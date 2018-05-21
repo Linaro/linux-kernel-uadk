@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#include <linux/circ_buf.h>
 
 #include <linux/vfio_pci_core.h>
 

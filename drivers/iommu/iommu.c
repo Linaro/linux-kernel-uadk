@@ -1335,6 +1335,7 @@ int iommu_report_device_fault(struct device *dev, struct iommu_fault_event *evt)
 		mutex_unlock(&fparam->lock);
 		kfree(evt_pending);
 	}
+	trace_dev_fault(dev, &evt->fault);
 done_unlock:
 	mutex_unlock(&param->lock);
 	return ret;
@@ -1394,6 +1395,7 @@ int iommu_page_response(struct device *dev,
 		}
 
 		ret = domain->ops->page_response(dev, evt, msg);
+		trace_dev_page_response(dev, msg);
 		list_del(&evt->list);
 		kfree(evt);
 		break;

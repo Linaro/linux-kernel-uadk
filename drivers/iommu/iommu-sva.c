@@ -12,6 +12,8 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
+#include <trace/events/iommu.h>
+
 #include "iommu-sva.h"
 
 /**
@@ -166,6 +168,7 @@ static struct mmu_notifier *io_mm_alloc(struct mm_struct *mm, void *privdata)
 		ret = PTR_ERR(io_mm->ctx);
 		goto err_free_pasid;
 	}
+	trace_io_mm_alloc(io_mm->pasid);
 	return &io_mm->notifier;
 
 err_free_pasid:
@@ -181,6 +184,7 @@ static void io_mm_free(struct mmu_notifier *mn)
 
 	WARN_ON(!hlist_empty(&io_mm->devices));
 
+	trace_io_mm_free(io_mm->pasid);
 	io_mm->ops->free(io_mm->ctx);
 	ioasid_free(io_mm->pasid);
 	kfree(io_mm);
@@ -197,6 +201,8 @@ static void io_mm_invalidate_range(struct mmu_notifier *mn,
 	hlist_for_each_entry_rcu(bond, &io_mm->devices, mm_node)
 		io_mm->ops->invalidate(bond->sva.dev, io_mm->pasid, io_mm->ctx,
 				       start, end - start);
+	if (!hlist_empty(&io_mm->devices))
+		trace_io_mm_invalidate(io_mm->pasid, start, end);
 	rcu_read_unlock();
 }
 
@@ -219,6 +225,7 @@ static void io_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
 			continue;
 
 		io_mm->ops->clear(bond->sva.dev, io_mm->pasid, io_mm->ctx);
+		trace_io_mm_exit(io_mm->pasid, bond->sva.dev);
 		bond->cleared = true;
 	}
 	mutex_unlock(&iommu_sva_lock);
@@ -299,6 +306,7 @@ io_mm_attach(struct device *dev, struct io_mm *io_mm, void *drvdata)
 			 */
 			refcount_inc(&tmp->refs);
 			io_mm_put(io_mm);
+			trace_io_mm_attach_get(io_mm->pasid, dev);
 			return &tmp->sva;
 		}
 
@@ -321,6 +329,7 @@ io_mm_attach(struct device *dev, struct io_mm *io_mm, void *drvdata)
 
 	hlist_add_head_rcu(&bond->mm_node, &io_mm->devices);
 
+	trace_io_mm_attach_alloc(io_mm->pasid, dev);
 	ret = io_mm->ops->attach(bond->sva.dev, io_mm->pasid, io_mm->ctx,
 				 attach_domain);
 	if (ret)
@@ -349,8 +358,10 @@ static void io_mm_detach(struct iommu_bond *bond)
 	struct iommu_domain *domain, *other;
 	struct iommu_sva_param *param = dev->iommu->sva_param;
 
-	if (!refcount_dec_and_test(&bond->refs))
+	if (!refcount_dec_and_test(&bond->refs)) {
+		trace_io_mm_detach_put(io_mm->pasid, bond->sva.dev);
 		return;
+	}
 
 	param->nr_bonds--;
 
@@ -367,6 +378,7 @@ static void io_mm_detach(struct iommu_bond *bond)
 		}
 	}
 
+	trace_io_mm_detach_free(io_mm->pasid, bond->sva.dev);
 	io_mm->ops->detach(bond->sva.dev, io_mm->pasid, io_mm->ctx,
 			   detach_domain, bond->cleared);
 
@@ -374,7 +386,6 @@ static void io_mm_detach(struct iommu_bond *bond)
 	kfree_rcu(bond, rcu_head);
 	io_mm_put(io_mm);
 }
-
 
 struct iommu_sva *
 iommu_sva_bind_generic(struct device *dev, struct mm_struct *mm,

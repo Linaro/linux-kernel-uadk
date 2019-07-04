@@ -20,6 +20,7 @@
 #include <linux/err.h>
 #include <linux/interrupt.h>
 #include <linux/io-pgtable.h>
+#include <linux/ioasid.h>
 #include <linux/iommu.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
@@ -762,6 +763,7 @@ struct arm_smmu_master {
 	bool				pri_supported;
 	bool				prg_resp_needs_ssid;
 	bool				sva_enabled;
+	bool				auxd_enabled;
 	struct list_head		bonds;
 	unsigned int			ssid_bits;
 };
@@ -791,10 +793,16 @@ struct arm_smmu_domain {
 
 	struct iommu_domain		domain;
 
+	/* Unused in aux domains */
 	struct list_head		devices;
 	spinlock_t			devices_lock;
 
 	struct list_head		mmu_notifiers;
+
+	/* Auxiliary domain stuff */
+	struct arm_smmu_domain		*parent;
+	ioasid_t			ssid;
+	unsigned long			aux_nr_devs;
 };
 
 struct arm_smmu_mmu_notifier {
@@ -827,6 +835,7 @@ struct arm_smmu_option_prop {
 static DEFINE_XARRAY_ALLOC1(asid_xa);
 static DEFINE_MUTEX(asid_lock);
 static DEFINE_MUTEX(sva_lock);
+static DECLARE_IOASID_SET(private_ioasid);
 
 /*
  * When a process dies, DMA is still running but we need to clear the pgd. If we
@@ -1934,6 +1943,9 @@ static void arm_smmu_free_cd_tables(struct arm_smmu_domain *smmu_domain)
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
 	struct arm_smmu_ctx_desc_cfg *cdcfg = &smmu_domain->s1_cfg.cdcfg;
 
+	if (!cdcfg->cdtab)
+		return;
+
 	if (cdcfg->l1_desc) {
 		size = CTXDESC_L2_ENTRIES * (CTXDESC_CD_DWORDS << 3);
 
@@ -2902,7 +2914,12 @@ static void arm_smmu_tlb_inv_context(void *cookie)
 		arm_smmu_cmdq_issue_cmd(smmu, &cmd);
 		arm_smmu_cmdq_issue_sync(smmu);
 	}
-	arm_smmu_atc_inv_domain(smmu_domain, 0, 0, 0);
+	if (smmu_domain->parent)
+		arm_smmu_atc_inv_domain(smmu_domain->parent, smmu_domain->ssid,
+					0, 0);
+	else
+		arm_smmu_atc_inv_domain(smmu_domain, 0, 0, 0);
+
 }
 
 static void arm_smmu_tlb_inv_range(unsigned long iova, size_t size,
@@ -2980,7 +2997,11 @@ static void arm_smmu_tlb_inv_range(unsigned long iova, size_t size,
 	 * Unfortunately, this can't be leaf-only since we may have
 	 * zapped an entire table.
 	 */
-	arm_smmu_atc_inv_domain(smmu_domain, 0, start, size);
+	if (smmu_domain->parent)
+		arm_smmu_atc_inv_domain(smmu_domain->parent, smmu_domain->ssid,
+					start, size);
+	else
+		arm_smmu_atc_inv_domain(smmu_domain, 0, start, size);
 }
 
 static void arm_smmu_tlb_inv_page_nosync(struct iommu_iotlb_gather *gather,
@@ -3098,6 +3119,8 @@ static void arm_smmu_domain_free(struct iommu_domain *domain)
 			arm_smmu_free_cd_tables(smmu_domain);
 		arm_smmu_free_asid(&cfg->cd);
 		mutex_unlock(&asid_lock);
+		if (smmu_domain->ssid)
+			ioasid_put(smmu_domain->ssid);
 	} else {
 		struct arm_smmu_s2_cfg *cfg = &smmu_domain->s2_cfg;
 		if (cfg->vmid)
@@ -3107,7 +3130,7 @@ static void arm_smmu_domain_free(struct iommu_domain *domain)
 	kfree(smmu_domain);
 }
 
-static int arm_smmu_domain_finalise_s1(struct arm_smmu_domain *smmu_domain,
+static int arm_smmu_domain_finalise_cd(struct arm_smmu_domain *smmu_domain,
 				       struct arm_smmu_master *master,
 				       struct io_pgtable_cfg *pgtbl_cfg)
 {
@@ -3123,19 +3146,10 @@ static int arm_smmu_domain_finalise_s1(struct arm_smmu_domain *smmu_domain,
 	 * Prevent arm_smmu_share_asid() from seizing the private ASID we're
 	 * allocating here until it is written to the CD.
 	 */
-	mutex_lock(&asid_lock);
 	ret = xa_alloc(&asid_xa, &asid, &cfg->cd,
 		       XA_LIMIT(1, (1 << smmu->asid_bits) - 1), GFP_KERNEL);
 	if (ret)
-		goto out_unlock;
-
-	cfg->s1cdmax = master->ssid_bits;
-
-	smmu_domain->stall_enabled = master->stall_enabled;
-
-	ret = arm_smmu_alloc_cd_tables(smmu_domain);
-	if (ret)
-		goto out_free_asid;
+		return ret;
 
 	cfg->cd.asid	= (u16)asid;
 	cfg->cd.ttbr	= pgtbl_cfg->arm_lpae_s1_cfg.ttbr;
@@ -3147,6 +3161,28 @@ static int arm_smmu_domain_finalise_s1(struct arm_smmu_domain *smmu_domain,
 			  FIELD_PREP(CTXDESC_CD_0_TCR_IPS, tcr->ips) |
 			  CTXDESC_CD_0_TCR_EPD1 | CTXDESC_CD_0_AA64;
 	cfg->cd.mair	= pgtbl_cfg->arm_lpae_s1_cfg.mair;
+	return 0;
+}
+
+static int arm_smmu_domain_finalise_s1(struct arm_smmu_domain *smmu_domain,
+				       struct arm_smmu_master *master,
+				       struct io_pgtable_cfg *pgtbl_cfg)
+{
+	int ret;
+	struct arm_smmu_s1_cfg *cfg = &smmu_domain->s1_cfg;
+
+	mutex_lock(&asid_lock);
+	ret = arm_smmu_domain_finalise_cd(smmu_domain, master, pgtbl_cfg);
+	if (ret)
+		goto out_unlock;
+
+	cfg->s1cdmax = master->ssid_bits;
+
+	smmu_domain->stall_enabled = master->stall_enabled;
+
+	ret = arm_smmu_alloc_cd_tables(smmu_domain);
+	if (ret)
+		goto out_free_asid;
 
 	/*
 	 * Note that this will end up calling arm_smmu_sync_cd() before
@@ -3226,7 +3262,10 @@ static int arm_smmu_domain_finalise(struct iommu_domain *domain,
 		ias = min_t(unsigned long, ias, VA_BITS);
 		oas = smmu->ias;
 		fmt = ARM_64_LPAE_S1;
-		finalise_stage_fn = arm_smmu_domain_finalise_s1;
+		if (smmu_domain->parent)
+			finalise_stage_fn = arm_smmu_domain_finalise_cd;
+		else
+			finalise_stage_fn = arm_smmu_domain_finalise_s1;
 		break;
 	case ARM_SMMU_DOMAIN_NESTED:
 	case ARM_SMMU_DOMAIN_S2:
@@ -3551,6 +3590,10 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 	} else if (smmu_domain->stall_enabled != master->stall_enabled) {
 		dev_err(dev, "cannot attach to stall-%s domain\n",
 			smmu_domain->stall_enabled ? "enabled" : "disabled");
+		ret = -EINVAL;
+		goto out_unlock;
+	} else if (smmu_domain->parent) {
+		dev_err(dev, "cannot attach auxiliary domain\n");
 		ret = -EINVAL;
 		goto out_unlock;
 	}
@@ -4172,6 +4215,8 @@ static bool arm_smmu_dev_has_feature(struct device *dev,
 
 		/* SSID and IOPF support are mandatory for the moment */
 		return master->ssid_bits && arm_smmu_iopf_supported(master);
+	case IOMMU_DEV_FEAT_AUX:
+		return master->ssid_bits != 0;
 	default:
 		return false;
 	}
@@ -4192,6 +4237,8 @@ static bool arm_smmu_dev_feature_enabled(struct device *dev,
 		enabled = master->sva_enabled;
 		mutex_unlock(&sva_lock);
 		return enabled;
+	case IOMMU_DEV_FEAT_AUX:
+		return master->auxd_enabled;
 	default:
 		return false;
 	}
@@ -4258,6 +4305,8 @@ static int arm_smmu_dev_disable_sva(struct device *dev)
 static int arm_smmu_dev_enable_feature(struct device *dev,
 				       enum iommu_dev_features feat)
 {
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+
 	if (!arm_smmu_dev_has_feature(dev, feat))
 		return -ENODEV;
 
@@ -4267,6 +4316,9 @@ static int arm_smmu_dev_enable_feature(struct device *dev,
 	switch (feat) {
 	case IOMMU_DEV_FEAT_SVA:
 		return arm_smmu_dev_enable_sva(dev);
+	case IOMMU_DEV_FEAT_AUX:
+		master->auxd_enabled = true;
+		return 0;
 	default:
 		return -EINVAL;
 	}
@@ -4275,15 +4327,136 @@ static int arm_smmu_dev_enable_feature(struct device *dev,
 static int arm_smmu_dev_disable_feature(struct device *dev,
 					enum iommu_dev_features feat)
 {
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+
 	if (!arm_smmu_dev_feature_enabled(dev, feat))
 		return -EINVAL;
 
 	switch (feat) {
 	case IOMMU_DEV_FEAT_SVA:
 		return arm_smmu_dev_disable_sva(dev);
+	case IOMMU_DEV_FEAT_AUX:
+		/* TODO: check if aux domains are still attached? */
+		master->auxd_enabled = false;
+		return 0;
 	default:
 		return -EINVAL;
 	}
+}
+
+static int arm_smmu_aux_attach_dev(struct iommu_domain *domain, struct device *dev)
+{
+	int ret;
+	struct iommu_domain *parent_domain;
+	struct arm_smmu_domain *parent_smmu_domain;
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+
+	if (!arm_smmu_dev_feature_enabled(dev, IOMMU_DEV_FEAT_AUX))
+		return -EINVAL;
+
+	parent_domain = iommu_get_domain_for_dev(dev);
+	if (!parent_domain)
+		return -EINVAL;
+	parent_smmu_domain = to_smmu_domain(parent_domain);
+
+	mutex_lock(&smmu_domain->init_mutex);
+	if (smmu_domain->stage != ARM_SMMU_DOMAIN_S1 ||
+	    parent_smmu_domain->stage != ARM_SMMU_DOMAIN_S1) {
+		ret = -EINVAL;
+		goto out_unlock;
+	} else if (smmu_domain->s1_cfg.cdcfg.cdtab) {
+		/* Already attached as a normal domain */
+		dev_err(dev, "cannot attach domain in auxiliary mode\n");
+		ret = -EINVAL;
+		goto out_unlock;
+	} else if (!smmu_domain->smmu) {
+		ioasid_t ssid = ioasid_alloc(&private_ioasid, 1,
+					     (1UL << master->ssid_bits) - 1,
+					     NULL);
+		if (ssid == INVALID_IOASID) {
+			ret = -EINVAL;
+			goto out_unlock;
+		}
+		smmu_domain->smmu = master->smmu;
+		smmu_domain->parent = parent_smmu_domain;
+		smmu_domain->ssid = ssid;
+
+		ret = arm_smmu_domain_finalise(domain, master);
+		if (ret) {
+			smmu_domain->smmu = NULL;
+			smmu_domain->ssid = 0;
+			smmu_domain->parent = NULL;
+			ioasid_put(ssid);
+			goto out_unlock;
+		}
+	} else if (smmu_domain->parent != parent_smmu_domain) {
+		/* Additional restriction: an aux domain has a single parent */
+		dev_err(dev, "cannot attach aux domain with different parent\n");
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	/* FIXME: serialize against arm_smmu_share_asid() */
+	if (!smmu_domain->aux_nr_devs++)
+		arm_smmu_write_ctx_desc(parent_smmu_domain, smmu_domain->ssid,
+					&smmu_domain->s1_cfg.cd);
+	/*
+	 * Note that all other devices attached to the parent domain can now
+	 * access this context as well.
+	 */
+
+out_unlock:
+	mutex_unlock(&smmu_domain->init_mutex);
+	return ret;
+}
+
+static void arm_smmu_aux_detach_dev(struct iommu_domain *domain, struct device *dev)
+{
+	struct iommu_domain *parent_domain;
+	struct arm_smmu_domain *parent_smmu_domain;
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+
+	if (!arm_smmu_dev_feature_enabled(dev, IOMMU_DEV_FEAT_AUX))
+		return;
+
+	parent_domain = iommu_get_domain_for_dev(dev);
+	if (!parent_domain)
+		return;
+	parent_smmu_domain = to_smmu_domain(parent_domain);
+
+	mutex_lock(&smmu_domain->init_mutex);
+	if (!smmu_domain->aux_nr_devs)
+		goto out_unlock;
+
+	if (!--smmu_domain->aux_nr_devs) {
+		arm_smmu_write_ctx_desc(parent_smmu_domain, smmu_domain->ssid,
+					NULL);
+		/*
+		 * TLB doesn't need invalidation since accesses from the device
+		 * can't use this domain's ASID once the CD is clear.
+		 *
+		 * Sadly that doesn't apply to ATCs, which are PASID tagged.
+		 * Invalidate all other devices as well, because even though
+		 * they weren't 'officially' attached to the auxiliary domain,
+		 * they could have formed ATC entries.
+		 */
+		arm_smmu_atc_inv_domain(parent_smmu_domain, smmu_domain->ssid,
+					0, 0);
+	} else {
+		/* Invalidate only this device's ATC */
+		arm_smmu_atc_inv_master(master, smmu_domain->ssid);
+	}
+out_unlock:
+	mutex_unlock(&smmu_domain->init_mutex);
+}
+
+static int arm_smmu_aux_get_pasid(struct iommu_domain *domain, struct device *dev)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+
+	return smmu_domain->ssid ?: -EINVAL;
 }
 
 static struct iommu_ops arm_smmu_ops = {
@@ -4312,6 +4485,9 @@ static struct iommu_ops arm_smmu_ops = {
 	.sva_unbind		= arm_smmu_sva_unbind,
 	.sva_get_pasid		= arm_smmu_sva_get_pasid,
 	.page_response		= arm_smmu_page_response,
+	.aux_attach_dev		= arm_smmu_aux_attach_dev,
+	.aux_detach_dev		= arm_smmu_aux_detach_dev,
+	.aux_get_pasid		= arm_smmu_aux_get_pasid,
 	.pgsize_bitmap		= -1UL, /* Restricted during device attach */
 };
 

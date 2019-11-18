@@ -235,6 +235,7 @@ static void io_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
 		bond->cleared = true;
 	}
 	mutex_unlock(&iommu_sva_lock);
+	trace_io_mm_release_done(1);
 }
 
 static struct mmu_notifier_ops iommu_mmu_notifier_ops = {

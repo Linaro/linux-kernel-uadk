@@ -12,6 +12,9 @@ static dev_t uacce_devt;
 static DEFINE_MUTEX(uacce_mutex);
 static DEFINE_XARRAY_ALLOC(uacce_xa);
 
+static bool uacce_nosva;
+module_param(uacce_nosva, bool, 0444);
+
 static int uacce_start_queue(struct uacce_queue *q)
 {
 	int ret = 0;
@@ -477,6 +480,8 @@ static unsigned int uacce_enable_sva(struct device *parent, unsigned int flags)
 		return flags;
 
 	flags &= ~UACCE_DEV_SVA;
+	if (uacce_nosva)
+		return flags;
 
 	if (iommu_dev_enable_feature(parent, IOMMU_DEV_FEAT_IOPF))
 		return flags;

@@ -1203,6 +1203,9 @@ void hisi_qm_release_qp(struct hisi_qp *qp)
 	qm->qp_in_used--;
 	write_unlock(&qm->qps_lock);
 
+	// TODO: check that this fixes something.
+	//flush_work(&qm->work);
+
 	kfree(qp);
 }
 EXPORT_SYMBOL_GPL(hisi_qm_release_qp);

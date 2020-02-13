@@ -2667,12 +2667,8 @@ static bool arm_smmu_ats_supported(struct arm_smmu_master *master)
 {
 	struct device *dev = master->dev;
 	struct arm_smmu_device *smmu = master->smmu;
-	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
 
 	if (!(smmu->features & ARM_SMMU_FEAT_ATS))
-		return false;
-
-	if (!(fwspec->flags & IOMMU_FWSPEC_PCI_RC_ATS))
 		return false;
 
 	return dev_is_pci(dev) && pci_ats_supported(to_pci_dev(dev));

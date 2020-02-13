@@ -156,14 +156,6 @@ static int of_fsl_mc_iommu_init(struct fsl_mc_device *mc_dev,
 	return err;
 }
 
-static void of_pci_check_device_ats(struct device *dev, struct device_node *np)
-{
-	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
-
-	if (fwspec && of_property_read_bool(np, "ats-supported"))
-		fwspec->flags |= IOMMU_FWSPEC_PCI_RC_ATS;
-}
-
 const struct iommu_ops *of_iommu_configure(struct device *dev,
 					   struct device_node *master_np)
 {
@@ -196,8 +188,6 @@ const struct iommu_ops *of_iommu_configure(struct device *dev,
 		pci_request_acs();
 		err = pci_for_each_dma_alias(to_pci_dev(dev),
 					     of_pci_iommu_init, &info);
-
-		of_pci_check_device_ats(dev, master_np);
 	} else if (dev_is_fsl_mc(dev)) {
 		err = of_fsl_mc_iommu_init(to_fsl_mc_device(dev), master_np);
 	} else {

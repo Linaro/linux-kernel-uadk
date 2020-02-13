@@ -39,7 +39,13 @@ void pci_ats_init(struct pci_dev *dev)
  */
 bool pci_ats_supported(struct pci_dev *dev)
 {
+	struct pci_host_bridge *bridge;
+
 	if (!dev->ats_cap)
+		return false;
+
+	bridge = pci_find_host_bridge(dev->bus);
+	if (!bridge || !bridge->ats_supported)
 		return false;
 
 	return (dev->untrusted == 0);

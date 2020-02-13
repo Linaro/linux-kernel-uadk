@@ -49,12 +49,23 @@ static struct pci_config_window *gen_pci_init(struct device *dev,
 	return cfg;
 }
 
+static void of_pci_host_check_ats(struct pci_host_bridge *bridge)
+{
+	struct device_node *np = bridge->bus->dev.of_node;
+
+	if (!np)
+		return;
+
+	bridge->ats_supported = of_property_read_bool(np, "ats-supported");
+}
+
 int pci_host_common_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct pci_host_bridge *bridge;
 	struct pci_config_window *cfg;
 	const struct pci_ecam_ops *ops;
+	int ret;
 
 	ops = of_device_get_match_data(&pdev->dev);
 	if (!ops)
@@ -80,7 +91,12 @@ int pci_host_common_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, bridge);
 
-	return pci_host_probe(bridge);
+	ret = pci_host_probe(bridge);
+	if (ret)
+		return ret;
+
+	of_pci_host_check_ats(bridge);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(pci_host_common_probe);
 

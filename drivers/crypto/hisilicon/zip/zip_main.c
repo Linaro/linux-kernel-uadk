@@ -320,9 +320,6 @@ static void hisi_zip_hw_error_enable(struct hisi_qm *qm)
 	writel(0x0, qm->io_base + HZIP_CORE_INT_RAS_FE_ENB);
 	writel(HZIP_CORE_INT_RAS_NFE_ENABLE,
 		qm->io_base + HZIP_CORE_INT_RAS_NFE_ENB);
-
-	/* enable ZIP hw error interrupts */
-	writel(0, qm->io_base + HZIP_CORE_INT_MASK_REG);
 }
 
 static void hisi_zip_hw_error_disable(struct hisi_qm *qm)

@@ -311,7 +311,7 @@ static void hisi_zip_hw_error_enable(struct hisi_qm *qm)
 
 	if (qm->ver == QM_HW_V2)
 		/* ignore ras */
-		writel(0x8, qm->io_base + HZIP_CORE_INT_MASK_REG);
+		writel(0xc, qm->io_base + HZIP_CORE_INT_MASK_REG);
 	else
 		writel(0, qm->io_base + HZIP_CORE_INT_MASK_REG);
 

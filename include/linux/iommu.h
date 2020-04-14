@@ -347,6 +347,8 @@ struct iommu_fault_param {
  * struct dev_iommu - Collection of per-device IOMMU data
  *
  * @fault_param: IOMMU detected device fault reporting data
+ * @sva_param:	 IOMMU parameter for SVA
+ * @sva_lock:	 protects @sva_param
  * @fwspec:	 IOMMU fwspec data
  * @priv:	 IOMMU Driver private data
  *
@@ -356,6 +358,8 @@ struct iommu_fault_param {
 struct dev_iommu {
 	struct mutex lock;
 	struct iommu_fault_param	*fault_param;
+	struct iommu_sva_param		*sva_param;
+	struct mutex			sva_lock;
 	struct iommu_fwspec		*fwspec;
 	void				*priv;
 };

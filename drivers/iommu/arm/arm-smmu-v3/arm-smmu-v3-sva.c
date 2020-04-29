@@ -10,6 +10,8 @@
 #include "arm-smmu-v3.h"
 #include "../../io-pgtable-arm.h"
 
+static DEFINE_MUTEX(sva_lock);
+
 /*
  * Try to reserve this ASID in the SMMU. If it is in use, try to steal it from
  * the private entry. Careful here, we may be modifying the context tables of
@@ -195,4 +197,51 @@ bool arm_smmu_sva_supported(struct arm_smmu_device *smmu)
 		num_possible_cpus() - 2);
 
 	return true;
+}
+
+static bool arm_smmu_iopf_supported(struct arm_smmu_master *master)
+{
+	return false;
+}
+
+bool arm_smmu_master_sva_supported(struct arm_smmu_master *master)
+{
+	if (!(master->smmu->features & ARM_SMMU_FEAT_SVA))
+		return false;
+
+	/* SSID and IOPF support are mandatory for the moment */
+	return master->ssid_bits && arm_smmu_iopf_supported(master);
+}
+
+bool arm_smmu_master_sva_enabled(struct arm_smmu_master *master)
+{
+	bool enabled;
+
+	mutex_lock(&sva_lock);
+	enabled = master->sva_enabled;
+	mutex_unlock(&sva_lock);
+	return enabled;
+}
+
+int arm_smmu_master_enable_sva(struct arm_smmu_master *master)
+{
+	mutex_lock(&sva_lock);
+	master->sva_enabled = true;
+	mutex_unlock(&sva_lock);
+
+	return 0;
+}
+
+int arm_smmu_master_disable_sva(struct arm_smmu_master *master)
+{
+	mutex_lock(&sva_lock);
+	if (!list_empty(&master->bonds)) {
+		dev_err(master->dev, "cannot disable SVA, device is bound\n");
+		mutex_unlock(&sva_lock);
+		return -EBUSY;
+	}
+	master->sva_enabled = false;
+	mutex_unlock(&sva_lock);
+
+	return 0;
 }

@@ -141,7 +141,7 @@ enum iommu_page_response_code {
  * struct iommu_page_response - Generic page response information
  * @version: API version of this structure
  * @flags: encodes whether the corresponding fields are valid
- *         (IOMMU_FAULT_PAGE_RESPONSE_* values)
+ *         (IOMMU_PAGE_RESP_* values)
  * @pasid: Process Address Space ID
  * @grpid: Page Request Group Index
  * @code: response code from &enum iommu_page_response_code

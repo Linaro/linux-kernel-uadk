@@ -1360,7 +1360,7 @@ static int qm_qp_has_no_task(struct hisi_qp *qp)
 		return -ENOMEM;
 	}
 
-	while (i++ < 100) {
+	while (i++ < 1000) {
 		ret = qm_dump_sqc(qp, dma_addr);
 		if (ret)
 			goto out;
@@ -1379,6 +1379,8 @@ static int qm_qp_has_no_task(struct hisi_qp *qp)
 out:
 	dma_unmap_single(dev, dma_addr, size, DMA_FROM_DEVICE);
 	kfree(addr);
+	if (i >= 1000)
+		dev_info(dev, "%s dma not stopped\n", __func__);
 	return ret;
 }
 

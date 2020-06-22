@@ -16,6 +16,7 @@
 #include <linux/cpufeature.h>
 #include <linux/crash_dump.h>
 #include <linux/delay.h>
+#include <linux/debugfs.h>
 #include <linux/dma-iommu.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
@@ -559,6 +560,11 @@ struct arm_smmu_cmdq_ent {
 			u8			resp;
 		} resume;
 
+		#define CMDQ_OP_STALL_TERM	0x45
+		struct {
+			u32			sid;
+		} stall_term;
+
 		#define CMDQ_OP_CMD_SYNC	0x46
 		struct {
 			u64			msiaddr;
@@ -1082,6 +1088,9 @@ static int arm_smmu_cmdq_build_cmd(u64 *cmd, struct arm_smmu_cmdq_ent *ent)
 		cmd[0] |= FIELD_PREP(CMDQ_RESUME_0_SID, ent->resume.sid);
 		cmd[0] |= FIELD_PREP(CMDQ_RESUME_0_RESP, ent->resume.resp);
 		cmd[1] |= FIELD_PREP(CMDQ_RESUME_1_STAG, ent->resume.stag);
+		break;
+	case CMDQ_OP_STALL_TERM:
+		cmd[0] |= FIELD_PREP(CMDQ_RESUME_0_SID, ent->stall_term.sid);
 		break;
 	case CMDQ_OP_CMD_SYNC:
 		if (ent->sync.msiaddr) {
@@ -5478,6 +5487,73 @@ static void __iomem *arm_smmu_ioremap(struct device *dev, resource_size_t start,
 	return devm_ioremap_resource(dev, &res);
 }
 
+/* add a debugfs interface to trigger terminate stall faults */
+int smmu_debugfs = 0;
+int current_test_num;
+struct dentry *smmu_terminate_stall;
+static ssize_t test_num_read(struct file *filp, char __user *buf,
+			     size_t count, loff_t *pos)
+{
+	char tbuf[20];
+	int ret;
+
+	ret = sprintf(tbuf, "%u\n", current_test_num);
+	return simple_read_from_buffer(buf, count, pos, tbuf, ret);
+}
+
+static void arm_smmu_terminate_stall(void)
+{
+	struct arm_smmu_cmdq_ent cmd = {0};
+	struct arm_smmu_master *master;
+	struct pci_dev *pdev;
+	struct device * dev;
+	int sid;
+
+	pdev = pci_get_domain_bus_and_slot(0, 0x75, 0);
+	if (!pdev) {
+		pr_err("fail to find zip device!\n");
+		return;
+	}
+
+	dev = &pdev->dev;
+	master = dev_iommu_priv_get(dev);
+	sid = master->streams[0].id;
+
+	cmd.opcode		= CMDQ_OP_STALL_TERM;
+	cmd.stall_term.sid	= sid;
+
+	arm_smmu_cmdq_issue_cmd(master->smmu, &cmd);
+}
+
+static ssize_t test_num_write(struct file *filp, const char __user *buf,
+			      size_t count, loff_t *pos)
+{
+	int len;
+	unsigned long val;
+	char tbuf[20];
+
+	len = simple_write_to_buffer(tbuf, 20 - 1, pos, buf, count);
+	if (len < 0)
+		return len;
+
+	tbuf[len] = '\0';
+	if (kstrtoul(tbuf, 0, &val))
+		return -EFAULT;
+
+	if (val == 1)
+		arm_smmu_terminate_stall();
+
+	return count;
+}
+
+static const struct file_operations test_num_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.read = test_num_read,
+	.write = test_num_write,
+};
+
+
 static int arm_smmu_device_probe(struct platform_device *pdev)
 {
 	int irq, ret;
@@ -5486,6 +5562,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 	struct arm_smmu_device *smmu;
 	struct device *dev = &pdev->dev;
 	bool bypass;
+
+	if (!smmu_debugfs) {
+		smmu_terminate_stall =
+		debugfs_create_file("smmu_terminate_stall", 0666, NULL, NULL,
+				    &test_num_fops);
+		smmu_debugfs = 1;
+	}
 
 	smmu = devm_kzalloc(dev, sizeof(*smmu), GFP_KERNEL);
 	if (!smmu) {
@@ -5588,6 +5671,10 @@ static int arm_smmu_device_remove(struct platform_device *pdev)
 {
 	struct arm_smmu_device *smmu = platform_get_drvdata(pdev);
 
+	if (smmu_debugfs == 1) {
+		debugfs_remove_recursive(smmu_terminate_stall);
+		smmu_debugfs = 0;
+	}
 	arm_smmu_set_bus_ops(NULL);
 	iommu_device_unregister(&smmu->iommu);
 	iommu_device_sysfs_remove(&smmu->iommu);

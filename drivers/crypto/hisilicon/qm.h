@@ -249,6 +249,7 @@ struct hisi_qm {
 
 struct hisi_qp_status {
 	atomic_t used;
+	atomic_t updated;
 	u16 sq_tail;
 	u16 cq_head;
 	bool cqc_phase;

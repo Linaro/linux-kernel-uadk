@@ -616,6 +616,7 @@ static void qm_cq_head_update(struct hisi_qp *qp)
 static void qm_poll_qp(struct hisi_qp *qp, struct hisi_qm *qm)
 {
 	if (qp->event_cb) {
+		atomic_set(&qp->qp_status.updated, 1);
 		qp->event_cb(qp);
 		return;
 	}
@@ -755,6 +756,7 @@ static void qm_init_qp_status(struct hisi_qp *qp)
 	qp_status->cq_head = 0;
 	qp_status->cqc_phase = true;
 	atomic_set(&qp_status->flags, 0);
+	atomic_set(&qp->qp_status.updated, 0);
 }
 
 static void qm_vft_data_cfg(struct hisi_qm *qm, enum vft_type type, u32 base,
@@ -2163,6 +2165,13 @@ static long hisi_qm_uacce_ioctl(struct uacce_queue *q, unsigned int cmd,
 	return 0;
 }
 
+static int hisi_qm_is_q_updated(struct uacce_queue *q)
+{
+	struct hisi_qp *qp = q->priv;
+
+	return atomic_cmpxchg(&qp->qp_status.updated, 1, 0);
+}
+
 static const struct uacce_ops uacce_qm_ops = {
 	.get_available_instances = hisi_qm_get_available_instances,
 	.get_queue = hisi_qm_uacce_get_queue,
@@ -2171,6 +2180,7 @@ static const struct uacce_ops uacce_qm_ops = {
 	.stop_queue = hisi_qm_uacce_stop_queue,
 	.mmap = hisi_qm_uacce_mmap,
 	.ioctl = hisi_qm_uacce_ioctl,
+	.is_q_updated = hisi_qm_is_q_updated,
 };
 
 static int qm_alloc_uacce(struct hisi_qm *qm)

@@ -14,8 +14,8 @@ hostprogs-always-$(CONFIG_SYSTEM_EXTRA_CERTIFICATE)	+= insert-sys-cert
 
 HOSTCFLAGS_sorttable.o = -I$(srctree)/tools/include
 HOSTCFLAGS_asn1_compiler.o = -I$(srctree)/include
-HOSTLDLIBS_sign-file = -lcrypto
-HOSTLDLIBS_extract-cert = -lcrypto
+HOSTLDLIBS_sign-file = -L/usr/local/lib -lcrypto
+HOSTLDLIBS_extract-cert = -L/usr/local/lib -lcrypto
 
 ifdef CONFIG_UNWINDER_ORC
 ifeq ($(ARCH),x86_64)

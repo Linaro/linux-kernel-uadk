@@ -16,6 +16,7 @@ struct arm_smmu_mmu_notifier {
 	struct mmu_notifier		mn;
 	struct arm_smmu_ctx_desc	*cd;
 	bool				cleared;
+	bool				tlb_inv_command;
 	refcount_t			refs;
 	struct list_head		list;
 	struct arm_smmu_domain		*domain;
@@ -182,9 +183,13 @@ static void arm_smmu_mm_invalidate_range(struct mmu_notifier *mn,
 					 unsigned long start, unsigned long end)
 {
 	struct arm_smmu_mmu_notifier *smmu_mn = mn_to_smmu(mn);
+	struct arm_smmu_domain *smmu_domain = smmu_mn->domain;
+	size_t size = end - start + 1;
 
-	arm_smmu_atc_inv_domain(smmu_mn->domain, mm->pasid, start,
-				end - start + 1);
+	if (smmu_mn->tlb_inv_command)
+		arm_smmu_tlb_inv_range_asid(start, size, smmu_mn->cd->asid,
+					    PAGE_SIZE, false, smmu_domain);
+	arm_smmu_atc_inv_domain(smmu_domain, mm->pasid, start, size);
 }
 
 static void arm_smmu_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
@@ -252,6 +257,9 @@ arm_smmu_mmu_notifier_get(struct arm_smmu_domain *smmu_domain,
 	smmu_mn->cd = cd;
 	smmu_mn->domain = smmu_domain;
 	smmu_mn->mn.ops = &arm_smmu_mmu_notifier_ops;
+
+	if (!(smmu_domain->smmu->features & ARM_SMMU_FEAT_BTM))
+		smmu_mn->tlb_inv_command = true;
 
 	ret = mmu_notifier_register(&smmu_mn->mn, mm);
 	if (ret) {
@@ -404,7 +412,7 @@ bool arm_smmu_sva_supported(struct arm_smmu_device *smmu)
 	unsigned long reg, fld;
 	unsigned long oas;
 	unsigned long asid_bits;
-	u32 feat_mask = ARM_SMMU_FEAT_BTM | ARM_SMMU_FEAT_COHERENCY;
+	u32 feat_mask = ARM_SMMU_FEAT_COHERENCY;
 
 	if (vabits_actual == 52)
 		feat_mask |= ARM_SMMU_FEAT_VAX;

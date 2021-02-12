@@ -7,6 +7,7 @@
 #include <linux/mmu_context.h>
 #include <linux/mmu_notifier.h>
 #include <linux/slab.h>
+#include <linux/debugfs.h>
 
 #include <trace/events/smmu.h>
 
@@ -38,6 +39,8 @@ struct arm_smmu_bond {
 	container_of(handle, struct arm_smmu_bond, sva)
 
 static DEFINE_MUTEX(sva_lock);
+
+static bool sva_force_inval;
 
 /*
  * Check if the CPU ASID is available on the SMMU side. If a private context
@@ -190,7 +193,7 @@ static void arm_smmu_mm_invalidate_range(struct mmu_notifier *mn,
 	struct arm_smmu_domain *smmu_domain = smmu_mn->domain;
 	size_t size = end - start + 1;
 
-	if (smmu_mn->tlb_inv_command)
+	if (smmu_mn->tlb_inv_command || sva_force_inval)
 		arm_smmu_tlb_inv_range_asid(start, size, smmu_mn->cd->asid,
 					    PAGE_SIZE, false, smmu_domain);
 	arm_smmu_atc_inv_domain(smmu_domain, mm->pasid, start, size);
@@ -586,3 +589,9 @@ void arm_smmu_sva_notifier_synchronize(void)
 	 */
 	mmu_notifier_synchronize();
 }
+
+void arm_smmu_sva_init(void)
+{
+	debugfs_create_bool("sva_force_inval", 0600, NULL, &sva_force_inval);
+}
+module_init(arm_smmu_sva_init);

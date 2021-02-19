@@ -82,6 +82,50 @@ DEFINE_EVENT(smmu_mn, smmu_mn_free, TP_PROTO(unsigned int pasid), TP_ARGS(pasid)
 DEFINE_EVENT(smmu_mn, smmu_mn_get, TP_PROTO(unsigned int pasid), TP_ARGS(pasid));
 DEFINE_EVENT(smmu_mn, smmu_mn_put, TP_PROTO(unsigned int pasid), TP_ARGS(pasid));
 
+DECLARE_EVENT_CLASS(smmu_io_fault_class,
+	TP_PROTO(struct device *dev, unsigned int pasid, u64 va),
+	TP_ARGS(dev, pasid, va),
+
+	TP_STRUCT__entry(
+		__string(dev, dev_name(dev))
+		__field(int, pasid)
+		__field(u64, va)
+	),
+	TP_fast_assign(
+		__assign_str(dev, dev_name(dev));
+		__entry->pasid = pasid;
+		__entry->va = va;
+	),
+	TP_printk("dev=%s pasid=%d, va=%llx", __get_str(dev), __entry->pasid,
+		   __entry->va)
+);
+
+#define DEFINE_IO_FAULT_EVENT(name)       \
+DEFINE_EVENT(smmu_io_fault_class, name,        \
+	TP_PROTO(struct device *dev, unsigned int pasid, u64 va), \
+	TP_ARGS(dev, pasid, va))
+
+DEFINE_IO_FAULT_EVENT(io_fault_entry);
+DEFINE_IO_FAULT_EVENT(io_fault_exit);
+
+DECLARE_EVENT_CLASS(smmu_cpu_fault_class,
+	TP_PROTO(u64 va),
+	TP_ARGS(va),
+
+	TP_STRUCT__entry(
+		__field(u64, va)
+	),
+	TP_fast_assign(
+		__entry->va = va;
+	),
+	TP_printk("va=%llx", __entry->va)
+);
+
+#define DEFINE_CPU_FAULT_EVENT(name)       \
+DEFINE_EVENT(smmu_cpu_fault_class, name, TP_PROTO(u64 va), TP_ARGS(va))
+
+DEFINE_CPU_FAULT_EVENT(cpu_fault_entry);
+DEFINE_CPU_FAULT_EVENT(cpu_fault_exit);
 
 #endif /* _TRACE_SMMU_H */
 

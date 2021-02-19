@@ -41,6 +41,8 @@
 #include <asm/tlbflush.h>
 #include <asm/traps.h>
 
+#include <trace/events/smmu.h>
+
 struct fault_info {
 	int	(*fn)(unsigned long far, unsigned int esr,
 		      struct pt_regs *regs);
@@ -655,9 +657,14 @@ static int __kprobes do_translation_fault(unsigned long far,
 					  struct pt_regs *regs)
 {
 	unsigned long addr = untagged_addr(far);
+	int ret;
 
-	if (is_ttbr0_addr(addr))
-		return do_page_fault(far, esr, regs);
+	if (is_ttbr0_addr(addr)) {
+		trace_cpu_fault_entry(far);
+		ret = do_page_fault(far, esr, regs);
+		trace_cpu_fault_exit(far);
+		return ret;
+	}
 
 	do_bad_area(far, esr, regs);
 	return 0;

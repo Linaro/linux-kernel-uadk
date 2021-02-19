@@ -32,6 +32,8 @@
 
 #include <linux/amba/bus.h>
 
+#include <trace/events/smmu.h>
+
 #include "arm-smmu-v3.h"
 #include "../../iommu-sva-lib.h"
 
@@ -945,6 +947,8 @@ static int arm_smmu_page_response(struct device *dev,
 	 * forget.
 	 */
 
+	trace_io_fault_exit(dev, resp->pasid, evt->fault.prm.addr);
+
 	return 0;
 }
 
@@ -1473,6 +1477,9 @@ static int arm_smmu_handle_evt(struct arm_smmu_device *smmu, u64 *evt)
 	u32 sid = FIELD_GET(EVTQ_0_SID, evt[0]);
 	struct iommu_fault_event fault_evt = { };
 	struct iommu_fault *flt = &fault_evt.fault;
+
+	trace_io_fault_entry(smmu->dev, FIELD_GET(EVTQ_0_SSID, evt[0]),
+			     FIELD_GET(EVTQ_2_ADDR, evt[2]));
 
 	/* Stage-2 is always pinned at the moment */
 	if (evt[1] & EVTQ_1_S2)

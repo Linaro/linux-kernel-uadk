@@ -12,18 +12,37 @@
 struct uacce_queue;
 struct uacce_device;
 
+struct uacce_hw_err {
+	struct list_head list;
+	unsigned long long tick_stamp;
+};
+
+struct uacce_err_isolate {
+	struct list_head hw_errs;
+	u32 hw_err_isolate_hz;	/* user cfg freq which triggers isolation */
+	atomic_t is_isolate;
+};
+
+struct uacce_dma_slice {
+	void *kaddr;	/* kernel address for ss */
+	dma_addr_t dma;	/* dma address, if created by dma api */
+	u64 size;	/* Size of this dma slice */
+	u32 total_num;	/* Total slices in this dma list */
+};
+
 /**
  * struct uacce_qfile_region - structure of queue file region
  * @type: type of the region
- * @kaddr: kernel addr of the qfr
- * @dma: dma address
- * @nr_pages: number of pages
  */
 struct uacce_qfile_region {
 	enum uacce_qfrt type;
-	void *kaddr;
-	dma_addr_t dma;
-	int nr_pages;
+	unsigned long iova;	/* iova share between user and device space */
+	unsigned long nr_pages;
+	int prot;
+	unsigned int flags;
+	struct list_head qs;	/* qs sharing the same region, for ss */
+	void *kaddr;		/* kernel address for dko */
+	struct uacce_dma_slice *dma_list;
 };
 
 /**
@@ -49,6 +68,7 @@ struct uacce_ops {
 		    struct uacce_qfile_region *qfr);
 	long (*ioctl)(struct uacce_queue *q, unsigned int cmd,
 		      unsigned long arg);
+	enum uacce_dev_state (*get_dev_state)(struct uacce_device *uacce);
 };
 
 /**
@@ -61,6 +81,11 @@ struct uacce_interface {
 	char name[UACCE_MAX_NAME_SIZE];
 	unsigned int flags;
 	const struct uacce_ops *ops;
+};
+
+enum uacce_dev_state {
+	UACCE_DEV_ERR = -1,
+	UACCE_DEV_NORMAL,
 };
 
 enum uacce_q_state {
@@ -86,6 +111,7 @@ struct uacce_queue {
 	wait_queue_head_t wait;
 	struct list_head list;
 	struct uacce_qfile_region *qfrs[UACCE_MAX_REGION];
+	struct file *filep;
 	enum uacce_q_state state;
 	u32 pasid;
 	struct iommu_sva *handle;
@@ -120,6 +146,9 @@ struct uacce_device {
 	struct cdev *cdev;
 	struct device dev;
 	void *priv;
+	atomic_t ref;
+	struct uacce_err_isolate isolate_data;
+	struct uacce_err_isolate *isolate;
 	struct list_head queues;
 	struct mutex queues_lock;
 	struct inode *inode;
@@ -131,7 +160,8 @@ struct uacce_device *uacce_alloc(struct device *parent,
 				 struct uacce_interface *interface);
 int uacce_register(struct uacce_device *uacce);
 void uacce_remove(struct uacce_device *uacce);
-
+struct uacce_device *dev_to_uacce(struct device *dev);
+int uacce_hw_err_isolate(struct uacce_device *uacce);
 #else /* CONFIG_UACCE */
 
 static inline

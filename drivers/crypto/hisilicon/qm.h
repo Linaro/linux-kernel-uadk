@@ -7,6 +7,7 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/uacce.h>
 
 #define QM_QNUM_V1			4096
 #define QM_QNUM_V2			1024
@@ -84,6 +85,8 @@
 
 /* page number for queue file region */
 #define QM_DOORBELL_PAGE_NR		1
+
+#define UACCE_MODE_DESC	"0(default) means only register to crypto, 1 means both register to crypto and uacce"
 
 enum qm_stop_reason {
 	QM_NORMAL,
@@ -243,12 +246,15 @@ struct hisi_qm {
 	struct work_struct work;
 	struct work_struct rst_work;
 
+	bool use_uacce;        /* register to uacce */
 	const char *algs;
 	bool use_sva;
+	bool use_iommu;
 	bool is_frozen;
 	resource_size_t phys_base;
 	resource_size_t phys_size;
 	struct uacce_device *uacce;
+	int mode;
 };
 
 struct hisi_qp_status {
@@ -335,12 +341,34 @@ static inline int vfs_num_set(const char *val, const struct kernel_param *kp)
 	return param_set_int(val, kp);
 }
 
+static inline int mode_set(const char *val, const struct kernel_param *kp)
+{
+	u32 n;
+	int ret;
+
+	if (!val)
+		return -EINVAL;
+
+	ret = kstrtou32(val, 10, &n);
+	if (ret != 0 || (n != UACCE_MODE_NOIOMMU && n != UACCE_MODE_SVA &&
+			 n != UACCE_MODE_NOUACCE))
+		return -EINVAL;
+
+	return param_set_int(val, kp);
+}
+
+static inline int uacce_mode_set(const char *val, const struct kernel_param *kp)
+{
+	return mode_set(val, kp);
+}
+
 static inline void hisi_qm_init_list(struct hisi_qm_list *qm_list)
 {
 	INIT_LIST_HEAD(&qm_list->list);
 	mutex_init(&qm_list->lock);
 }
 
+int qm_register_uacce(struct hisi_qm *qm);
 int hisi_qm_init(struct hisi_qm *qm);
 void hisi_qm_uninit(struct hisi_qm *qm);
 int hisi_qm_start(struct hisi_qm *qm);

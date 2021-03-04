@@ -211,6 +211,20 @@ static const struct debugfs_reg32 hzip_dfx_regs[] = {
 	{"HZIP_DECOMP_LZ77_CURR_ST       ",  0x9cull},
 };
 
+static const struct kernel_param_ops zip_uacce_mode_ops = {
+	.set = uacce_mode_set,
+	.get = param_get_int,
+};
+
+/*
+ * uacce_mode = 0 means zip only register to crypto,
+ * uacce_mode = 1 means zip both register to crypto and uacce.
+ * uacce_mode = 2 means zip use noiommu
+ */
+static u32 uacce_mode = UACCE_MODE_NOUACCE;
+module_param_cb(uacce_mode, &zip_uacce_mode_ops, &uacce_mode, 0444);
+MODULE_PARM_DESC(uacce_mode, UACCE_MODE_DESC);
+
 static int pf_q_num_set(const char *val, const struct kernel_param *kp)
 {
 	return q_num_set(val, kp, PCI_DEVICE_ID_ZIP_PF);
@@ -752,6 +766,7 @@ static int hisi_zip_qm_init(struct hisi_qm *qm, struct pci_dev *pdev)
 	qm->pdev = pdev;
 	qm->ver = pdev->revision;
 	qm->algs = "zlib\ngzip";
+	qm->mode = uacce_mode;
 	qm->sqe_size = HZIP_SQE_SIZE;
 	qm->dev_name = hisi_zip_name;
 
@@ -841,18 +856,16 @@ static int hisi_zip_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret)
 		pci_err(pdev, "failed to init debugfs (%d)!\n", ret);
 
+	ret = qm_register_uacce(qm);
+	if (ret) {
+		pci_err(pdev, "failed to register uacce (%d)!\n", ret);
+		goto err_qm_stop;
+	}
+
 	ret = hisi_qm_alg_register(qm, &zip_devices);
 	if (ret < 0) {
 		pci_err(pdev, "failed to register driver to crypto!\n");
 		goto err_qm_stop;
-	}
-
-	if (qm->uacce) {
-		ret = uacce_register(qm->uacce);
-		if (ret) {
-			pci_err(pdev, "failed to register uacce (%d)!\n", ret);
-			goto err_qm_alg_unregister;
-		}
 	}
 
 	if (qm->fun_type == QM_HW_PF && vfs_num > 0) {

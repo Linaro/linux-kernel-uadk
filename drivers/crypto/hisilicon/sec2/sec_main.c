@@ -238,6 +238,19 @@ struct hisi_qp **sec_create_qps(void)
 	return NULL;
 }
 
+static const struct kernel_param_ops sec_uacce_mode_ops = {
+	.set = uacce_mode_set,
+	.get = param_get_int,
+};
+
+/*
+ * uacce_mode = 0 means sec only register to crypto,
+ * uacce_mode = 1 means sec both register to crypto and uacce.
+ * uacce_mode = 2 means sec use noiommu
+ */
+static u32 uacce_mode = UACCE_MODE_NOUACCE;
+module_param_cb(uacce_mode, &sec_uacce_mode_ops, &uacce_mode, 0444);
+MODULE_PARM_DESC(uacce_mode, UACCE_MODE_DESC);
 
 static const struct pci_device_id sec_dev_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_HUAWEI, SEC_PF_PCI_DEVICE_ID) },
@@ -766,6 +779,7 @@ static int sec_qm_init(struct hisi_qm *qm, struct pci_dev *pdev)
 	int ret;
 
 	qm->algs = "cipher\ndigest\naead\n";
+	qm->mode = uacce_mode;
 	qm->pdev = pdev;
 	qm->ver = pdev->revision;
 	qm->sqe_size = SEC_SQE_SIZE;
@@ -888,17 +902,17 @@ static int sec_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = sec_debugfs_init(qm);
 	if (ret)
 		pci_warn(pdev, "Failed to init debugfs!\n");
+	
+	ret = qm_register_uacce(qm);
+	if (ret) {
+		pci_err(pdev, "Failed to register uacce (%d)!\n", ret);
+		goto err_qm_stop;
+	}
 
 	ret = hisi_qm_alg_register(qm, &sec_devices);
 	if (ret < 0) {
 		pr_err("Failed to register driver to crypto.\n");
 		goto err_qm_stop;
-	}
-
-	if (qm->uacce) {
-		ret = uacce_register(qm->uacce);
-		if (ret)
-			goto err_alg_unregister;
 	}
 
 	if (qm->fun_type == QM_HW_PF && vfs_num) {

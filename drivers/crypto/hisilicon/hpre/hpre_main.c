@@ -179,6 +179,20 @@ static const char *hpre_dfx_files[HPRE_DFX_FILE_NUM] = {
 	"invalid_req_cnt"
 };
 
+static const struct kernel_param_ops hpre_uacce_mode_ops = {
+	.set = uacce_mode_set,
+	.get = param_get_int,
+};
+
+/*
+ * uacce_mode = 0 means hpre only register to crypto,
+ * uacce_mode = 1 means hpre both register to crypto and uacce.
+ * uacce_mode = 2 means sec use noiommu
+ */
+static u32 uacce_mode = UACCE_MODE_NOUACCE;
+module_param_cb(uacce_mode, &hpre_uacce_mode_ops, &uacce_mode, 0444);
+MODULE_PARM_DESC(uacce_mode, UACCE_MODE_DESC);
+
 static int pf_q_num_set(const char *val, const struct kernel_param *kp)
 {
 	return q_num_set(val, kp, HPRE_PCI_DEVICE_ID);
@@ -766,6 +780,7 @@ static int hpre_qm_init(struct hisi_qm *qm, struct pci_dev *pdev)
 	}
 
 	qm->algs = "rsa\ndh\n";
+	qm->mode = uacce_mode;
 	qm->pdev = pdev;
 	qm->ver = pdev->revision;
 	qm->sqe_size = HPRE_SQE_SIZE;

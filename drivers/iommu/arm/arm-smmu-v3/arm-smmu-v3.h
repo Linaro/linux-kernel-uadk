@@ -99,6 +99,8 @@
 #define CR2_RECINVSID			(1 << 1)
 #define CR2_E2H				(1 << 0)
 
+#define ARM_SMMU_STATUSR		0x40
+
 #define ARM_SMMU_GBPA			0x44
 #define GBPA_UPDATE			(1 << 31)
 #define GBPA_ABORT			(1 << 20)
@@ -833,4 +835,13 @@ static inline u32 arm_smmu_sva_get_pasid(struct iommu_sva *handle)
 
 static inline void arm_smmu_sva_notifier_synchronize(void) {}
 #endif /* CONFIG_ARM_SMMU_V3_SVA */
+
+#ifdef CONFIG_ARM_SMMU_V3_DEBUGFS
+void arm_smmu_debugfs_init(void);
+void arm_smmu_debugfs_uninit(void);
+#else
+static inline void arm_smmu_debugfs_init(void) {}
+static inline void arm_smmu_debugfs_uninit(void) {}
+#endif /* CONFIG_ARM_SMMU_V3_DEBUGFS */
+
 #endif /* _ARM_SMMU_V3_H */

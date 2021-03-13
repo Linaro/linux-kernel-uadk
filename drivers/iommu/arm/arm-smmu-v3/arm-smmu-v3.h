@@ -626,6 +626,7 @@ struct arm_smmu_strtab_cfg {
 
 /* An SMMUv3 instance */
 struct arm_smmu_device {
+	resource_size_t			ioaddr;
 	struct device			*dev;
 	void __iomem			*base;
 	void __iomem			*page1;

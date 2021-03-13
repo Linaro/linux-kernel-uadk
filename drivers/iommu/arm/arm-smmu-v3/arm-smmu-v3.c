@@ -3591,6 +3591,8 @@ static void arm_smmu_setup_msis(struct arm_smmu_device *smmu)
 		switch (desc->platform.msi_index) {
 		case EVTQ_MSI_INDEX:
 			smmu->evtq.q.irq = desc->irq;
+			dev_info(smmu->dev, "evtq irq number(%llx): %d\n",
+				 smmu->ioaddr, desc->irq);
 			break;
 		case GERROR_MSI_INDEX:
 			smmu->gerr_irq = desc->irq;
@@ -4257,6 +4259,7 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	ioaddr = res->start;
+	smmu->ioaddr = ioaddr;
 
 	/*
 	 * Don't map the IMPLEMENTATION DEFINED regions, since they may contain
@@ -4282,8 +4285,11 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 		smmu->combined_irq = irq;
 	else {
 		irq = platform_get_irq_byname_optional(pdev, "eventq");
-		if (irq > 0)
+		if (irq > 0) {
 			smmu->evtq.q.irq = irq;
+			dev_info(smmu->dev, "evtq irq number(%llx): %d\n",
+				 ioaddr, irq);
+		}
 
 		irq = platform_get_irq_byname_optional(pdev, "priq");
 		if (irq > 0)

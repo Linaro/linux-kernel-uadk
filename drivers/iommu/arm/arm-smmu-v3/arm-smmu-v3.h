@@ -772,6 +772,8 @@ int arm_smmu_atc_inv_domain(struct arm_smmu_domain *smmu_domain, int ssid,
 int arm_smmu_enable_pri(struct arm_smmu_master *master);
 void arm_smmu_disable_pri(struct arm_smmu_master *master);
 int arm_smmu_flush_priq(struct arm_smmu_device *smmu);
+__le64 *arm_smmu_get_cd_ptr(struct arm_smmu_domain *smmu_domain, u32 ssid);
+__le64 *arm_smmu_get_step_for_sid(struct arm_smmu_device *smmu, u32 sid);
 
 #ifdef CONFIG_ARM_SMMU_V3_SVA
 bool arm_smmu_sva_supported(struct arm_smmu_device *smmu);

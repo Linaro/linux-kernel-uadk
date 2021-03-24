@@ -182,6 +182,19 @@ static void arm_smmu_free_shared_cd(struct arm_smmu_ctx_desc *cd)
 	}
 }
 
+static int arm_smmu_mm_invalidate_range_start(struct mmu_notifier *mn,
+					 const struct mmu_notifier_range *range)
+{
+	struct arm_smmu_mmu_notifier *smmu_mn = mn_to_smmu(mn);
+	struct arm_smmu_domain *smmu_domain = smmu_mn->domain;
+	size_t size = range->end - range->start + 1;
+	unsigned long start = range->start;
+
+	arm_smmu_tlb_inv_range_asid(start, size, smmu_mn->cd->asid, PAGE_SIZE,
+				    false, smmu_domain);
+	return 0;
+}
+
 static void arm_smmu_mm_invalidate_range(struct mmu_notifier *mn,
 					 struct mm_struct *mm,
 					 unsigned long start, unsigned long end)
@@ -227,6 +240,7 @@ static void arm_smmu_mmu_notifier_free(struct mmu_notifier *mn)
 }
 
 static struct mmu_notifier_ops arm_smmu_mmu_notifier_ops = {
+	.invalidate_range_start = arm_smmu_mm_invalidate_range_start,
 	.invalidate_range	= arm_smmu_mm_invalidate_range,
 	.release		= arm_smmu_mm_release,
 	.free_notifier		= arm_smmu_mmu_notifier_free,

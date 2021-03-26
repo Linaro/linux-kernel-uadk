@@ -14,6 +14,10 @@
 #include "../../iommu-sva-lib.h"
 #include "../../io-pgtable-arm.h"
 
+#include <linux/debugfs.h>
+
+static bool sva_force_inval = 0;
+
 struct arm_smmu_mmu_notifier {
 	struct mmu_notifier		mn;
 	struct arm_smmu_ctx_desc	*cd;
@@ -203,7 +207,7 @@ static void arm_smmu_mm_invalidate_range(struct mmu_notifier *mn,
 	struct arm_smmu_domain *smmu_domain = smmu_mn->domain;
 	size_t size = end - start + 1;
 
-	if (smmu_mn->tlb_inv_command)
+	if (smmu_mn->tlb_inv_command || sva_force_inval)
 		arm_smmu_tlb_inv_range_asid(start, size, smmu_mn->cd->asid,
 					    PAGE_SIZE, false, smmu_domain);
 	arm_smmu_atc_inv_domain(smmu_domain, mm->pasid, start, size);
@@ -240,7 +244,7 @@ static void arm_smmu_mmu_notifier_free(struct mmu_notifier *mn)
 }
 
 static struct mmu_notifier_ops arm_smmu_mmu_notifier_ops = {
-	.invalidate_range_start = arm_smmu_mm_invalidate_range_start,
+//	.invalidate_range_start = arm_smmu_mm_invalidate_range_start,
 	.invalidate_range	= arm_smmu_mm_invalidate_range,
 	.release		= arm_smmu_mm_release,
 	.free_notifier		= arm_smmu_mmu_notifier_free,
@@ -600,3 +604,9 @@ void arm_smmu_sva_notifier_synchronize(void)
 	 */
 	mmu_notifier_synchronize();
 }
+
+void arm_smmu_sva_init(void)
+{
+	debugfs_create_bool("sva_force_inval", 0600, NULL, &sva_force_inval);
+}
+module_init(arm_smmu_sva_init);

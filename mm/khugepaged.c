@@ -23,6 +23,11 @@
 #include <asm/pgalloc.h>
 #include "internal.h"
 
+#include <linux/delay.h>
+#include <linux/debugfs.h>
+
+static unsigned long thp_udelay = 0;
+
 enum scan_result {
 	SCAN_FAIL,
 	SCAN_SUCCEED,
@@ -396,6 +401,8 @@ int __init khugepaged_init(void)
 	khugepaged_max_ptes_swap = HPAGE_PMD_NR / 8;
 	khugepaged_max_ptes_shared = HPAGE_PMD_NR / 2;
 
+	debugfs_create_ulong("thp_udelay", 0600, NULL, &thp_udelay);
+
 	return 0;
 }
 
@@ -458,6 +465,7 @@ static bool hugepage_vma_check(struct vm_area_struct *vma,
 		return false;
 	if (vma_is_temporary_stack(vma))
 		return false;
+
 	return !(vm_flags & VM_NO_KHUGEPAGED);
 }
 
@@ -1050,6 +1058,7 @@ static void collapse_huge_page(struct mm_struct *mm,
 				   struct page **hpage,
 				   int node, int referenced, int unmapped)
 {
+	//pr_err("---> debug: %s: address: %lx\n", __FUNCTION__, address);
 	LIST_HEAD(compound_pagelist);
 	pmd_t *pmd, _pmd;
 	pte_t *pte;
@@ -1142,6 +1151,8 @@ static void collapse_huge_page(struct mm_struct *mm,
 	 */
 	_pmd = pmdp_collapse_flush(vma, address, pmd);
 	spin_unlock(pmd_ptl);
+	if (thp_udelay)
+		udelay(thp_udelay);
 	mmu_notifier_invalidate_range_end(&range);
 
 	spin_lock(pte_ptl);

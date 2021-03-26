@@ -55,6 +55,7 @@ static inline void khugepaged_exit(struct mm_struct *mm)
 static inline int khugepaged_enter(struct vm_area_struct *vma,
 				   unsigned long vm_flags)
 {
+	//pr_err("---> debug: %s, vma start: %lx, vma size: %lx\n", __FUNCTION__, vma->vm_start, vma->vm_end - vma->vm_start + 1);
 	if (!test_bit(MMF_VM_HUGEPAGE, &vma->vm_mm->flags))
 		if ((khugepaged_always() ||
 		     (khugepaged_req_madv() && (vm_flags & VM_HUGEPAGE))) &&

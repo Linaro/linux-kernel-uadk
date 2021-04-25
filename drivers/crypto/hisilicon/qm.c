@@ -629,9 +629,6 @@ static void qm_poll_qp(struct hisi_qp *qp, struct hisi_qm *qm)
 		return;
 
 	if (qp->event_cb) {
-		spin_lock(&qp->qp_lock);
-		qp->qp_status.updated = true;
-		spin_unlock(&qp->qp_lock);
 		qp->event_cb(qp);
 		return;
 	}
@@ -771,7 +768,6 @@ static void qm_init_qp_status(struct hisi_qp *qp)
 	qp_status->sq_tail = 0;
 	qp_status->cq_head = 0;
 	qp_status->cqc_phase = true;
-	qp_status->updated = false;
 	atomic_set(&qp_status->used, 0);
 }
 
@@ -2116,7 +2112,7 @@ static int hisi_qm_uacce_get_queue(struct uacce_device *uacce,
 	q->priv = qp;
 	q->uacce = uacce;
 	qp->uacce_q = q;
-	qp->event_cb = qm_qp_event_notifier;
+	qp->event_cb = NULL;
 	qp->pasid = arg;
 	qp->is_in_kernel = false;
 
@@ -2232,12 +2228,20 @@ static long hisi_qm_uacce_ioctl(struct uacce_queue *q, unsigned int cmd,
 static int hisi_qm_is_q_updated(struct uacce_queue *q)
 {
 	struct hisi_qp *qp = q->priv;
-	bool updated;
+	struct qm_cqe *cqe = qp->cqe + qp->qp_status.cq_head;
+	int updated = 0;
 
-	spin_lock(&qp->qp_lock);
-	updated = qp->qp_status.updated;
-	qp->qp_status.updated = false;
-	spin_unlock(&qp->qp_lock);
+	spin_lock_bh(&qp->qp_lock);
+	if (unlikely(!qp->event_cb))
+		qp->event_cb = qm_qp_event_notifier;
+
+	while (QM_CQE_PHASE(cqe) == qp->qp_status.cqc_phase) {
+		dma_rmb();
+		qm_cq_head_update(qp);
+		cqe = qp->cqe + qp->qp_status.cq_head;
+		updated = 1;
+	}
+	spin_unlock_bh(&qp->qp_lock);
 
 	return updated;
 }

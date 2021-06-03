@@ -422,6 +422,8 @@ extern int iommu_sva_unbind_gpasid(struct iommu_domain *domain,
 				   struct device *dev, ioasid_t pasid);
 extern int iommu_attach_pasid_table(struct iommu_domain *domain,
 				    struct iommu_pasid_table_config *cfg);
+extern int iommu_uapi_attach_pasid_table(struct iommu_domain *domain,
+					 void __user *udata);
 extern void iommu_detach_pasid_table(struct iommu_domain *domain);
 extern struct iommu_domain *iommu_get_domain_for_dev(struct device *dev);
 extern struct iommu_domain *iommu_get_dma_domain(struct device *dev);
@@ -1023,6 +1025,13 @@ static inline struct iommu_fwspec *dev_iommu_fwspec_get(struct device *dev)
 static inline
 int iommu_attach_pasid_table(struct iommu_domain *domain,
 			     struct iommu_pasid_table_config *cfg)
+{
+	return -ENODEV;
+}
+
+static inline
+int iommu_uapi_attach_pasid_table(struct iommu_domain *domain,
+				  void __user *uinfo)
 {
 	return -ENODEV;
 }

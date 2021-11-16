@@ -634,6 +634,7 @@ struct mm_struct {
 
 #ifdef CONFIG_IOMMU_SUPPORT
 		u32 pasid;
+		struct iommu_sva		*sva_handle;
 #endif
 	} __randomize_layout;
 

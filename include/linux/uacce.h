@@ -79,10 +79,12 @@ struct uacce_queue {
 	void *priv;
 	wait_queue_head_t wait;
 	struct list_head list;
+	struct list_head child_queues;
 	struct uacce_qfile_region *qfrs[UACCE_MAX_REGION];
 	enum uacce_q_state state;
 	u32 pasid;
 	struct iommu_sva *handle;
+	refcount_t users;
 };
 
 /**

@@ -96,6 +96,7 @@
 #include <linux/scs.h>
 #include <linux/io_uring.h>
 #include <linux/bpf.h>
+#include <linux/iommu.h>
 
 #include <asm/pgalloc.h>
 #include <linux/uaccess.h>
@@ -1078,6 +1079,20 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 		goto fail_nocontext;
 
 	mm->user_ns = get_user_ns(user_ns);
+
+	if (current->mm && current->mm->sva_handle) {
+		u32 pasid;
+		struct iommu_sva *handle;
+		/* if parent mm bind to dev, new mm bind to the same dev */
+		handle = iommu_sva_bind_device(current->mm->sva_handle->dev, mm, 0);
+		if (!IS_ERR(handle)) {
+			pasid = iommu_sva_get_pasid(handle);
+			if (pasid == IOMMU_PASID_INVALID)
+				iommu_sva_unbind_device(handle);
+			else
+				mm->pasid = pasid;
+		}
+	}
 	return mm;
 
 fail_nocontext:

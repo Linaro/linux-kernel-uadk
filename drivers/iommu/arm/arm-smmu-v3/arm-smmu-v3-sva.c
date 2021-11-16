@@ -342,6 +342,7 @@ __arm_smmu_sva_bind(struct device *dev, struct mm_struct *mm)
 		ret = PTR_ERR(bond->smmu_mn);
 		goto err_free_pasid;
 	}
+	mm->sva_handle= &bond->sva;
 
 	list_add(&bond->list, &master->bonds);
 	return &bond->sva;

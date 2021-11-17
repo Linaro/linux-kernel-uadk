@@ -1236,8 +1236,13 @@ static int vfio_device_open_count(struct vfio_device *device)
 static void vfio_device_close_decount(struct vfio_device *device)
 {
 	mutex_lock(&device->dev_set->lock);
-	if (device->open_count == 1 && device->ops->close_device)
-		device->ops->close_device(device);
+	if (device->open_count == 1) {
+		if ((!device->group || !device->group->container) &&
+		    device->ops->unbind_iommufd)
+			device->ops->unbind_iommufd(device);
+		if (device->ops->close_device)
+			device->ops->close_device(device);
+	}
 	device->open_count--;
 	mutex_unlock(&device->dev_set->lock);
 }
@@ -1489,10 +1494,49 @@ static int vfio_device_fops_release(struct inode *inode, struct file *filep)
 	return 0;
 }
 
+static long vfio_device_bind_iommufd(struct file *filep, unsigned long arg)
+{
+	struct vfio_device_bind_iommufd bind;
+	struct vfio_device *device = container_of(filep->f_inode->i_cdev,
+						  struct vfio_device, cdev);
+	unsigned long minsz;
+	int ret;
+
+	minsz = offsetofend(struct vfio_device_bind_iommufd, iommufd);
+
+	if (copy_from_user(&bind, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (bind.argsz < minsz || bind.flags ||
+	    bind.iommufd < 0)
+		return -EINVAL;
+
+	if (!device->ops->bind_iommufd || !device->ops->unbind_iommufd)
+		return -ENODEV;
+
+	ret = device->ops->bind_iommufd(device, &bind);
+	if (ret)
+		return ret;
+
+	/* Init private_data to unlock the device access via this fd */
+	smp_store_release(&filep->private_data, device);
+
+	return copy_to_user((void __user *)arg + minsz,
+			    &bind.out_devid,
+			    sizeof(bind.out_devid)) ? -EFAULT : 0;
+}
+
 static long vfio_device_fops_unl_ioctl(struct file *filep,
 				       unsigned int cmd, unsigned long arg)
 {
-	struct vfio_device *device = filep->private_data;
+	struct vfio_device *device;
+
+	/* Bind is the only allowed operation before a successful bind */
+	if (cmd == VFIO_DEVICE_BIND_IOMMUFD)
+		return vfio_device_bind_iommufd(filep, arg);
+
+	/* Pair with smp_store_release() in vfio_device_bind_iommufd() */
+	device = smp_load_acquire(&filep->private_data);
 
 	if (!device || unlikely(!device->ops->ioctl))
 		return -EINVAL;
@@ -1503,7 +1547,8 @@ static long vfio_device_fops_unl_ioctl(struct file *filep,
 static ssize_t vfio_device_fops_read(struct file *filep, char __user *buf,
 				     size_t count, loff_t *ppos)
 {
-	struct vfio_device *device = filep->private_data;
+	/* Pair with smp_store_release() in vfio_device_bind_iommufd() */
+	struct vfio_device *device = smp_load_acquire(&filep->private_data);
 
 	if (!device || unlikely(!device->ops->read))
 		return -EINVAL;
@@ -1515,7 +1560,8 @@ static ssize_t vfio_device_fops_write(struct file *filep,
 				      const char __user *buf,
 				      size_t count, loff_t *ppos)
 {
-	struct vfio_device *device = filep->private_data;
+	/* Pair with smp_store_release() in vfio_device_bind_iommufd() */
+	struct vfio_device *device = smp_load_acquire(&filep->private_data);
 
 	if (!device || unlikely(!device->ops->write))
 		return -EINVAL;
@@ -1525,7 +1571,8 @@ static ssize_t vfio_device_fops_write(struct file *filep,
 
 static int vfio_device_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 {
-	struct vfio_device *device = filep->private_data;
+	/* Pair with smp_store_release() in vfio_device_bind_iommufd() */
+	struct vfio_device *device = smp_load_acquire(&filep->private_data);
 
 	if (!device || unlikely(!device->ops->mmap))
 		return -EINVAL;

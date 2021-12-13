@@ -319,10 +319,35 @@ static long uacce_fops_compat_ioctl(struct file *filep,
 }
 #endif
 
+static int uacce_handle_sva_fault(struct iommu_sva *handle, int reason)
+{
+	struct uacce_queue *q, *next_q;
+	struct uacce_device *uacce;
+
+	uacce = dev_to_uacce(handle->dev); /* handle->dev is parent */
+
+	mutex_lock(&uacce->queues_lock);
+	list_for_each_entry_safe(q, next_q, &uacce->queues, list) {
+		if (q->handle == handle)
+			break;
+	}
+	mutex_unlock(&uacce->queues_lock);
+
+	if (q)
+		kill_pid(q->pid, SIGKILL, 1);
+
+	return 0;
+}
+
+static struct iommu_sva_ops uacce_sva_ops = {
+	.handle_sva_fault = uacce_handle_sva_fault,
+};
+
 static int uacce_bind_queue(struct uacce_device *uacce, struct uacce_queue *q)
 {
 	u32 pasid;
 	struct iommu_sva *handle;
+	int ret;
 
 	if (!(uacce->flags & UACCE_DEV_SVA))
 		return 0;
@@ -330,6 +355,12 @@ static int uacce_bind_queue(struct uacce_device *uacce, struct uacce_queue *q)
 	handle = iommu_sva_bind_device(uacce->parent, current->mm, NULL);
 	if (IS_ERR(handle))
 		return PTR_ERR(handle);
+
+	ret = iommu_sva_set_ops(handle, &uacce_sva_ops);
+	if (ret) {
+		iommu_sva_unbind_device(handle);
+		return -ENODEV;
+	}
 
 	pasid = iommu_sva_get_pasid(handle);
 	if (pasid == IOMMU_PASID_INVALID) {
@@ -381,6 +412,7 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 	init_waitqueue_head(&q->wait);
 	filep->private_data = q;
 	uacce->inode = inode;
+	q->pid = get_task_pid(current, PIDTYPE_PID);
 	q->state = UACCE_Q_INIT;
 
 	mutex_lock(&uacce->queues_lock);
@@ -412,6 +444,7 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 		kfree(ss);
 	}
 
+	put_pid(q->pid);
 	kfree(q);
 
 	return 0;

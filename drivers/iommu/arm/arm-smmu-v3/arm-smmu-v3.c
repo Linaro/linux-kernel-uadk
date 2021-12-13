@@ -912,6 +912,8 @@ static int arm_smmu_page_response(struct device *dev,
 	struct arm_smmu_cmdq_ent cmd = {0};
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
 	int sid = master->streams[0].id;
+	struct iommu_sva *sva;
+	struct mm_struct *mm;
 
 	if (master->stall_enabled) {
 		cmd.opcode		= CMDQ_OP_RESUME;
@@ -920,6 +922,13 @@ static int arm_smmu_page_response(struct device *dev,
 		switch (resp->code) {
 		case IOMMU_PAGE_RESP_INVALID:
 		case IOMMU_PAGE_RESP_FAILURE:
+			mm = iommu_sva_find(resp->pasid);
+			if (!IS_ERR_OR_NULL(mm)) {
+				mmput(mm);
+				sva = arm_smmu_find_sva(master, mm);
+				if (sva && sva->ops && sva->ops->handle_sva_fault)
+					sva->ops->handle_sva_fault(sva, resp->code);
+			}
 			cmd.resume.resp = CMDQ_RESUME_0_RESP_ABORT;
 			break;
 		case IOMMU_PAGE_RESP_SUCCESS:

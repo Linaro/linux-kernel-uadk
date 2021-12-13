@@ -48,6 +48,7 @@ struct iommu_dma_cookie;
 
 typedef int (*iommu_fault_handler_t)(struct iommu_domain *,
 			struct device *, unsigned long, int, void *);
+typedef int (*iommu_sva_fault_handler_t)(struct iommu_sva *, int reason);
 typedef int (*iommu_dev_fault_handler_t)(struct iommu_fault *, void *);
 
 struct iommu_domain_geometry {
@@ -174,6 +175,13 @@ enum iommu_dev_features {
 };
 
 #define IOMMU_PASID_INVALID	(-1U)
+
+/**
+ * struct iommu_sva_ops - device driver callbacks for an SVA context
+ */
+struct iommu_sva_ops {
+	iommu_sva_fault_handler_t handle_sva_fault;
+};
 
 #ifdef CONFIG_IOMMU_API
 
@@ -653,6 +661,7 @@ struct iommu_fwspec {
  */
 struct iommu_sva {
 	struct device			*dev;
+	const struct iommu_sva_ops	*ops;
 };
 
 int iommu_fwspec_init(struct device *dev, struct fwnode_handle *iommu_fwnode,
@@ -702,6 +711,8 @@ struct iommu_sva *iommu_sva_bind_device(struct device *dev,
 					struct mm_struct *mm,
 					void *drvdata);
 void iommu_sva_unbind_device(struct iommu_sva *handle);
+int iommu_sva_set_ops(struct iommu_sva *handle,
+		      const struct iommu_sva_ops *ops);
 u32 iommu_sva_get_pasid(struct iommu_sva *handle);
 bool iommu_get_nesting(struct iommu_domain *domain);
 
@@ -1084,6 +1095,12 @@ iommu_sva_bind_device(struct device *dev, struct mm_struct *mm, void *drvdata)
 
 static inline void iommu_sva_unbind_device(struct iommu_sva *handle)
 {
+}
+
+static inline int iommu_sva_set_ops(struct iommu_sva *handle,
+				    const struct iommu_sva_ops *ops)
+{
+	return -EINVAL;
 }
 
 static inline u32 iommu_sva_get_pasid(struct iommu_sva *handle)

@@ -109,6 +109,7 @@ struct uacce_queue {
 	enum uacce_q_state state;
 	u32 pasid;
 	struct iommu_sva *handle;
+	struct pid *pid;
 };
 
 /**

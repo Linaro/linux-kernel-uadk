@@ -306,6 +306,24 @@ static void arm_smmu_mmu_notifier_put(struct arm_smmu_mmu_notifier *smmu_mn)
 	arm_smmu_free_shared_cd(cd);
 }
 
+struct iommu_sva *
+arm_smmu_find_sva(struct arm_smmu_master *master, struct mm_struct *mm)
+{
+	struct arm_smmu_bond *bond;
+	struct iommu_sva *sva = NULL;
+
+	if (!master || !master->sva_enabled)
+		return ERR_PTR(-ENODEV);
+
+	mutex_lock(&sva_lock);
+	list_for_each_entry(bond, &master->bonds, list) {
+		if (bond->mm == mm)
+			sva = &bond->sva;
+	}
+	mutex_unlock(&sva_lock);
+	return sva;
+}
+
 static struct iommu_sva *
 __arm_smmu_sva_bind(struct device *dev, struct mm_struct *mm)
 {

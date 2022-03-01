@@ -843,8 +843,12 @@ void vfio_unregister_group_dev(struct vfio_device *device)
 	 * Without this stall, we're potentially racing with a user process
 	 * that may attempt to immediately bind this device to another driver.
 	 */
-	if (list_empty(&group->device_list))
-		wait_event(group->container_q, !group->container);
+	if (list_empty(&group->device_list)) {
+		if (group->container)
+			wait_event(group->container_q, !group->container);
+		else
+			wait_event(group->container_q, !group->iommufd);
+	}
 
 	if (group->type == VFIO_NO_IOMMU || group->type == VFIO_EMULATED_IOMMU)
 		iommu_group_remove_device(device->dev);
@@ -1083,6 +1087,7 @@ static void __vfio_group_unset_container(struct vfio_group *group)
 	if (group->iommufd) {
 		vfio_group_unset_iommufd(group->iommufd, &group->device_list);
 		group->iommufd = NULL;
+		wake_up(&group->container_q);
 		return;
 	}
 
@@ -1250,7 +1255,8 @@ static int vfio_device_open_count(struct vfio_device *device)
 
 static bool vfio_device_in_container(struct vfio_device *device)
 {
-	return device->group && device->group->container;
+	return device->group &&
+		(device->group->container || device->group->iommufd);
 }
 
 static void vfio_device_close_decount(struct vfio_device *device)
@@ -1359,7 +1365,7 @@ static long vfio_group_fops_unl_ioctl(struct file *filep,
 
 		status.flags = 0;
 
-		if (group->container)
+		if (group->container || group->iommufd)
 			status.flags |= VFIO_GROUP_FLAGS_CONTAINER_SET |
 					VFIO_GROUP_FLAGS_VIABLE;
 		else if (!iommu_group_dma_owner_claimed(group->iommu_group))
@@ -1427,7 +1433,7 @@ static int vfio_group_fops_open(struct inode *inode, struct file *filep)
 	}
 
 	/* Is something still in use from a previous open? */
-	if (group->container) {
+	if (group->container || group->iommufd) {
 		atomic_dec(&group->opened);
 		vfio_group_put(group);
 		return -EBUSY;
@@ -1953,6 +1959,9 @@ int vfio_pin_pages(struct device *dev, unsigned long *user_pfn, int npage,
 	if (ret)
 		goto err_pin_pages;
 
+	/*
+	 * TODO: pin_pages should use the iommufd implementation
+	 */
 	container = group->container;
 	driver = container->iommu_driver;
 	if (likely(driver && driver->ops->pin_pages))
@@ -2000,6 +2009,9 @@ int vfio_unpin_pages(struct device *dev, unsigned long *user_pfn, int npage)
 	if (ret)
 		goto err_unpin_pages;
 
+	/*
+	 * TODO: unpin_pages should use the iommufd implementation
+	 */
 	container = group->container;
 	driver = container->iommu_driver;
 	if (likely(driver && driver->ops->unpin_pages))
@@ -2054,6 +2066,9 @@ int vfio_group_pin_pages(struct vfio_group *group,
 	if (npage > VFIO_PIN_PAGES_MAX_ENTRIES)
 		return -E2BIG;
 
+	/*
+	 * TODO: pin_pages should use the iommufd implementation
+	 */
 	container = group->container;
 	driver = container->iommu_driver;
 	if (likely(driver && driver->ops->pin_pages))
@@ -2146,6 +2161,9 @@ int vfio_dma_rw(struct vfio_group *group, dma_addr_t user_iova,
 	if (!group || !data || len <= 0)
 		return -EINVAL;
 
+	/*
+	 * TODO: dma_rw should use the iommufd implementation
+	 */
 	container = group->container;
 	driver = container->iommu_driver;
 
@@ -2171,6 +2189,9 @@ static int vfio_register_iommu_notifier(struct vfio_group *group,
 	if (ret)
 		return -EINVAL;
 
+	/*
+	 * TODO: register_notifier should use the iommufd implementation
+	 */
 	container = group->container;
 	driver = container->iommu_driver;
 	if (likely(driver && driver->ops->register_notifier))
@@ -2195,6 +2216,9 @@ static int vfio_unregister_iommu_notifier(struct vfio_group *group,
 	if (ret)
 		return -EINVAL;
 
+	/*
+	 * TODO: unregister_notifier should use the iommufd implementation
+	 */
 	container = group->container;
 	driver = container->iommu_driver;
 	if (likely(driver && driver->ops->unregister_notifier))
@@ -2334,6 +2358,9 @@ struct iommu_domain *vfio_group_iommu_domain(struct vfio_group *group)
 	if (!group)
 		return ERR_PTR(-EINVAL);
 
+	/*
+	 * TODO: group_iommu_domain should use the iommufd implementation
+	 */
 	container = group->container;
 	driver = container->iommu_driver;
 	if (likely(driver && driver->ops->group_iommu_domain))

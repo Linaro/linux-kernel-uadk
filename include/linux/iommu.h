@@ -273,6 +273,7 @@ struct iommu_ops {
  *            queue
  * @iova_to_phys: translate iova to physical address
  * @enable_nesting: Enable nesting
+ * @get_nesting: get whether the domain uses nested stages
  * @set_pgtable_quirks: Set io page table quirks (IO_PGTABLE_QUIRK_*)
  * @free: Release the domain after use.
  * @attach_pasid_table: attach a pasid table
@@ -303,6 +304,7 @@ struct iommu_domain_ops {
 				    dma_addr_t iova);
 
 	int (*enable_nesting)(struct iommu_domain *domain);
+	bool (*get_nesting)(struct iommu_domain *domain);
 	int (*set_pgtable_quirks)(struct iommu_domain *domain,
 				  unsigned long quirks);
 
@@ -684,6 +686,7 @@ struct iommu_sva *iommu_sva_bind_device(struct device *dev,
 					void *drvdata);
 void iommu_sva_unbind_device(struct iommu_sva *handle);
 u32 iommu_sva_get_pasid(struct iommu_sva *handle);
+bool iommu_get_nesting(struct iommu_domain *domain);
 
 #else /* CONFIG_IOMMU_API */
 
@@ -1057,6 +1060,11 @@ static inline u32 iommu_sva_get_pasid(struct iommu_sva *handle)
 static inline struct iommu_fwspec *dev_iommu_fwspec_get(struct device *dev)
 {
 	return NULL;
+}
+
+static inline bool iommu_get_nesting(struct iommu_domain *domain)
+{
+	return false;
 }
 #endif /* CONFIG_IOMMU_API */
 

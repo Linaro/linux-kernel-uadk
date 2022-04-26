@@ -282,6 +282,7 @@ struct iommu_ops {
  * @free: Release the domain after use.
  * @attach_pasid_table: attach a pasid table
  * @detach_pasid_table: detach the pasid table
+ * @cache_invalidate: invalidate translation caches
  */
 struct iommu_domain_ops {
 	int (*attach_dev)(struct iommu_domain *domain, struct device *dev);
@@ -317,7 +318,13 @@ struct iommu_domain_ops {
 	int (*attach_pasid_table)(struct iommu_domain *domain,
 				  struct iommu_pasid_table_config *cfg);
 	void (*detach_pasid_table)(struct iommu_domain *domain);
+	int (*cache_invalidate)(struct iommu_domain *domain, struct device *dev,
+				struct iommu_cache_invalidate_info *inv_info);
 };
+
+extern int iommu_uapi_cache_invalidate(struct iommu_domain *domain,
+				       struct device *dev,
+				       void __user *uinfo);
 
 /**
  * struct iommu_device - IOMMU core representation of one IOMMU hardware

@@ -52,6 +52,8 @@ int iommufd_ioas_alloc_ioctl(struct iommufd_ucmd *ucmd)
 		return -EOPNOTSUPP;
 
 	ioas = iommufd_ioas_alloc(ucmd->ictx);
+
+	printk("gzf %s, ioas=%x\n", __func__, ioas);
 	if (IS_ERR(ioas))
 		return PTR_ERR(ioas);
 
@@ -60,6 +62,7 @@ int iommufd_ioas_alloc_ioctl(struct iommufd_ucmd *ucmd)
 	if (rc)
 		goto out_table;
 	iommufd_object_finalize(ucmd->ictx, &ioas->obj);
+	printk("gzf %s, ioas=%x DONE\n", __func__, ioas);
 	return 0;
 
 out_table:
@@ -144,6 +147,7 @@ int iommufd_ioas_map(struct iommufd_ucmd *ucmd)
 	struct iommu_ioas_map *cmd = ucmd->cmd;
 	struct iommufd_ioas *ioas;
 	unsigned int flags = 0;
+	__aligned_u64 iova1;
 	unsigned long iova;
 	int rc;
 
@@ -162,11 +166,19 @@ int iommufd_ioas_map(struct iommufd_ucmd *ucmd)
 	if (!(cmd->flags & IOMMU_IOAS_MAP_FIXED_IOVA))
 		flags = IOPT_ALLOC_IOVA;
 	iova = cmd->iova;
+	iova1 = cmd->iova;
+	if (cmd->iova == 0)
+		printk("gzf cmd->iova is 0\n");
+	else
+		printk("gzf cmd->iova is not 0\n");
+	printk("gzf %s 1 iova=%lx, iova1=%lx, cmd->iova=%lx, cmd->user_va=%x, cmd->length=%x\n", __func__, iova, iova1, cmd->iova, cmd->user_va, cmd->length);
 	rc = iopt_map_user_pages(&ioas->iopt, &iova,
 				 u64_to_user_ptr(cmd->user_va), cmd->length,
 				 conv_iommu_prot(cmd->flags), flags);
+	printk("map user rc=%d\n", rc);
 	if (rc)
 		goto out_put;
+	printk("gzf %s 2 iova=%x, cmd->user_va=%x, cmd->length=%x\n", __func__, iova, cmd->user_va, cmd->length);
 
 	cmd->iova = iova;
 	rc = iommufd_ucmd_respond(ucmd, sizeof(*cmd));
@@ -236,6 +248,7 @@ int iommufd_ioas_unmap(struct iommufd_ucmd *ucmd)
 	ioas = iommufd_get_ioas(ucmd, cmd->ioas_id);
 	if (IS_ERR(ioas))
 		return PTR_ERR(ioas);
+	printk("gzf %s 1 iova=%x, cmd->length=%x\n", __func__, cmd->iova,  cmd->length);
 
 	if (cmd->iova == 0 && cmd->length == U64_MAX) {
 		rc = iopt_unmap_all(&ioas->iopt, &unmapped);

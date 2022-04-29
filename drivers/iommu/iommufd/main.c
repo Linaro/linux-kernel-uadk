@@ -154,6 +154,7 @@ static int iommufd_fops_open(struct inode *inode, struct file *filp)
 	ictx = kzalloc(sizeof(*ictx), GFP_KERNEL);
 	if (!ictx)
 		return -ENOMEM;
+	printk("gzf %s ictx=%x\n", __func__, ictx);
 
 	xa_init_flags(&ictx->objects, XA_FLAGS_ALLOC1);
 	ictx->filp = filp;
@@ -242,6 +243,8 @@ static long iommufd_fops_ioctl(struct file *filp, unsigned int cmd,
 	union ucmd_buffer buf;
 	unsigned int nr;
 	int ret;
+
+	printk("gzf %s ictx=%x\n", __func__, ictx);
 
 	nr = _IOC_NR(cmd);
 	if (nr < IOMMUFD_CMD_BASE ||

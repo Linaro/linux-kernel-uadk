@@ -2013,8 +2013,7 @@ static int iommu_check_cache_invl_data(struct iommu_cache_invalidate_info *info)
 	return 0;
 }
 
-int iommu_uapi_cache_invalidate(struct iommu_domain *domain, struct device *dev,
-				void __user *uinfo)
+int iommu_uapi_cache_invalidate(struct iommu_domain *domain, void __user *uinfo)
 {
 	struct iommu_cache_invalidate_info inv_info = { 0 };
 	u32 minsz;
@@ -2061,7 +2060,7 @@ int iommu_uapi_cache_invalidate(struct iommu_domain *domain, struct device *dev,
 	if (ret)
 		return ret;
 
-	return domain->ops->cache_invalidate(domain, dev, &inv_info);
+	return domain->ops->cache_invalidate(domain, &inv_info);
 }
 EXPORT_SYMBOL_GPL(iommu_uapi_cache_invalidate);
 

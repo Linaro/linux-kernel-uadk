@@ -521,7 +521,7 @@ static int pfn_reader_pin_pages(struct pfn_reader *pfns)
 {
 	struct iopt_pages *pages = pfns->pages;
 	unsigned long npages;
-	long rc;
+	long rc = 0;
 
 	if (!pfns->upages) {
 		/* All undone in iopt_pfn_reader_destroy */
@@ -545,14 +545,25 @@ static int pfn_reader_pin_pages(struct pfn_reader *pfns)
 		       pfns->upages_len / sizeof(*pfns->upages));
 
 	/* FIXME use pin_user_pages_fast() if current == source_mm */
+	// gzf hack
+
 	rc = pin_user_pages_remote(
 		pages->source_mm,
 		(uintptr_t)(pages->uptr + pfns->batch_end_index * PAGE_SIZE),
 		npages, pfns->gup_flags, pfns->upages, NULL, NULL);
+/*
+	rc = pin_user_pages_fast(
+		(uintptr_t)(pages->uptr + pfns->batch_end_index * PAGE_SIZE),
+		npages, pfns->gup_flags, pfns->upages);
+*/
+	printk("call pin_user_pages_remote rc=%d\n", rc);
 	if (rc < 0)
 		return rc;
-	if (WARN_ON(!rc))
+	if (WARN_ON(!rc)) {
+		printk("return -EFAULT\n");
 		return -EFAULT;
+	}
+//*/
 	iopt_pages_add_npinned(pages, rc);
 	pfns->upages_start = pfns->batch_end_index;
 	pfns->upages_end = pfns->batch_end_index + rc;
@@ -965,24 +976,32 @@ int iopt_area_fill_domains(struct iopt_area *area, struct iopt_pages *pages)
 	mutex_lock(&pages->mutex);
 	rc = pfn_reader_first(&pfns, pages, iopt_area_index(area),
 			      iopt_area_last_index(area));
-	if (rc)
+	if (rc) {
+		printk("1 rc=%d\n", rc);
 		goto out_unlock;
+	}
 
 	while (!pfn_reader_done(&pfns)) {
 		xa_for_each (&area->iopt->domains, index, domain) {
 			rc = batch_to_domain(&pfns.batch, domain, area,
 					     pfns.batch_start_index);
-			if (rc)
+			if (rc) {
+				printk("2 rc=%d\n", rc);
 				goto out_unmap;
+			}
 		}
 
 		rc = pfn_reader_next(&pfns);
-		if (rc)
+		if (rc) {
+			printk("3 rc=%d\n", rc);
 			goto out_unmap;
+		}
 	}
 	rc = update_pinned(pages);
-	if (rc)
+	if (rc) {
+		printk("4 rc=%d\n", rc);
 		goto out_unmap;
+	}
 
 	area->storage_domain = xa_load(&area->iopt->domains, 0);
 	interval_tree_insert(&area->pages_node, &pages->domains_itree);

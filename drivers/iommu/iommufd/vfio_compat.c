@@ -157,6 +157,119 @@ static int iommufd_vfio_unmap_dma(struct iommufd_ctx *ictx, unsigned int cmd,
 	return rc;
 }
 
+static int iommufd_vfio_cache_invalidate(struct iommufd_ctx *ictx, unsigned int cmd,
+					 void __user *arg)
+{
+	struct vfio_iommu_type1_cache_invalidate cache_inv;
+	struct iommufd_ioas *ioas;
+	unsigned long minsz;
+	struct iommu_domain *domain;
+	int ret;
+
+	printk("gzf %s ictx=%x\n", __func__, ictx);
+	
+	minsz = offsetofend(struct vfio_iommu_type1_cache_invalidate, flags);
+
+	if (copy_from_user(&cache_inv, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (cache_inv.argsz < minsz || cache_inv.flags)
+		return -EINVAL;
+
+	minsz = offsetofend(struct vfio_iommu_type1_set_pasid_table, flags);
+	printk("gzf %s minsz=%ld\n", __func__, minsz);
+
+	ioas = get_compat_ioas(ictx);
+	printk("gzf %s ioas=%x\n", __func__, ioas);
+	if (IS_ERR(ioas)) {
+		printk("gzf %s ioas=%x error\n", __func__, ioas);
+		return PTR_ERR(ioas);
+	}
+
+	domain = xa_load(&ioas->iopt.domains, ioas->iopt.next_domain_id-1);
+	printk("domain=%x iopt=%x ioas->iopt->next_domain_id=%d\n", domain, ioas->iopt, ioas->iopt.next_domain_id);
+
+	ret = iommu_uapi_cache_invalidate(domain, (void __user *)(arg + minsz));
+	printk("gzf %s ret=%d\n", __func__, ret);
+
+	return 0;
+}
+
+static int iommufd_vfio_set_pasid_table(struct iommufd_ctx *ictx, unsigned int cmd,
+				  void __user *arg)
+{
+	struct vfio_iommu_type1_set_pasid_table spt;
+	struct iommufd_ioas *ioas;
+	unsigned long minsz;
+	struct iommu_domain *domain;
+	printk("gzf %s ictx=%x\n", __func__, ictx);
+
+	minsz = offsetofend(struct vfio_iommu_type1_set_pasid_table, flags);
+	printk("gzf %s minsz=%ld\n", __func__, minsz);
+
+	if (copy_from_user(&spt, (void __user *)arg, minsz)) {
+		printk("1\n");
+		return -EFAULT;
+	}
+
+	if (spt.argsz < minsz) {
+		printk("2\n");
+		return -EINVAL;
+	}
+
+	ioas = get_compat_ioas(ictx);
+	printk("gzf %s ioas=%x\n", __func__, ioas);
+	if (IS_ERR(ioas)) {
+		printk("gzf %s ioas=%x error\n", __func__, ioas);
+		return PTR_ERR(ioas);
+	}
+
+	domain = xa_load(&ioas->iopt.domains, ioas->iopt.next_domain_id-1);
+	printk("domain=%x iopt=%x ioas->iopt->next_domain_id=%d\n", domain, ioas->iopt, ioas->iopt.next_domain_id);
+
+	if (spt.flags == VFIO_PASID_TABLE_FLAG_SET) {
+		int ret;
+		if (domain)
+			ret = iommu_uapi_attach_pasid_table(domain, (void __user *)(arg + minsz));
+		printk("VFIO_PASID_TABLE_FLAG_SET ret=%d\n", ret);
+		//return vfio_attach_pasid_table(iommu, arg + minsz);
+		return 0;
+	} else if (spt.flags == VFIO_PASID_TABLE_FLAG_UNSET) {
+		printk("VFIO_PASID_TABLE_FLAG_UNSET\n");
+		if (domain)
+			iommu_detach_pasid_table(domain);
+		//vfio_detach_pasid_table(iommu);
+		return 0;
+	}
+	return -EINVAL;
+
+#if 0
+	size_t minsz = offsetofend(struct vfio_iommu_type1_dma_unmap, size);
+	u32 supported_flags = VFIO_DMA_UNMAP_FLAG_ALL;
+	struct vfio_iommu_type1_dma_unmap unmap;
+	struct iommufd_ioas *ioas;
+	int rc;
+	printk("gzf %s\n", __func__);
+
+	if (copy_from_user(&unmap, arg, minsz))
+		return -EFAULT;
+
+	if (unmap.argsz < minsz || unmap.flags & ~supported_flags)
+		return -EINVAL;
+
+	ioas = get_compat_ioas(ictx);
+	if (IS_ERR(ioas))
+		return PTR_ERR(ioas);
+
+	if (unmap.flags & VFIO_DMA_UNMAP_FLAG_ALL)
+		rc = iopt_unmap_all(&ioas->iopt);
+	else
+		rc = iopt_unmap_iova(&ioas->iopt, unmap.iova, unmap.size);
+	iommufd_put_object(&ioas->obj);
+	return rc;
+#endif
+}
+
 int iommufd_vfio_check_extension(unsigned long type)
 {
 	switch (type) {
@@ -384,6 +497,8 @@ int iommufd_vfio_ioctl(struct iommufd_ctx *ictx, unsigned int cmd,
 {
 	void __user *uarg = (void __user *)arg;
 
+	printk("gzf %s ictx=%x cmd=0x%x\n", __func__, ictx, cmd);
+
 	switch (cmd) {
 	case VFIO_GET_API_VERSION:
 		return VFIO_API_VERSION;
@@ -397,6 +512,10 @@ int iommufd_vfio_ioctl(struct iommufd_ctx *ictx, unsigned int cmd,
 		return iommufd_vfio_map_dma(ictx, cmd, uarg);
 	case VFIO_IOMMU_UNMAP_DMA:
 		return iommufd_vfio_unmap_dma(ictx, cmd, uarg);
+	case VFIO_IOMMU_SET_PASID_TABLE:
+		return iommufd_vfio_set_pasid_table(ictx, cmd, uarg);
+	case VFIO_IOMMU_CACHE_INVALIDATE:
+		return iommufd_vfio_cache_invalidate(ictx, cmd, uarg);
 	case VFIO_IOMMU_DIRTY_PAGES:
 	default:
 		return -ENOIOCTLCMD;

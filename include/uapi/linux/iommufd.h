@@ -220,4 +220,23 @@ struct iommu_vfio_ioas {
 	__u16 __reserved;
 };
 #define IOMMU_VFIO_IOAS _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VFIO_IOAS)
+
+#if 0
+/*
+ * The SET operation passes a PASID table to the host while the
+ * UNSET operation detaches the one currently programmed. It is
+ * allowed to "SET" the table several times without unsetting as
+ * long as the table config does not stay IOMMU_PASID_CONFIG_TRANSLATE.
+ */
+struct iommu_vfio_set_pasid_table {
+	__u32	argsz;
+	__u32	flags;
+#define VFIO_PASID_TABLE_FLAG_SET	(1 << 0)
+#define VFIO_PASID_TABLE_FLAG_UNSET	(1 << 1)
+	struct iommu_pasid_table_config config; /* used on SET */
+};
+
+#define IOMMU_VFIO_SET_PASID_TABLE _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VFIO_SET_PASID_TABLE)
+
+#endif
 #endif

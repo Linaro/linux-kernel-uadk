@@ -33,9 +33,16 @@ static struct iopt_area *iopt_find_exact_area(struct io_pagetable *iopt,
 	struct iopt_area *area;
 
 	area = iopt_area_iter_first(iopt, iova, last_iova);
-	if (!area || !area->pages || iopt_area_iova(area) != iova ||
-	    iopt_area_last_iova(area) != last_iova)
-		return NULL;
+	printk("gzf %s area=%x iova=%x, iova_end=%x\n", __func__, area, iova, last_iova);
+	if (!area)
+		printk("area->pages=%x\n", area->pages);
+	if (iopt_area_iova(area) != iova)
+		printk("iopt_area_iova(area) =%x iova =%x\n", iopt_area_iova(area), iova);
+	if (iopt_area_last_iova(area) != last_iova)
+		printk("iopt_area_last_iova(area)=%x last_iova=%x\n", iopt_area_last_iova(area), last_iova);
+	//if (!area || !area->pages || iopt_area_iova(area) != iova ||
+	//    iopt_area_last_iova(area) != last_iova)
+	//	return NULL;
 	return area;
 }
 
@@ -66,6 +73,8 @@ static int iopt_alloc_iova(struct io_pagetable *iopt, unsigned long *iova,
 	unsigned long page_offset = uptr % PAGE_SIZE;
 	struct interval_tree_span_iter area_span;
 	unsigned long iova_alignment;
+
+	printk("gzf %s *iova=%x\n", __func__, *iova);
 
 	lockdep_assert_held(&iopt->iova_rwsem);
 
@@ -125,6 +134,7 @@ iopt_alloc_area(struct io_pagetable *iopt, struct iopt_pages *pages,
 	area = kzalloc(sizeof(*area), GFP_KERNEL);
 	if (!area)
 		return ERR_PTR(-ENOMEM);
+	printk("gzf %s input area=%x iova=%lx\n", __func__, area, iova);
 
 	area->iopt = iopt;
 	area->iommu_prot = iommu_prot;
@@ -141,6 +151,7 @@ iopt_alloc_area(struct io_pagetable *iopt, struct iopt_pages *pages,
 		rc = iopt_alloc_iova(iopt, &iova,
 				     (uintptr_t)pages->uptr + start_byte,
 				     length);
+		printk("output iova=%x\n", iova);
 		if (rc)
 			goto out_unlock;
 	}
@@ -176,6 +187,7 @@ iopt_alloc_area(struct io_pagetable *iopt, struct iopt_pages *pages,
 	 * initialized yet.
 	 */
 	area->node.start = iova;
+	printk("gzf %s area=%x iova=%lx\n", __func__, area, iova);
 	interval_tree_insert(&area->node, &area->iopt->area_itree);
 	up_write(&iopt->iova_rwsem);
 	return area;
@@ -200,6 +212,7 @@ static int iopt_finalize_area(struct iopt_area *area, struct iopt_pages *pages)
 
 	down_read(&area->iopt->domains_rwsem);
 	rc = iopt_area_fill_domains(area, pages);
+	printk("fill rc=%d\n", rc);
 	if (!rc) {
 		/*
 		 * area->pages must be set inside the domains_rwsem to ensure
@@ -774,6 +787,7 @@ int iopt_table_add_domain(struct io_pagetable *iopt,
 			goto out_reserved;
 	}
 
+	printk("gzf %s iopt->next_domain_id=%x domian=%x\n", __func__, iopt->next_domain_id, domain);
 	rc = xa_reserve(&iopt->domains, iopt->next_domain_id, GFP_KERNEL);
 	if (rc)
 		goto out_reserved;
@@ -787,6 +801,7 @@ int iopt_table_add_domain(struct io_pagetable *iopt,
 	iopt->next_domain_id++;
 	up_write(&iopt->iova_rwsem);
 	up_write(&iopt->domains_rwsem);
+	printk("gzf %s done iopt=%x iopt->next_domain_id=%x domian=%x\n", __func__, iopt, iopt->next_domain_id, domain);
 	return 0;
 out_release:
 	xa_release(&iopt->domains, iopt->next_domain_id);
@@ -819,6 +834,7 @@ void iopt_table_remove_domain(struct io_pagetable *iopt,
 	 * with the tail entry and shrinking the tail.
 	 */
 	iopt->next_domain_id--;
+	printk("gzf %s iopt->next_domain_id=%x domian=%x\n", __func__, iopt->next_domain_id, domain);
 	iter_domain = xa_erase(&iopt->domains, iopt->next_domain_id);
 	if (index != iopt->next_domain_id)
 		xa_store(&iopt->domains, index, iter_domain, GFP_KERNEL);

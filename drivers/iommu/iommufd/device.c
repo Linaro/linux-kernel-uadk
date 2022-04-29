@@ -209,6 +209,8 @@ int iommufd_device_attach(struct iommufd_device *idev, u32 *pt_id,
 	 * we are the first and need to attach the group. */
 	if (!iommufd_hw_pagetable_has_group(hwpt, idev->group)) {
 		phys_addr_t sw_msi_start = 0;
+		rc = iommu_enable_nesting(hwpt->domain);
+		printk("gzf hack set nesting rc=%d\n", rc);
 
 		rc = iommu_attach_group(hwpt->domain, idev->group);
 		if (rc)
@@ -229,6 +231,7 @@ int iommufd_device_attach(struct iommufd_device *idev, u32 *pt_id,
 
 	idev->hwpt = hwpt;
 	if (list_empty(&hwpt->devices)) {
+		printk("gzf %s hwpt->domain=%x\n", __func__, hwpt->domain);
 		rc = iopt_table_add_domain(&hwpt->ioas->iopt, hwpt->domain);
 		if (rc)
 			goto out_iova;

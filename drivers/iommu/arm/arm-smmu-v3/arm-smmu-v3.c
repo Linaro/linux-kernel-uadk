@@ -3012,7 +3012,7 @@ unlock:
 }
 
 static int
-arm_smmu_cache_invalidate(struct iommu_domain *domain, struct device *dev,
+arm_smmu_cache_invalidate(struct iommu_domain *domain,
 			  struct iommu_cache_invalidate_info *inv_info)
 {
 	struct arm_smmu_cmdq_ent cmd = {.opcode = CMDQ_OP_TLBI_NSNH_ALL};
@@ -3096,7 +3096,7 @@ arm_smmu_cache_invalidate(struct iommu_domain *domain, struct device *dev,
 	}
 
 	/* Global S1 invalidation */
-	cmd.tlbi.vmid   = smmu_domain->s2_cfg.vmid;
+	cmd.tlbi.vmid = smmu_domain->s2_cfg.vmid;
 	arm_smmu_cmdq_issue_cmd_with_sync(smmu, &cmd);
 	return 0;
 }

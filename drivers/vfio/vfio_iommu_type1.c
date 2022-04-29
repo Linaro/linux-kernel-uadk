@@ -2772,7 +2772,7 @@ static int vfio_cache_inv_fn(struct device *dev, void *data)
 	struct domain_capsule *dc = (struct domain_capsule *)data;
 	unsigned long arg = *(unsigned long *)dc->data;
 
-	return iommu_uapi_cache_invalidate(dc->domain, dev, (void __user *)arg);
+	return iommu_uapi_cache_invalidate(dc->domain, (void __user *)arg);
 }
 
 static int vfio_iommu_migration_build_caps(struct vfio_iommu *iommu,

@@ -1399,6 +1399,7 @@ struct vfio_iommu_type1_dirty_bitmap_get {
  */
 struct vfio_iommu_type1_set_pasid_table {
 	__u32	argsz;
+//	__u32	ioas_id;
 	__u32	flags;
 #define VFIO_PASID_TABLE_FLAG_SET	(1 << 0)
 #define VFIO_PASID_TABLE_FLAG_UNSET	(1 << 1)
@@ -1415,6 +1416,7 @@ struct vfio_iommu_type1_set_pasid_table {
  */
 struct vfio_iommu_type1_cache_invalidate {
 	__u32   argsz;
+//	__u32   ioas_id;
 	__u32   flags;
 	struct iommu_cache_invalidate_info info;
 };

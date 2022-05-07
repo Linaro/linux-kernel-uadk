@@ -2538,6 +2538,8 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 	struct arm_smmu_master *master;
 
+	printk("gzf %s\n", __func__);
+
 	if (!fwspec)
 		return -ENOENT;
 
@@ -2930,6 +2932,8 @@ static int arm_smmu_attach_pasid_table(struct iommu_domain *domain,
 	unsigned long flags;
 	int ret = -EINVAL;
 
+	printk("gzf %s\n", __func__);
+
 	if (cfg->format != IOMMU_PASID_FORMAT_SMMUV3)
 		return -EINVAL;
 
@@ -2946,6 +2950,7 @@ static int arm_smmu_attach_pasid_table(struct iommu_domain *domain,
 
 	if (smmu_domain->stage != ARM_SMMU_DOMAIN_NESTED)
 		goto out;
+	printk("gzf %s cfg->config=%d\n", __func__, cfg->config);
 
 	switch (cfg->config) {
 	case IOMMU_PASID_CONFIG_ABORT:
@@ -3019,6 +3024,8 @@ arm_smmu_cache_invalidate(struct iommu_domain *domain,
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
 
+	printk("gzf %s smmu_domain->stage=%d\n", __func__, smmu_domain->stage);
+
 	if (smmu_domain->stage != ARM_SMMU_DOMAIN_NESTED)
 		return -EINVAL;
 
@@ -3046,7 +3053,8 @@ arm_smmu_cache_invalidate(struct iommu_domain *domain,
 		return -EINVAL;
 
 	/* IOTLB invalidation */
-
+	printk("gzf %s inv_info->granularity=%d\n", __func__, inv_info->granularity);
+	
 	switch (inv_info->granularity) {
 	case IOMMU_INV_GRANU_PASID:
 	{

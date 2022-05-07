@@ -1966,6 +1966,7 @@ static int iommu_check_cache_invl_data(struct iommu_cache_invalidate_info *info)
 {
 	u32 mask;
 	int i;
+	printk("gzf %s\n", __func__);
 
 	if (info->version != IOMMU_CACHE_INVALIDATE_INFO_VERSION_1)
 		return -EINVAL;
@@ -2019,6 +2020,8 @@ int iommu_uapi_cache_invalidate(struct iommu_domain *domain, void __user *uinfo)
 	u32 minsz;
 	int ret;
 
+	printk("gzf %s\n", __func__);
+
 	if (unlikely(!domain->ops->cache_invalidate))
 		return -ENODEV;
 
@@ -2027,23 +2030,31 @@ int iommu_uapi_cache_invalidate(struct iommu_domain *domain, void __user *uinfo)
 	 * minimum size is the offset to the union.
 	 */
 	minsz = offsetof(struct iommu_cache_invalidate_info, granu);
+	printk("gzf %s minsz=%d\n", __func__, minsz);
 
 	/* Copy minsz from user to get flags and argsz */
 	if (copy_from_user(&inv_info, uinfo, minsz))
 		return -EFAULT;
+	printk("inv_info.argsz=%d minsz=%d\n", inv_info.argsz, minsz);
 
 	/* Fields before the variable size union are mandatory */
-	if (inv_info.argsz < minsz)
+	if (inv_info.argsz < minsz) {
+		printk("1 inv_info.argsz=%d minsz=%d\n", inv_info.argsz, minsz);
 		return -EINVAL;
+	}
 
 	/* PASID and address granu require additional info beyond minsz */
 	if (inv_info.granularity == IOMMU_INV_GRANU_PASID &&
-	    inv_info.argsz < offsetofend(struct iommu_cache_invalidate_info, granu.pasid_info))
+	    inv_info.argsz < offsetofend(struct iommu_cache_invalidate_info, granu.pasid_info)) {
+		printk("2\n");
 		return -EINVAL;
+	}
 
 	if (inv_info.granularity == IOMMU_INV_GRANU_ADDR &&
-	    inv_info.argsz < offsetofend(struct iommu_cache_invalidate_info, granu.addr_info))
+	    inv_info.argsz < offsetofend(struct iommu_cache_invalidate_info, granu.addr_info)) {
+		printk("3\n");
 		return -EINVAL;
+	}
 
 	/*
 	 * User might be using a newer UAPI header which has a larger data
@@ -2093,17 +2104,24 @@ int iommu_uapi_attach_pasid_table(struct iommu_domain *domain,
 	if (copy_from_user(&pasid_table_data, uinfo, minsz))
 		return -EFAULT;
 
+	printk("pasid_table_data.argsz=%d minsz=%d\n", pasid_table_data.argsz, minsz);
 	/* Fields before the variable size union are mandatory */
-	if (pasid_table_data.argsz < minsz)
+	if (pasid_table_data.argsz < minsz) {
+		printk("error pasid_table_data.argsz=%d minsz=%d\n", pasid_table_data.argsz, minsz);
 		return -EINVAL;
+	}
 
 	/* PASID and address granu require additional info beyond minsz */
-	if (pasid_table_data.version != PASID_TABLE_CFG_VERSION_1)
+	if (pasid_table_data.version != PASID_TABLE_CFG_VERSION_1) {
+		printk("gzf pasid_table_data.version=%d\n", pasid_table_data.version);
 		return -EINVAL;
+	}
 	if (pasid_table_data.format == IOMMU_PASID_FORMAT_SMMUV3 &&
 	    pasid_table_data.argsz <
-		offsetofend(struct iommu_pasid_table_config, vendor_data.smmuv3))
+		offsetofend(struct iommu_pasid_table_config, vendor_data.smmuv3)) {
+		printk("offsetofend(struct iommu_pasid_table_config, vendor_data.smmuv3)=%d\n", offsetofend(struct iommu_pasid_table_config, vendor_data.smmuv3));
 		return -EINVAL;
+	}
 
 	/*
 	 * User might be using a newer UAPI header which has a larger data
@@ -2117,8 +2135,11 @@ int iommu_uapi_attach_pasid_table(struct iommu_domain *domain,
 
 	/* Now the argsz is validated, check the content */
 	if (pasid_table_data.config < IOMMU_PASID_CONFIG_TRANSLATE ||
-	    pasid_table_data.config > IOMMU_PASID_CONFIG_ABORT)
+	    pasid_table_data.config > IOMMU_PASID_CONFIG_ABORT) {
+		printk("gzf pasid_table_data.config=%d\n", pasid_table_data.config);
+
 		return -EINVAL;
+	}
 
 	return domain->ops->attach_pasid_table(domain, &pasid_table_data);
 }

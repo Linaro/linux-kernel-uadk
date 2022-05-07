@@ -136,6 +136,7 @@ static int iommufd_vfio_unmap_dma(struct iommufd_ctx *ictx, unsigned int cmd,
 	unsigned long unmapped;
 	int rc;
 
+
 	if (copy_from_user(&unmap, arg, minsz))
 		return -EFAULT;
 
@@ -143,6 +144,7 @@ static int iommufd_vfio_unmap_dma(struct iommufd_ctx *ictx, unsigned int cmd,
 		return -EINVAL;
 
 	ioas = get_compat_ioas(ictx);
+	printk("gzf %s ioas=%x\n", __func__, ioas);
 	if (IS_ERR(ioas))
 		return PTR_ERR(ioas);
 
@@ -161,35 +163,42 @@ static int iommufd_vfio_cache_invalidate(struct iommufd_ctx *ictx, unsigned int 
 					 void __user *arg)
 {
 	struct vfio_iommu_type1_cache_invalidate cache_inv;
+	struct iommu_cache_invalidate_info inv_info;
 	struct iommufd_ioas *ioas;
-	unsigned long minsz;
+	unsigned long minsz, size;
 	struct iommu_domain *domain;
 	int ret;
 
-	printk("gzf %s ictx=%x\n", __func__, ictx);
-	
 	minsz = offsetofend(struct vfio_iommu_type1_cache_invalidate, flags);
+	printk("gzf %s minsz=%d\n", __func__, minsz);
 
 	if (copy_from_user(&cache_inv, (void __user *)arg, minsz))
 		return -EFAULT;
+	
+	size = offsetof(struct iommu_cache_invalidate_info, granu);
+	printk("gzf %s size=%d\n", __func__, size);
+	if (copy_from_user(&inv_info, (void __user *)(arg + minsz), size))
+		return -EFAULT;
+	printk("inv_info.argsz=%d size=%d\n", inv_info.argsz, size);
 
 	if (cache_inv.argsz < minsz || cache_inv.flags)
 		return -EINVAL;
 
-	minsz = offsetofend(struct vfio_iommu_type1_set_pasid_table, flags);
-	printk("gzf %s minsz=%ld\n", __func__, minsz);
+	ioas = container_of(iommufd_get_object(ictx, 1, //cache_inv.ioas_id,
+					       IOMMUFD_OBJ_IOAS),
+			    struct iommufd_ioas, obj);
 
-	ioas = get_compat_ioas(ictx);
+//	printk("gzf %s ictx=%x cache_inv->ioas_id=%d\n", __func__, ictx, cache_inv.ioas_id);
 	printk("gzf %s ioas=%x\n", __func__, ioas);
 	if (IS_ERR(ioas)) {
 		printk("gzf %s ioas=%x error\n", __func__, ioas);
 		return PTR_ERR(ioas);
 	}
-
+	//fixme how to get domain
 	domain = xa_load(&ioas->iopt.domains, ioas->iopt.next_domain_id-1);
 	printk("domain=%x iopt=%x ioas->iopt->next_domain_id=%d\n", domain, ioas->iopt, ioas->iopt.next_domain_id);
 
-	ret = iommu_uapi_cache_invalidate(domain, (void __user *)(arg + minsz));
+	ret = iommu_uapi_cache_invalidate(domain, arg + minsz);
 	printk("gzf %s ret=%d\n", __func__, ret);
 
 	return 0;
@@ -216,8 +225,11 @@ static int iommufd_vfio_set_pasid_table(struct iommufd_ctx *ictx, unsigned int c
 		printk("2\n");
 		return -EINVAL;
 	}
+//fixme, how to get ioas_id	
+	ioas = container_of(iommufd_get_object(ictx, 1, //spt.ioas_id,
+					       IOMMUFD_OBJ_IOAS),
+			    struct iommufd_ioas, obj);
 
-	ioas = get_compat_ioas(ictx);
 	printk("gzf %s ioas=%x\n", __func__, ioas);
 	if (IS_ERR(ioas)) {
 		printk("gzf %s ioas=%x error\n", __func__, ioas);
@@ -230,7 +242,7 @@ static int iommufd_vfio_set_pasid_table(struct iommufd_ctx *ictx, unsigned int c
 	if (spt.flags == VFIO_PASID_TABLE_FLAG_SET) {
 		int ret;
 		if (domain)
-			ret = iommu_uapi_attach_pasid_table(domain, (void __user *)(arg + minsz));
+			ret = iommu_uapi_attach_pasid_table(domain, arg + minsz);
 		printk("VFIO_PASID_TABLE_FLAG_SET ret=%d\n", ret);
 		//return vfio_attach_pasid_table(iommu, arg + minsz);
 		return 0;

@@ -2973,6 +2973,8 @@ static int vfio_iommu_type1_cache_invalidate(struct vfio_iommu *iommu,
 	unsigned long minsz;
 	int ret;
 
+	printk("gzf see? %s\n", __func__);
+
 	minsz = offsetofend(struct vfio_iommu_type1_cache_invalidate, flags);
 
 	if (copy_from_user(&cache_inv, (void __user *)arg, minsz))

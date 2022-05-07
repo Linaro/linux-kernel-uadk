@@ -246,9 +246,10 @@ int iommufd_ioas_unmap(struct iommufd_ucmd *ucmd)
 	int rc;
 
 	ioas = iommufd_get_ioas(ucmd, cmd->ioas_id);
+	printk("gzf %s ioas=%x\n", __func__, ioas);
 	if (IS_ERR(ioas))
 		return PTR_ERR(ioas);
-	printk("gzf %s 1 iova=%x, cmd->length=%x\n", __func__, cmd->iova,  cmd->length);
+	printk("gzf %s 1 iova=%x, cmd->length=%x  cmd->ioas_id=%d\n", __func__, cmd->iova,  cmd->length, cmd->ioas_id);
 
 	if (cmd->iova == 0 && cmd->length == U64_MAX) {
 		rc = iopt_unmap_all(&ioas->iopt, &unmapped);

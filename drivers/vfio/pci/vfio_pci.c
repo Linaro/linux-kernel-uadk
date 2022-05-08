@@ -106,6 +106,7 @@ static int vfio_pci_open_device(struct vfio_device *core_vdev)
 	struct pci_dev *pdev = vdev->pdev;
 	int ret;
 
+	printk("gzf %s !!\n", __func__);
 	ret = vfio_pci_core_enable(vdev);
 	if (ret)
 		return ret;

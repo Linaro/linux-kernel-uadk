@@ -379,6 +379,8 @@ vfio_pci_iommu_dev_fault_handler(struct iommu_fault *fault, void *data)
 	int ext_irq_index;
 	int ret = -EINVAL;
 
+	printk("gzf %s\n", __func__);
+
 	if (WARN_ON(!reg))
 		return ret;
 
@@ -410,8 +412,10 @@ unlock:
 		return -EINVAL;
 
 	mutex_lock(&vdev->igate);
-	if (vdev->ext_irqs[ext_irq_index].trigger)
+	if (vdev->ext_irqs[ext_irq_index].trigger) {
+		printk("eventfd_signal\n");
 		eventfd_signal(vdev->ext_irqs[ext_irq_index].trigger, 1);
+	}
 	mutex_unlock(&vdev->igate);
 	return 0;
 }
@@ -429,8 +433,10 @@ static int vfio_pci_dma_fault_init(struct vfio_pci_core_device *vdev)
 	if (!domain)
 		return 0;
 
-	if (!iommu_get_nesting(domain))
-		return 0;
+	printk("gzf %s no get_nesting\n", __func__);
+	// hack not add this check
+//	if (!iommu_get_nesting(domain))
+//		return 0;
 
 	mutex_init(&vdev->fault_queue_lock);
 
@@ -460,6 +466,7 @@ static int vfio_pci_dma_fault_init(struct vfio_pci_core_device *vdev)
 	header->nb_entries = DMA_FAULT_RING_LENGTH;
 	header->offset = PAGE_SIZE;
 
+	printk("gzf %s iommu_register_device_fault_handler\n", __func__);
 	ret = iommu_register_device_fault_handler(&vdev->pdev->dev,
 					vfio_pci_iommu_dev_fault_handler,
 					vdev);
@@ -514,12 +521,14 @@ static int vfio_pci_dma_fault_response_init(struct vfio_pci_core_device *vdev)
 	int ret;
 	size_t size;
 
+	printk("gzf %s\n", __func__);
+
 	domain = iommu_get_domain_for_dev(&vdev->pdev->dev);
 	if (!domain)
 		return 0;
-
-	if (!iommu_get_nesting(domain))
-		return 0;
+//	hack not add this checking
+//	if (!iommu_get_nesting(domain))
+//		return 0;
 
 	mutex_init(&vdev->fault_response_queue_lock);
 
@@ -575,6 +584,7 @@ int vfio_pci_core_enable(struct vfio_pci_core_device *vdev)
 	int ret;
 	u16 cmd;
 	u8 msix_pos;
+	printk("gzf %s\n", __func__);
 
 	ret = vfio_pci_dma_fault_init(vdev);
 	if (ret) {

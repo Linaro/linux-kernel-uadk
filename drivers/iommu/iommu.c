@@ -2688,6 +2688,7 @@ core_initcall(iommu_init);
 
 int iommu_enable_nesting(struct iommu_domain *domain)
 {
+	printk("gzf %s domain->type=%d IOMMU_DOMAIN_UNMANAGED=%d\n", __func__, domain->type, IOMMU_DOMAIN_UNMANAGED);
 	if (domain->type != IOMMU_DOMAIN_UNMANAGED)
 		return -EINVAL;
 	if (!domain->ops->enable_nesting)

@@ -210,7 +210,7 @@ int iommufd_device_attach(struct iommufd_device *idev, u32 *pt_id,
 	if (!iommufd_hw_pagetable_has_group(hwpt, idev->group)) {
 		phys_addr_t sw_msi_start = 0;
 		rc = iommu_enable_nesting(hwpt->domain);
-		printk("gzf hack set nesting rc=%d\n", rc);
+		printk("gzf %s hack set nesting rc=%d\n", __func__, rc);
 
 		rc = iommu_attach_group(hwpt->domain, idev->group);
 		if (rc)

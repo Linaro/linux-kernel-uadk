@@ -1242,6 +1242,7 @@ static int vfio_device_open_count(struct vfio_device *device)
 {
 	int ret = 0;
 
+	printk("gzf %s\n", __func__);
 	mutex_lock(&device->dev_set->lock);
 	device->open_count++;
 	if (device->open_count == 1 && device->ops->open_device) {
@@ -1262,6 +1263,7 @@ static bool vfio_device_in_container(struct vfio_device *device)
 
 static void vfio_device_close_decount(struct vfio_device *device)
 {
+	printk("gzf %s\n", __func__);
 	mutex_lock(&device->dev_set->lock);
 	if (device->open_count == 1) {
 		if (!vfio_device_in_container(device) &&
@@ -1281,6 +1283,7 @@ static int vfio_group_get_device_fd(struct vfio_group *group, char *buf)
 	int fdno;
 	int ret = 0;
 
+	printk("gzf %s\n", __func__);
 	if (0 == atomic_read(&group->container_users) ||
 	    (group->container && !group->container->iommu_driver) ||
 	    (!group->container && !group->iommufd))
@@ -1397,6 +1400,8 @@ static long vfio_group_fops_unl_ioctl(struct file *filep,
 	case VFIO_GROUP_GET_DEVICE_FD:
 	{
 		char *buf;
+		
+		printk("gzf %s VFIO_GROUP_GET_DEVICE_FD\n", __func__);
 
 		buf = strndup_user((const char __user *)arg, PAGE_SIZE);
 		if (IS_ERR(buf))
@@ -1480,6 +1485,7 @@ static int vfio_device_fops_open(struct inode *inode, struct file *filep)
 	struct vfio_device *device =
 		container_of(inode->i_cdev, struct vfio_device, cdev);
 	int ret;
+	printk("gzf %s\n", __func__);
 
 	if (!vfio_device_try_get(device))
 		return -ENODEV;

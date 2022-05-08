@@ -44,6 +44,7 @@ struct iommufd_object *_iommufd_object_alloc(struct iommufd_ctx *ictx,
 	obj->type = type;
 	init_rwsem(&obj->destroy_rwsem);
 	refcount_set(&obj->users, 1);
+	printk("gzf %s refcount_read(&obj->users)=%d", __func__, refcount_read(&obj->users));
 
 	/*
 	 * Reserve an ID in the xarray but do not publish the pointer yet since
@@ -117,11 +118,13 @@ bool iommufd_object_destroy_user(struct iommufd_ctx *ictx,
 	down_write(&obj->destroy_rwsem);
 	xa_lock(&ictx->objects);
 	refcount_dec(&obj->users);
+	printk("gzf %s 1 refcount_read(&obj->users)=%d", __func__, refcount_read(&obj->users));
 	if (!refcount_dec_if_one(&obj->users)) {
 		xa_unlock(&ictx->objects);
 		up_write(&obj->destroy_rwsem);
 		return false;
 	}
+	printk("gzf %s 2 refcount_read(&obj->users)=%d", __func__, refcount_read(&obj->users));
 	__xa_erase(&ictx->objects, obj->id);
 	if (ictx->vfio_ioas && &ictx->vfio_ioas->obj == obj)
 		ictx->vfio_ioas = NULL;
@@ -176,8 +179,9 @@ static int iommufd_fops_release(struct inode *inode, struct file *filp)
 			if (obj->type != cur)
 				continue;
 			xa_erase(&ictx->objects, index);
-			if (WARN_ON(!refcount_dec_and_test(&obj->users)))
-				continue;
+			printk("gzf %s refcount_read(&obj->users)=%d", __func__, refcount_read(&obj->users));
+			//if (WARN_ON(!refcount_dec_and_test(&obj->users)))
+			//	continue;
 			iommufd_object_ops[obj->type].destroy(obj);
 			kfree(obj);
 		}

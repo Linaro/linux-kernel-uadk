@@ -2885,6 +2885,8 @@ static int arm_smmu_enable_nesting(struct iommu_domain *domain)
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 	int ret = 0;
 
+	printk("gzf %s\n", __func__);
+
 	mutex_lock(&smmu_domain->init_mutex);
 	if (smmu_domain->smmu)
 		ret = -EPERM;

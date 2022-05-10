@@ -184,11 +184,13 @@ static int iommufd_vfio_cache_invalidate(struct iommufd_ctx *ictx, unsigned int 
 	if (cache_inv.argsz < minsz || cache_inv.flags)
 		return -EINVAL;
 
-	ioas = container_of(iommufd_get_object(ictx, 1, //cache_inv.ioas_id,
+	printk("gzf %s cache_inv.ioas_id=%d\n\n", __func__, cache_inv.ioas_id);
+
+	ioas = container_of(iommufd_get_object(ictx, cache_inv.ioas_id,
 					       IOMMUFD_OBJ_IOAS),
 			    struct iommufd_ioas, obj);
 
-//	printk("gzf %s ictx=%x cache_inv->ioas_id=%d\n", __func__, ictx, cache_inv.ioas_id);
+	printk("gzf %s ictx=%x cache_inv->ioas_id=%d\n", __func__, ictx, cache_inv.ioas_id);
 	printk("gzf %s ioas=%x\n", __func__, ioas);
 	if (IS_ERR(ioas)) {
 		printk("gzf %s ioas=%x error\n", __func__, ioas);
@@ -225,8 +227,11 @@ static int iommufd_vfio_set_pasid_table(struct iommufd_ctx *ictx, unsigned int c
 		printk("2\n");
 		return -EINVAL;
 	}
+	
+	printk("gzf %s spt.ioas_id=%d\n\n", __func__, spt.ioas_id);
+
 //fixme, how to get ioas_id	
-	ioas = container_of(iommufd_get_object(ictx, 1, //spt.ioas_id,
+	ioas = container_of(iommufd_get_object(ictx, spt.ioas_id,
 					       IOMMUFD_OBJ_IOAS),
 			    struct iommufd_ioas, obj);
 

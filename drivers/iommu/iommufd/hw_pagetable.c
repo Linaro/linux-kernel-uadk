@@ -111,14 +111,18 @@ iommufd_hw_pagetable_from_id(struct iommufd_ctx *ictx, u32 pt_id,
 	if (IS_ERR(obj))
 		return ERR_CAST(obj);
 
+	printk("gzf %s obj->type=%d\n", __func__, obj->type);
+
 	switch (obj->type) {
 	case IOMMUFD_OBJ_HW_PAGETABLE:
+		printk("IOMMUFD_OBJ_HW_PAGETABLE\n");
 		iommufd_put_object_keep_user(obj);
 		return container_of(obj, struct iommufd_hw_pagetable, obj);
 	case IOMMUFD_OBJ_IOAS: {
 		struct iommufd_ioas *ioas =
 			container_of(obj, struct iommufd_ioas, obj);
 		struct iommufd_hw_pagetable *hwpt;
+		printk("IOMMUFD_OBJ_IOAS\n");
 
 		hwpt = iommufd_hw_pagetable_auto_get(ictx, ioas, dev);
 		iommufd_put_object(obj);

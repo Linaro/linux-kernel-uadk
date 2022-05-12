@@ -167,6 +167,7 @@ static int iommufd_vfio_cache_invalidate(struct iommufd_ctx *ictx, unsigned int 
 	struct iommufd_ioas *ioas;
 	unsigned long minsz, size;
 	struct iommu_domain *domain;
+	struct iommufd_hw_pagetable *hwpt;
 	int ret;
 
 	minsz = offsetofend(struct vfio_iommu_type1_cache_invalidate, flags);
@@ -177,30 +178,32 @@ static int iommufd_vfio_cache_invalidate(struct iommufd_ctx *ictx, unsigned int 
 	
 	size = offsetof(struct iommu_cache_invalidate_info, granu);
 	printk("gzf %s size=%d\n", __func__, size);
-	if (copy_from_user(&inv_info, (void __user *)(arg + minsz), size))
-		return -EFAULT;
-	printk("inv_info.argsz=%d size=%d\n", inv_info.argsz, size);
+//	if (copy_from_user(&inv_info, (void __user *)(arg + minsz), size))
+//		return -EFAULT;
+//	printk("inv_info.argsz=%d size=%d\n", inv_info.argsz, size);
 
 	if (cache_inv.argsz < minsz || cache_inv.flags)
 		return -EINVAL;
 
-	printk("gzf %s cache_inv.ioas_id=%d\n\n", __func__, cache_inv.ioas_id);
+	printk("gzf %s cache_inv.hwpt_id=%d\n\n", __func__, cache_inv.hwpt_id);
 
-	ioas = container_of(iommufd_get_object(ictx, cache_inv.ioas_id,
-					       IOMMUFD_OBJ_IOAS),
-			    struct iommufd_ioas, obj);
+//	ioas = container_of(iommufd_get_object(ictx, cache_inv.ioas_id,
+//					       IOMMUFD_OBJ_IOAS),
+//			    struct iommufd_ioas, obj);
+	hwpt = iommufd_hw_pagetable_from_id(ictx, cache_inv.hwpt_id, NULL);
 
-	printk("gzf %s ictx=%x cache_inv->ioas_id=%d\n", __func__, ictx, cache_inv.ioas_id);
+//	printk("gzf %s ictx=%x cache_inv->ioas_id=%d\n", __func__, ictx, cache_inv.ioas_id);
 	printk("gzf %s ioas=%x\n", __func__, ioas);
 	if (IS_ERR(ioas)) {
 		printk("gzf %s ioas=%x error\n", __func__, ioas);
 		return PTR_ERR(ioas);
 	}
 	//fixme how to get domain
-	domain = xa_load(&ioas->iopt.domains, ioas->iopt.next_domain_id-1);
-	printk("domain=%x iopt=%x ioas->iopt->next_domain_id=%d\n", domain, ioas->iopt, ioas->iopt.next_domain_id);
+//	domain = xa_load(&ioas->iopt.domains, ioas->iopt.next_domain_id-1);
+//	printk("domain=%x iopt=%x ioas->iopt->next_domain_id=%d\n", domain, ioas->iopt, ioas->iopt.next_domain_id);
+//	printk("hwpt->domain=%x\n", hwpt->domain);
 
-	ret = iommu_uapi_cache_invalidate(domain, arg + minsz);
+	ret = iommu_uapi_cache_invalidate(hwpt->domain, arg + minsz);
 	printk("gzf %s ret=%d\n", __func__, ret);
 
 	return 0;
@@ -213,6 +216,7 @@ static int iommufd_vfio_set_pasid_table(struct iommufd_ctx *ictx, unsigned int c
 	struct iommufd_ioas *ioas;
 	unsigned long minsz;
 	struct iommu_domain *domain;
+	struct iommufd_hw_pagetable *hwpt;
 	printk("gzf %s ictx=%x\n", __func__, ictx);
 
 	minsz = offsetofend(struct vfio_iommu_type1_set_pasid_table, flags);
@@ -227,10 +231,13 @@ static int iommufd_vfio_set_pasid_table(struct iommufd_ctx *ictx, unsigned int c
 		printk("2\n");
 		return -EINVAL;
 	}
+	hwpt = iommufd_hw_pagetable_from_id(ictx, spt.hwpt_id, NULL);
+	domain = hwpt->domain;
 	
-	printk("gzf %s spt.ioas_id=%d\n\n", __func__, spt.ioas_id);
+//	printk("gzf %s spt.ioas_id=%d\n\n", __func__, spt.ioas_id);
 
 //fixme, how to get ioas_id	
+	/*
 	ioas = container_of(iommufd_get_object(ictx, spt.ioas_id,
 					       IOMMUFD_OBJ_IOAS),
 			    struct iommufd_ioas, obj);
@@ -243,6 +250,7 @@ static int iommufd_vfio_set_pasid_table(struct iommufd_ctx *ictx, unsigned int c
 
 	domain = xa_load(&ioas->iopt.domains, ioas->iopt.next_domain_id-1);
 	printk("domain=%x iopt=%x ioas->iopt->next_domain_id=%d\n", domain, ioas->iopt, ioas->iopt.next_domain_id);
+	*/
 
 	if (spt.flags == VFIO_PASID_TABLE_FLAG_SET) {
 		int ret;

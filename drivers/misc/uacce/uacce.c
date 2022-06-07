@@ -136,9 +136,16 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 	if (!q)
 		return -ENOMEM;
 
+	mutex_lock(&uacce->queues_lock);
+
+	if (!uacce->parent->driver) {
+		ret = -ENODEV;
+		goto out_with_lock;
+	}
+
 	ret = uacce_bind_queue(uacce, q);
 	if (ret)
-		goto out_with_mem;
+		goto out_with_lock;
 
 	q->uacce = uacce;
 
@@ -153,7 +160,6 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 	uacce->inode = inode;
 	q->state = UACCE_Q_INIT;
 
-	mutex_lock(&uacce->queues_lock);
 	list_add(&q->list, &uacce->queues);
 	mutex_unlock(&uacce->queues_lock);
 
@@ -161,7 +167,8 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 
 out_with_bond:
 	uacce_unbind_queue(q);
-out_with_mem:
+out_with_lock:
+	mutex_unlock(&uacce->queues_lock);
 	kfree(q);
 	return ret;
 }
@@ -171,10 +178,10 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 	struct uacce_queue *q = filep->private_data;
 
 	mutex_lock(&q->uacce->queues_lock);
-	list_del(&q->list);
-	mutex_unlock(&q->uacce->queues_lock);
 	uacce_put_queue(q);
 	uacce_unbind_queue(q);
+	list_del(&q->list);
+	mutex_unlock(&q->uacce->queues_lock);
 	kfree(q);
 
 	return 0;
@@ -513,10 +520,10 @@ void uacce_remove(struct uacce_device *uacce)
 		uacce_put_queue(q);
 		uacce_unbind_queue(q);
 	}
-	mutex_unlock(&uacce->queues_lock);
 
 	/* disable sva now since no opened queues */
 	uacce_disable_sva(uacce);
+	mutex_unlock(&uacce->queues_lock);
 
 	if (uacce->cdev)
 		cdev_device_del(uacce->cdev, &uacce->dev);

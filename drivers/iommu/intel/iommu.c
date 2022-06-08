@@ -4872,6 +4872,18 @@ static bool intel_iommu_is_attach_deferred(struct device *dev)
 	return translation_pre_enabled(info->iommu) && !info->domain;
 }
 
+static bool intel_iommu_get_nesting(struct iommu_domain *domain)
+{
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+	bool nesting;
+
+	spin_lock_irqsave(&device_domain_lock, flags);
+	nesting =  dmar_domain->flags & DOMAIN_FLAG_NESTING_MODE &&
+		   !(dmar_domain->flags & DOMAIN_FLAG_USE_FIRST_LEVEL);
+	spin_unlock_irqrestore(&device_domain_lock, flags);
+	return nesting;
+}
+
 /*
  * Check that the device does not live on an external facing PCI port that is
  * marked as untrusted. Such devices should not be able to apply quirks and
@@ -4933,6 +4945,7 @@ const struct iommu_ops intel_iommu_ops = {
 		.flush_iotlb_all        = intel_flush_iotlb_all,
 		.iotlb_sync		= intel_iommu_tlb_sync,
 		.iova_to_phys		= intel_iommu_iova_to_phys,
+		.get_nesting		= intel_iommu_get_nesting,
 		.free			= intel_iommu_domain_free,
 		.enforce_cache_coherency = intel_iommu_enforce_cache_coherency,
 	}

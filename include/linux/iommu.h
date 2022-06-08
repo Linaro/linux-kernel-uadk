@@ -277,6 +277,7 @@ struct iommu_ops {
  *                           including no-snoop TLPs on PCIe or other platform
  *                           specific mechanisms.
  * @enable_nesting: Enable nesting
+ * @get_nesting: get whether the domain uses nested stages
  * @set_pgtable_quirks: Set io page table quirks (IO_PGTABLE_QUIRK_*)
  * @free: Release the domain after use.
  * @attach_pasid_table: attach a pasid table
@@ -308,6 +309,7 @@ struct iommu_domain_ops {
 
 	bool (*enforce_cache_coherency)(struct iommu_domain *domain);
 	int (*enable_nesting)(struct iommu_domain *domain);
+	bool (*get_nesting)(struct iommu_domain *domain);
 	int (*set_pgtable_quirks)(struct iommu_domain *domain,
 				  unsigned long quirks);
 
@@ -679,6 +681,7 @@ struct iommu_sva *iommu_sva_bind_device(struct device *dev,
 					void *drvdata);
 void iommu_sva_unbind_device(struct iommu_sva *handle);
 u32 iommu_sva_get_pasid(struct iommu_sva *handle);
+bool iommu_get_nesting(struct iommu_domain *domain);
 
 int iommu_device_use_default_domain(struct device *dev);
 void iommu_device_unuse_default_domain(struct device *dev);
@@ -1074,6 +1077,11 @@ static inline void iommu_group_release_dma_owner(struct iommu_group *group)
 }
 
 static inline bool iommu_group_dma_owner_claimed(struct iommu_group *group)
+{
+	return false;
+}
+
+static inline bool iommu_get_nesting(struct iommu_domain *domain)
 {
 	return false;
 }

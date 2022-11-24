@@ -3455,3 +3455,19 @@ struct iommu_domain *iommu_domain_alloc_user(struct device *dev,
 	return ops->domain_alloc_user(dev, parent, user_data);
 }
 EXPORT_SYMBOL_NS_GPL(iommu_domain_alloc_user, IOMMUFD_INTERNAL);
+
+/**
+ * iommu_iotlb_sync_user - flush hardware caches for a user domain
+ * @domain - the user iommu domain
+ * @user_data - parameters for cache flush
+ *
+ * Any iommu driver which supports allocation of a user domain through
+ * iommu_domain_alloc_user() must provides the iotlb_sync_user domain
+ * op.
+ */
+void iommu_iotlb_sync_user(struct iommu_domain *domain, void *user_data)
+{
+	if (!WARN_ON(!domain->ops->iotlb_sync_user))
+		domain->ops->iotlb_sync_user(domain, user_data);
+}
+EXPORT_SYMBOL_NS_GPL(iommu_iotlb_sync_user, IOMMUFD_INTERNAL);

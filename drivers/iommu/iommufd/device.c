@@ -220,7 +220,7 @@ int iommufd_device_get_info(struct iommufd_ucmd *ucmd)
 		cmd->out_pgtbl_type_bitmap = iommuf_supported_pgtbl_types[ops->driver_type];
 #ifdef CONFIG_IOMMUFD_TEST
 	else
-		cmd->out_pgtbl_type_bitmap = 0;
+		cmd->out_pgtbl_type_bitmap = U64_MAX; // Pretend to support all types
 #endif
 
 	rc = iommufd_ucmd_respond(ucmd, sizeof(*cmd));

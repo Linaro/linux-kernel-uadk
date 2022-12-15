@@ -9,6 +9,7 @@
 
 #include "io_pagetable.h"
 #include "iommufd_private.h"
+#include "iommufd_test.h"
 
 static bool allow_unsafe_interrupts;
 module_param(allow_unsafe_interrupts, bool, S_IRUGO | S_IWUSR);
@@ -215,7 +216,12 @@ int iommufd_device_get_info(struct iommufd_ucmd *ucmd)
 
 	cmd->out_device_type = ops->driver_type;
 	cmd->data_len = data_len;
-	cmd->out_pgtbl_type_bitmap = iommuf_supported_pgtbl_types[ops->driver_type];
+	if (ops->driver_type != IOMMU_DEVICE_DATA_SELFTEST)
+		cmd->out_pgtbl_type_bitmap = iommuf_supported_pgtbl_types[ops->driver_type];
+#ifdef CONFIG_IOMMUFD_TEST
+	else
+		cmd->out_pgtbl_type_bitmap = 0;
+#endif
 
 	rc = iommufd_ucmd_respond(ucmd, sizeof(*cmd));
 

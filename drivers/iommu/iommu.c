@@ -3427,3 +3427,31 @@ struct iommu_domain *iommu_sva_domain_alloc(struct device *dev,
 
 	return domain;
 }
+
+/**
+ * iommu_domain_alloc_user - allocate a user domain for a device
+ * @dev - the device for which the domain is allocated
+ * @parent - an existing domain which the new domain is nested on,
+ *           NULL if not
+ * @user_data - user specified domain configurations
+ *
+ * Return the domain on success, otherwise NULL. The driver callback
+ * should set the domain type and ops according to the @user_data.
+ */
+struct iommu_domain *iommu_domain_alloc_user(struct device *dev,
+					     struct iommu_domain *parent,
+					     const void *user_data)
+{
+	const struct iommu_ops *ops;
+
+	if (!dev->iommu || !dev->iommu->iommu_dev)
+		return NULL;
+
+	ops = dev_iommu_ops(dev);
+
+	if (!ops->domain_alloc_user)
+		return NULL;
+
+	return ops->domain_alloc_user(dev, parent, user_data);
+}
+EXPORT_SYMBOL_NS_GPL(iommu_domain_alloc_user, IOMMUFD_INTERNAL);

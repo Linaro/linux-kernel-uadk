@@ -345,7 +345,7 @@ static int iommufd_device_do_attach(struct iommufd_device *idev,
 
 	lockdep_assert_held(&hwpt->ioas->mutex);
 
-	mutex_lock(&hwpt->devices_lock);
+	mutex_lock(hwpt->devices_lock);
 
 	/*
 	 * Try to upgrade the domain we have, it is an iommu driver bug to
@@ -382,13 +382,13 @@ static int iommufd_device_do_attach(struct iommufd_device *idev,
 	idev->hwpt = hwpt;
 	refcount_inc(&hwpt->obj.users);
 	list_add(&idev->devices_item, &hwpt->devices);
-	mutex_unlock(&hwpt->devices_lock);
+	mutex_unlock(hwpt->devices_lock);
 	return 0;
 
 out_detach:
 	iommu_detach_group(hwpt->domain, idev->group);
 out_unlock:
-	mutex_unlock(&hwpt->devices_lock);
+	mutex_unlock(hwpt->devices_lock);
 	return rc;
 }
 
@@ -512,12 +512,12 @@ void iommufd_device_detach(struct iommufd_device *idev)
 	struct iommufd_hw_pagetable *hwpt = idev->hwpt;
 
 	mutex_lock(&hwpt->ioas->mutex);
-	mutex_lock(&hwpt->devices_lock);
+	mutex_lock(hwpt->devices_lock);
 	list_del(&idev->devices_item);
 	iommufd_device_detach_ioas(idev, hwpt);
 	if (!iommufd_hw_pagetable_has_group(hwpt, idev->group))
 		iommu_detach_group(hwpt->domain, idev->group);
-	mutex_unlock(&hwpt->devices_lock);
+	mutex_unlock(hwpt->devices_lock);
 	mutex_unlock(&hwpt->ioas->mutex);
 
 	if (hwpt->auto_domain)

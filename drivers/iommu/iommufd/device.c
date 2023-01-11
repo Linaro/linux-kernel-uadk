@@ -133,6 +133,20 @@ void iommufd_device_unbind(struct iommufd_device *idev)
 }
 EXPORT_SYMBOL_NS_GPL(iommufd_device_unbind, IOMMUFD);
 
+static struct device *
+iommufd_obj_dev(struct iommufd_object *obj)
+{
+	struct device *dev = NULL;
+
+	if (obj->type == IOMMUFD_OBJ_DEVICE)
+		dev = container_of(obj, struct iommufd_device, obj)->dev;
+#ifdef CONFIG_IOMMUFD_TEST
+	else if (obj->type == IOMMUFD_OBJ_SELFTEST)
+		dev = iommufd_selftest_obj_to_dev(obj);
+#endif
+	return dev;
+}
+
 static const u64 iommuf_supported_pgtbl_types[] =  {
 	[IOMMU_DEVICE_DATA_INTEL_VTD] = 0,
 };
@@ -151,11 +165,15 @@ int iommufd_device_get_info(struct iommufd_ucmd *ucmd)
 		return -EOPNOTSUPP;
 
 	dev_obj = iommufd_get_object(ucmd->ictx, cmd->dev_id,
-				     IOMMUFD_OBJ_DEVICE);
+				     IOMMUFD_OBJ_ANY);
 	if (IS_ERR(dev_obj))
 		return PTR_ERR(dev_obj);
 
-	dev = container_of(dev_obj, struct iommufd_device, obj)->dev;
+	dev = iommufd_obj_dev(dev_obj);
+	if (!dev) {
+		rc = -EINVAL;
+		goto out_put;
+	}
 
 	ops = dev_iommu_ops(dev);
 	if (!ops || !ops->hw_info) {

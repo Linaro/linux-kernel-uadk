@@ -134,8 +134,7 @@ void iommufd_device_unbind(struct iommufd_device *idev)
 }
 EXPORT_SYMBOL_NS_GPL(iommufd_device_unbind, IOMMUFD);
 
-static struct device *
-iommufd_obj_dev(struct iommufd_object *obj)
+struct device *iommufd_obj_dev(struct iommufd_object *obj)
 {
 	struct device *dev = NULL;
 
@@ -148,8 +147,8 @@ iommufd_obj_dev(struct iommufd_object *obj)
 	return dev;
 }
 
-static const u64 iommuf_supported_pgtbl_types[] =  {
-	[IOMMU_DEVICE_DATA_INTEL_VTD] = 0,
+const u64 iommuf_supported_pgtbl_types[] =  {
+	[IOMMU_DEVICE_DATA_INTEL_VTD] = BIT_ULL(IOMMU_PGTBL_TYPE_NONE),
 };
 
 int iommufd_device_get_info(struct iommufd_ucmd *ucmd)

@@ -5,6 +5,7 @@
 #include <linux/slab.h>
 #include <linux/iommu.h>
 #include <linux/irqdomain.h>
+#include <uapi/linux/iommufd.h>
 
 #include "io_pagetable.h"
 #include "iommufd_private.h"
@@ -131,6 +132,81 @@ void iommufd_device_unbind(struct iommufd_device *idev)
 	WARN_ON(!was_destroyed);
 }
 EXPORT_SYMBOL_NS_GPL(iommufd_device_unbind, IOMMUFD);
+
+static const u64 iommuf_supported_pgtbl_types[] =  {
+	[IOMMU_DEVICE_DATA_INTEL_VTD] = 0,
+};
+
+int iommufd_device_get_info(struct iommufd_ucmd *ucmd)
+{
+	struct iommu_device_info *cmd = ucmd->cmd;
+	struct iommufd_object *dev_obj;
+	struct device *dev;
+	const struct iommu_ops *ops;
+	void *data;
+	unsigned int length, data_len;
+	int rc;
+
+	if (cmd->flags || cmd->__reserved || !cmd->data_len)
+		return -EOPNOTSUPP;
+
+	dev_obj = iommufd_get_object(ucmd->ictx, cmd->dev_id,
+				     IOMMUFD_OBJ_DEVICE);
+	if (IS_ERR(dev_obj))
+		return PTR_ERR(dev_obj);
+
+	dev = container_of(dev_obj, struct iommufd_device, obj)->dev;
+
+	ops = dev_iommu_ops(dev);
+	if (!ops || !ops->hw_info) {
+		rc = -EOPNOTSUPP;
+		goto out_put;
+	}
+
+	if (ops->driver_type == IOMMU_DEVICE_DATA_NONE) {
+		rc = -EOPNOTSUPP;
+		goto out_put;
+	}
+
+	rc = ops->hw_info(dev, &data, &data_len);
+	if (rc)
+		goto out_put;
+
+	length = (cmd->data_len > data_len) ? data_len : cmd->data_len;
+	if (copy_to_user(u64_to_user_ptr(cmd->data_ptr), data, length)) {
+		rc = -EFAULT;
+		goto out_free_data;
+	}
+
+	/*
+	 * Zero the trailing bytes for userspace if the buffer is bigger
+	 * than the data size kernel actually has.
+	 */
+	if (length < cmd->data_len) {
+		u64 ptr = cmd->data_ptr + length;
+		u32 index;
+		u8 zero = 0;
+
+		for (index = 0; index < cmd->data_len - length; index++) {
+			if (copy_to_user(u64_to_user_ptr(ptr + index), &zero, 1)) {
+				rc = -EFAULT;
+				goto out_free_data;
+			}
+		}
+	}
+
+	cmd->out_device_type = ops->driver_type;
+	cmd->data_len = data_len;
+	cmd->out_pgtbl_type_bitmap = iommuf_supported_pgtbl_types[ops->driver_type];
+
+	rc = iommufd_ucmd_respond(ucmd, sizeof(*cmd));
+
+out_free_data:
+	kfree(data);
+out_put:
+	iommufd_put_object(dev_obj);
+	return rc;
+}
 
 static int iommufd_device_setup_msi(struct iommufd_device *idev,
 				    struct iommufd_hw_pagetable *hwpt,

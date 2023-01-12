@@ -253,6 +253,7 @@ union ucmd_buffer {
 	struct iommu_ioas_alloc alloc;
 	struct iommu_ioas_allow_iovas allow_iovas;
 	struct iommu_ioas_iova_ranges iova_ranges;
+	struct iommu_device_info info;
 	struct iommu_ioas_map map;
 	struct iommu_ioas_unmap unmap;
 #ifdef CONFIG_IOMMUFD_TEST
@@ -286,6 +287,8 @@ static const struct iommufd_ioctl_op iommufd_ioctl_ops[] = {
 		 src_iova),
 	IOCTL_OP(IOMMU_IOAS_IOVA_RANGES, iommufd_ioas_iova_ranges,
 		 struct iommu_ioas_iova_ranges, out_iova_alignment),
+	IOCTL_OP(IOMMU_DEVICE_GET_INFO, iommufd_device_get_info, struct iommu_device_info,
+		 __reserved),
 	IOCTL_OP(IOMMU_IOAS_MAP, iommufd_ioas_map, struct iommu_ioas_map,
 		 iova),
 	IOCTL_OP(IOMMU_IOAS_UNMAP, iommufd_ioas_unmap, struct iommu_ioas_unmap,

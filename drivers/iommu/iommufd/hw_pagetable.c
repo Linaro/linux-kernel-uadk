@@ -19,29 +19,28 @@ void iommufd_hw_pagetable_destroy(struct iommufd_object *obj)
 	mutex_destroy(&hwpt->devices_lock);
 }
 
-/**
- * iommufd_hw_pagetable_alloc() - Get an iommu_domain for a device
- * @ictx: iommufd context
- * @ioas: IOAS to associate the domain with
- * @dev: Device to get an iommu_domain for
- *
- * Allocate a new iommu_domain and return it as a hw_pagetable.
- */
-struct iommufd_hw_pagetable *
-iommufd_hw_pagetable_alloc(struct iommufd_ctx *ictx, struct iommufd_ioas *ioas,
-			   struct device *dev)
+static struct iommufd_hw_pagetable *
+__iommufd_hw_pagetable_alloc(struct iommufd_ctx *ictx,
+			     struct iommufd_ioas *ioas,
+			     struct device *dev,
+			     struct iommufd_hw_pagetable *parent,
+			     void *user_data)
 {
+	struct iommu_domain *parent_domain = NULL;
 	struct iommufd_hw_pagetable *hwpt;
 	int rc;
 
-	if (WARN_ON(!ioas))
+	if (WARN_ON(!ioas && !parent))
 		return ERR_PTR(-EINVAL);
 
 	hwpt = iommufd_object_alloc(ictx, hwpt, IOMMUFD_OBJ_HW_PAGETABLE);
 	if (IS_ERR(hwpt))
 		return hwpt;
 
-	hwpt->domain = iommu_domain_alloc_user(dev, NULL, NULL);
+	if (parent)
+		parent_domain = parent->domain;
+
+	hwpt->domain = iommu_domain_alloc_user(dev, parent_domain, user_data);
 	if (!hwpt->domain) {
 		rc = -ENOMEM;
 		goto out_abort;
@@ -58,4 +57,19 @@ iommufd_hw_pagetable_alloc(struct iommufd_ctx *ictx, struct iommufd_ioas *ioas,
 out_abort:
 	iommufd_object_abort(ictx, &hwpt->obj);
 	return ERR_PTR(rc);
+}
+
+/**
+ * iommufd_hw_pagetable_alloc() - Get an iommu_domain for a device
+ * @ictx: iommufd context
+ * @ioas: IOAS to associate the domain with
+ * @dev: Device to get an iommu_domain for
+ *
+ * Allocate a new iommu_domain and return it as a hw_pagetable.
+ */
+struct iommufd_hw_pagetable *
+iommufd_hw_pagetable_alloc(struct iommufd_ctx *ictx, struct iommufd_ioas *ioas,
+			   struct device *dev)
+{
+	return __iommufd_hw_pagetable_alloc(ictx, ioas, dev, NULL, NULL);
 }

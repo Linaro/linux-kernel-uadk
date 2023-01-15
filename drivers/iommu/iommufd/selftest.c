@@ -154,9 +154,6 @@ static struct iommu_domain *mock_domain_alloc_user(struct device *dev,
 	struct mock_iommu_domain *mock_parent;
 	struct mock_iommu_domain *mock;
 
-	if (alloc)
-		return NULL;
-
 	if (!parent || !alloc || !(alloc->flags & IOMMU_TEST_FLAG_NESTED))
 		return mock_domain_alloc(IOMMU_DOMAIN_UNMANAGED);
 

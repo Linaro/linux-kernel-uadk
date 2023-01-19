@@ -256,6 +256,11 @@ union ucmd_buffer {
 	struct iommu_device_info info;
 	struct iommu_ioas_map map;
 	struct iommu_ioas_unmap unmap;
+	// add
+	struct iommu_option option;
+	struct iommu_vfio_ioas ioas;
+	struct iommu_hwpt_alloc hwpt_alloc;
+
 	/*
 	 * data_type specific structure used in the cache invalidation
 	 * path.

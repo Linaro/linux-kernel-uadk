@@ -2043,24 +2043,26 @@ static bool arm_smmu_capable(struct device *dev, enum iommu_cap cap)
 	}
 }
 
-static int arm_smmu_hw_info(struct device *dev, struct iommu_hw_info *info)
+static int arm_smmu_hw_info(struct device *dev, void **data, u32 *length)
 {
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
-	struct iommu_device_info_smmuv3 *data = info->data;
+	struct iommu_device_info_smmuv3 *info;
 	void *base_idr;
 	int i;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
 
 	if (!master || !master->smmu)
 		return -ENODEV;
 
-	if (!data || info->data_len != sizeof(struct iommu_device_info_smmuv3))
-		return -EINVAL;
-
-	info->device_type = IOMMU_DEVICE_DATA_ARM_SMMUV3;
-
 	base_idr = master->smmu->base + ARM_SMMU_IDR0;
 	for (i = 0; i <= 5; i++)
-		data->idr[i] = readl_relaxed(base_idr + 0x4 * i);
+		info->idr[i] = readl_relaxed(base_idr + 0x4 * i);
+
+	*data = info;
+	*length = sizeof(*info);
 
 	return 0;
 }
@@ -2098,14 +2100,11 @@ static struct iommu_domain *arm_smmu_domain_alloc(unsigned type)
 
 static struct iommu_domain *
 arm_smmu_domain_alloc_user(struct device *dev, struct iommu_domain *s2_domain,
-			   void *user_data, size_t data_len)
+			   const void *user_data)
 {
-	struct iommu_hwpt_arm_smmuv3 *alloc = user_data;
+	const struct iommu_hwpt_arm_smmuv3 *alloc = user_data;
 	struct arm_smmu_domain *s2, *smmu_domain;
 	struct iommu_domain *domain;
-
-	if (user_data && data_len != sizeof(*alloc))
-		return NULL;
 
 	if (!s2_domain) {
 		domain = arm_smmu_domain_alloc(IOMMU_DOMAIN_UNMANAGED);
@@ -2707,7 +2706,7 @@ static void arm_smmu_iotlb_sync(struct iommu_domain *domain,
 }
 
 static void arm_smmu_iotlb_sync_user(struct iommu_domain *domain,
-				     void *user_data, size_t data_len)
+				     void *user_data)
 {
 	struct iommu_hwpt_invalidate_arm_smmuv3 *inv_info = user_data;
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
@@ -2722,9 +2721,6 @@ static void arm_smmu_iotlb_sync_user(struct iommu_domain *domain,
 		return;
 
 	if (!smmu || !inv_info)
-		return;
-
-	if (inv_info && data_len != sizeof(*inv_info))
 		return;
 
 	cmd.opcode = inv_info->opcode;
@@ -3118,6 +3114,7 @@ static struct iommu_ops arm_smmu_ops = {
 	.dev_disable_feat	= arm_smmu_dev_disable_feature,
 	.page_response		= arm_smmu_page_response,
 	.def_domain_type	= arm_smmu_def_domain_type,
+	.driver_type		= IOMMU_DEVICE_DATA_ARM_SMMUV3,
 	.pgsize_bitmap		= -1UL, /* Restricted during device attach */
 	.owner			= THIS_MODULE,
 	.default_domain_ops = &(const struct iommu_domain_ops) {

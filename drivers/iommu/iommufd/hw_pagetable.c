@@ -479,7 +479,7 @@ int iommufd_hwpt_alloc(struct iommufd_ucmd *ucmd)
 
 		cmd->out_fault_fd = hwpt->s1_fault_data.fault_fd;
 
-		rc = iommu_register_device_fault_handler(idev->dev,
+		rc = iommu_register_device_fault_handler(dev,
 				iommufd_hw_pagetable_dev_fault_handler, hwpt);
 	}
 
@@ -566,20 +566,25 @@ out_put_hwpt:
 int iommufd_hwpt_page_response(struct iommufd_ucmd *ucmd)
 {
 	struct iommu_hwpt_page_response *cmd = ucmd->cmd;
-	struct iommufd_ctx *ictx = ucmd->ictx;
-	struct iommufd_device *idev;
+	struct iommufd_object *dev_obj;
+	struct device *dev;
 	int rc = 0;
 
 	if (cmd->flags)
 		return -EOPNOTSUPP;
 
-	idev = iommufd_device_get_by_id(ictx, cmd->dev_id);
-	if (IS_ERR(idev))
-		return PTR_ERR(idev);
+	dev_obj = iommufd_get_object(ucmd->ictx, cmd->dev_id,
+				     IOMMUFD_OBJ_ANY);
+	if (IS_ERR(dev_obj))
+		return PTR_ERR(dev_obj);
 
-	rc = iommu_page_response(idev->dev, &cmd->resp);
+	dev = iommufd_obj_dev(dev_obj);
+	if (!dev)
+		return -EINVAL;
 
-	iommufd_put_object(&idev->obj);
+	rc = iommu_page_response(dev, &cmd->resp);
+
+	iommufd_put_object(dev_obj);
 	return rc;
 }
 

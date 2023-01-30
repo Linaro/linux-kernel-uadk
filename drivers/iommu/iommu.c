@@ -3459,6 +3459,7 @@ struct iommu_domain *iommu_domain_alloc_user(struct device *dev,
 					     const void *user_data)
 {
 	const struct iommu_ops *ops;
+	struct iommu_domain *domain;
 
 	if (!dev->iommu || !dev->iommu->iommu_dev)
 		return NULL;
@@ -3468,7 +3469,17 @@ struct iommu_domain *iommu_domain_alloc_user(struct device *dev,
 	if (!ops->domain_alloc_user)
 		return NULL;
 
-	return ops->domain_alloc_user(dev, parent, user_data);
+	domain = ops->domain_alloc_user(dev, parent, user_data);
+
+	if (parent)
+		domain->type = IOMMU_DOMAIN_NESTED;
+	else
+		domain->type = IOMMU_DOMAIN_UNMANAGED;
+
+	if (!domain->ops)
+		domain->ops = ops->default_domain_ops;
+
+	return domain;
 }
 EXPORT_SYMBOL_NS_GPL(iommu_domain_alloc_user, IOMMUFD_INTERNAL);
 

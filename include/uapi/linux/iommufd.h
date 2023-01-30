@@ -380,6 +380,7 @@ struct iommu_device_info_vtd {
 enum iommu_pgtbl_types {
 	IOMMU_PGTBL_TYPE_NONE,
 	IOMMU_PGTBL_TYPE_VTD_S1,
+	IOMMU_PGTBL_TYPE_ARM_S1,
 };
 
 /**

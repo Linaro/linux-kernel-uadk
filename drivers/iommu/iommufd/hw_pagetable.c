@@ -349,6 +349,7 @@ iommufd_hw_pagetable_alloc(struct iommufd_ctx *ictx, struct iommufd_ioas *ioas,
 static const u32 iommufd_hwpt_info_size[] = {
 	[IOMMU_PGTBL_TYPE_NONE] = 0,
 	[IOMMU_PGTBL_TYPE_VTD_S1] = sizeof(struct iommu_hwpt_intel_vtd),
+	[IOMMU_PGTBL_TYPE_ARM_S1] = sizeof(struct iommu_hwpt_arm_smmuv3),
 };
 
 /* Return true if type is supported, otherwise false */
@@ -507,6 +508,7 @@ out_put_dev:
 
 static u32 iommufd_hwpt_invalidate_info_size[] = {
 	[IOMMU_PGTBL_TYPE_VTD_S1] = sizeof(struct iommu_hwpt_invalidate_intel_vtd),
+	[IOMMU_PGTBL_TYPE_ARM_S1] = sizeof(struct iommu_hwpt_invalidate_arm_smmuv3),
 };
 
 int iommufd_hwpt_invalidate(struct iommufd_ucmd *ucmd)

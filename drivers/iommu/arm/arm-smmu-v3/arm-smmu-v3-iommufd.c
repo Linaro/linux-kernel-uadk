@@ -191,6 +191,14 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 	if (smmu_parent->smmu != master->smmu)
 		return ERR_PTR(-EINVAL);
 
+	/*
+	 * FORCE_SYNC is not set with FEAT_NESTING. Some study of the exact HW
+	 * defect is needed to determine if arm_vsmmu_cache_invalidate() needs
+	 * any change to remove this.
+	 */
+	if (WARN_ON(master->smmu->options & ARM_SMMU_OPT_CMDQ_FORCE_SYNC))
+		return ERR_PTR(-EOPNOTSUPP);
+
 	ret = iommu_copy_struct_from_user(&arg, user_data,
 					  IOMMU_HWPT_DATA_ARM_SMMUV3, ste);
 	if (ret)
@@ -213,6 +221,127 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 	return &nested_domain->domain;
 }
 
+static int arm_vsmmu_vsid_to_sid(struct arm_vsmmu *vsmmu, u32 vsid, u32 *sid)
+{
+	XA_STATE(xas, &vsmmu->core.vdevs, (unsigned long)vsid);
+	struct arm_smmu_master *master;
+	struct device *dev;
+	int ret = 0;
+
+	xa_lock(&vsmmu->core.vdevs);
+	dev = vdev_to_dev(xas_load(&xas));
+	if (!dev) {
+		ret = -EIO;
+		goto unlock;
+	}
+	master = dev_iommu_priv_get(dev);
+
+	/* At this moment, iommufd only supports PCI device that has one SID */
+	if (sid)
+		*sid = master->streams[0].id;
+unlock:
+	xa_unlock(&vsmmu->core.vdevs);
+	return ret;
+}
+
+/*
+ * Convert, in place, the raw invalidation command into an internal format that
+ * can be passed to arm_smmu_cmdq_issue_cmdlist(). Internally commands are
+ * stored in CPU endian.
+ *
+ * Enforce the VMID or SID on the command.
+ */
+static int
+arm_vsmmu_convert_user_cmd(struct arm_vsmmu *vsmmu,
+			   struct iommu_viommu_arm_smmuv3_invalidate *cmd)
+{
+	cmd->cmd[0] = le64_to_cpu(cmd->cmd[0]);
+	cmd->cmd[1] = le64_to_cpu(cmd->cmd[1]);
+
+	switch (cmd->cmd[0] & CMDQ_0_OP) {
+	case CMDQ_OP_TLBI_NSNH_ALL:
+		/* Convert to NH_ALL */
+		cmd->cmd[0] = CMDQ_OP_TLBI_NH_ALL |
+			      FIELD_PREP(CMDQ_TLBI_0_VMID, vsmmu->vmid);
+		cmd->cmd[1] = 0;
+		break;
+	case CMDQ_OP_TLBI_NH_VA:
+	case CMDQ_OP_TLBI_NH_VAA:
+	case CMDQ_OP_TLBI_NH_ALL:
+	case CMDQ_OP_TLBI_NH_ASID:
+		cmd->cmd[0] &= ~CMDQ_TLBI_0_VMID;
+		cmd->cmd[0] |= FIELD_PREP(CMDQ_TLBI_0_VMID, vsmmu->vmid);
+		break;
+	case CMDQ_OP_ATC_INV:
+	case CMDQ_OP_CFGI_CD:
+	case CMDQ_OP_CFGI_CD_ALL:
+		u32 sid, vsid = FIELD_GET(CMDQ_CFGI_0_SID, cmd->cmd[0]);
+
+		if (arm_vsmmu_vsid_to_sid(vsmmu, vsid, &sid))
+			return -EIO;
+		cmd->cmd[0] &= ~CMDQ_CFGI_0_SID;
+		cmd->cmd[0] |= FIELD_PREP(CMDQ_CFGI_0_SID, sid);
+		break;
+	default:
+		return -EIO;
+	}
+	return 0;
+}
+
+static int arm_vsmmu_cache_invalidate(struct iommufd_viommu *viommu,
+				      struct iommu_user_data_array *array)
+{
+	struct arm_vsmmu *vsmmu = container_of(viommu, struct arm_vsmmu, core);
+	struct iommu_viommu_arm_smmuv3_invalidate *last;
+	struct iommu_viommu_arm_smmuv3_invalidate *cmds;
+	struct iommu_viommu_arm_smmuv3_invalidate *cur;
+	struct iommu_viommu_arm_smmuv3_invalidate *end;
+	struct arm_smmu_device *smmu = vsmmu->smmu;
+	int ret;
+
+	cmds = kcalloc(array->entry_num, sizeof(*cmds), GFP_KERNEL);
+	if (!cmds)
+		return -ENOMEM;
+	cur = cmds;
+	end = cmds + array->entry_num;
+
+	static_assert(sizeof(*cmds) == 2 * sizeof(u64));
+	ret = iommu_copy_struct_from_full_user_array(
+		cmds, sizeof(*cmds), array,
+		IOMMU_VIOMMU_INVALIDATE_DATA_ARM_SMMUV3);
+	if (ret)
+		goto out;
+
+	last = cmds;
+	while (cur != end) {
+		ret = arm_vsmmu_convert_user_cmd(vsmmu, cur);
+		if (ret)
+			goto out;
+
+		/* FIXME work in blocks of CMDQ_BATCH_ENTRIES and copy each block? */
+		cur++;
+		if (cur != end && (cur - last) != CMDQ_BATCH_ENTRIES - 1)
+			continue;
+
+		/* FIXME always uses the main cmdq rather than trying to group by type */
+		ret = arm_smmu_cmdq_issue_cmdlist(smmu, &smmu->cmdq, last->cmd,
+						  cur - last, true);
+		if (ret) {
+			cur--;
+			goto out;
+		}
+		last = cur;
+	}
+out:
+	array->entry_num = cur - cmds;
+	kfree(cmds);
+	return ret;
+}
+
+const struct iommufd_viommu_ops arm_vsmmu_ops = {
+	.cache_invalidate = arm_vsmmu_cache_invalidate,
+};
+
 struct iommufd_viommu *
 arm_vsmmu_alloc(struct iommu_device *iommu_dev, struct iommu_domain *parent,
 		struct iommufd_ctx *ictx, unsigned int viommu_type)
@@ -225,7 +354,7 @@ arm_vsmmu_alloc(struct iommu_device *iommu_dev, struct iommu_domain *parent,
 	if (viommu_type != IOMMU_VIOMMU_TYPE_ARM_SMMUV3)
 		return ERR_PTR(-EOPNOTSUPP);
 
-	vsmmu = iommufd_viommu_alloc(ictx, arm_vsmmu, core, NULL);
+	vsmmu = iommufd_viommu_alloc(ictx, arm_vsmmu, core, &arm_vsmmu_ops);
 	if (IS_ERR(vsmmu))
 		return ERR_CAST(vsmmu);
 

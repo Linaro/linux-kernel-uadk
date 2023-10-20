@@ -33,6 +33,9 @@ static const char *const online_type_to_str[] = {
 	[MMOP_ONLINE] = "online",
 	[MMOP_ONLINE_KERNEL] = "online_kernel",
 	[MMOP_ONLINE_MOVABLE] = "online_movable",
+#ifdef CONFIG_ZONE_EXTMEM
+	[MMOP_ONLINE_EXTMEM] = "online_extmem",
+#endif
 };
 
 int mhp_online_type_from_str(const char *str)
@@ -371,6 +374,9 @@ static ssize_t state_store(struct device *dev, struct device_attribute *attr,
 	switch (online_type) {
 	case MMOP_ONLINE_KERNEL:
 	case MMOP_ONLINE_MOVABLE:
+#ifdef CONFIG_ZONE_EXTMEM
+	case MMOP_ONLINE_EXTMEM:
+#endif
 	case MMOP_ONLINE:
 		/* mem->online_type is protected by device_hotplug_lock */
 		mem->online_type = online_type;
@@ -460,6 +466,10 @@ static ssize_t valid_zones_show(struct device *dev,
 				  MMOP_ONLINE_KERNEL, default_zone);
 	len += print_allowed_zone(buf, len, nid, group, start_pfn, nr_pages,
 				  MMOP_ONLINE_MOVABLE, default_zone);
+#ifdef CONFIG_ZONE_EXTMEM
+	len += print_allowed_zone(buf, len, nid, group, start_pfn, nr_pages,
+				  MMOP_ONLINE_EXTMEM, default_zone);
+#endif
 out:
 	len += sysfs_emit_at(buf, len, "\n");
 	return len;

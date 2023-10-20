@@ -1055,6 +1055,11 @@ struct zone *zone_for_pfn_range(int online_type, int nid,
 	if (online_type == MMOP_ONLINE_MOVABLE)
 		return &NODE_DATA(nid)->node_zones[ZONE_MOVABLE];
 
+#ifdef CONFIG_ZONE_EXTMEM
+	if (online_type == MMOP_ONLINE_EXTMEM)
+		return &NODE_DATA(nid)->node_zones[ZONE_EXTMEM];
+#endif
+
 	if (online_policy == ONLINE_POLICY_AUTO_MOVABLE)
 		return auto_movable_zone_for_pfn(nid, group, start_pfn, nr_pages);
 
@@ -1836,13 +1841,16 @@ static void node_states_check_changes_offline(unsigned long nr_pages,
 	/*
 	 * We have accounted the pages from [0..ZONE_NORMAL); ZONE_HIGHMEM
 	 * does not apply as we don't support 32bit.
-	 * Here we count the possible pages from ZONE_MOVABLE.
+	 * Here we count the possible pages from ZONE_MOVABLE and ZONE_EXTMEM.
 	 * If after having accounted all the pages, we see that the nr_pages
 	 * to be offlined is over or equal to the accounted pages,
 	 * we know that the node will become empty, and so, we can clear
 	 * it for N_MEMORY as well.
 	 */
 	present_pages += pgdat->node_zones[ZONE_MOVABLE].present_pages;
+#ifdef CONFIG_ZONE_EXTMEM
+	present_pages += pgdat->node_zones[ZONE_EXTMEM].present_pages;
+#endif
 
 	if (nr_pages >= present_pages)
 		arg->status_change_nid = zone_to_nid(zone);
@@ -2277,6 +2285,11 @@ static int try_offline_memory_block(struct memory_block *mem, void *arg)
 	page = pfn_to_online_page(section_nr_to_pfn(mem->start_section_nr));
 	if (page && zone_idx(page_zone(page)) == ZONE_MOVABLE)
 		online_type = MMOP_ONLINE_MOVABLE;
+
+#ifdef CONFIG_ZONE_EXTMEM
+	if (page && is_zone_extmem_page(page))
+		online_type = MMOP_ONLINE_EXTMEM;
+#endif
 
 	rc = device_offline(&mem->dev);
 	/*

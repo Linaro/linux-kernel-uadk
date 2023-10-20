@@ -1535,6 +1535,28 @@ static inline bool zone_is_zone_device(struct zone *zone)
 }
 #endif
 
+#ifdef CONFIG_ZONE_EXTMEM
+static inline bool is_zone_extmem_page(const struct page *page)
+{
+	return page_zonenum(page) == ZONE_EXTMEM;
+}
+
+static inline bool zone_is_zone_extmem(struct zone *zone)
+{
+	return zone_idx(zone) == ZONE_EXTMEM;
+}
+#else
+static inline bool is_zone_extmem_page(const struct page *page)
+{
+	return false;
+}
+
+static inline bool zone_is_zone_extmem(struct zone *zone)
+{
+	return false;
+}
+#endif
+
 /*
  * Returns true if a zone has pages managed by the buddy allocator.
  * All the reclaim decisions have to use this function rather than

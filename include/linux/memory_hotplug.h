@@ -81,6 +81,10 @@ enum {
 	MMOP_ONLINE_KERNEL,
 	/* Online the memory to ZONE_MOVABLE. */
 	MMOP_ONLINE_MOVABLE,
+#ifdef CONFIG_ZONE_EXTMEM
+	/* Online the memory to ZONE_EXTMEM. */
+	MMOP_ONLINE_EXTMEM,
+#endif
 };
 
 /* Flags for add_memory() and friends to specify memory hotplug details. */

@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) "NUMA remote: " fmt
 
+#include <linux/device.h>
 #include <linux/numa_remote.h>
 
 /* The default distance between local node and remote node */
@@ -66,3 +67,90 @@ static int __init numa_parse_remote_nodes(char *buf)
 	return 0;
 }
 early_param("numa_remote", numa_parse_remote_nodes);
+
+static int find_unused_remote_node(void)
+{
+	int nid;
+
+	for_each_node_mask(nid, numa_nodes_remote) {
+		if (!node_online(nid))
+			return nid;
+	}
+
+	return NUMA_NO_NODE;
+}
+
+/*
+ * Add remote memory to the system as system RAM from CXL or UB.
+ * The resource_name (visible via /proc/iomem) has to have the format
+ * "System RAM (Remote)".
+ *
+ * @nid:	which node to online
+ * @start:	start address of memory range
+ * @size:	size of memory range
+ * @flags:	memory hotplug flags
+ *
+ * Returns:
+ *	node in case add memory succeed.
+ *	NUMA_NO_NODE in case add memory failed.
+ */
+int add_memory_remote(int nid, u64 start, u64 size, int flags)
+{
+	int real_nid = NUMA_NO_NODE;
+
+	if (!numa_remote_enabled)
+		return NUMA_NO_NODE;
+
+	if (nid < NUMA_NO_NODE || nid >= MAX_NUMNODES)
+		return NUMA_NO_NODE;
+
+	if (nid != NUMA_NO_NODE && !numa_is_remote_node(nid))
+		return NUMA_NO_NODE;
+
+	lock_device_hotplug();
+
+	real_nid = (nid == NUMA_NO_NODE) ? find_unused_remote_node() : nid;
+	if (real_nid == NUMA_NO_NODE)
+		goto unlock;
+
+	if (__add_memory(real_nid, start, size, MHP_MERGE_RESOURCE))
+		real_nid = NUMA_NO_NODE;
+
+unlock:
+	unlock_device_hotplug();
+
+	return real_nid;
+}
+EXPORT_SYMBOL_GPL(add_memory_remote);
+
+/*
+ * Remove remote memory.
+ *
+ * Returns:
+ *	0 in case of memory hotremove succeed.
+ *	-errno in case of memory hotremove failed.
+ */
+int remove_memory_remote(int nid, u64 start, u64 size)
+{
+	int ret = -EINVAL;
+
+	if (!numa_remote_enabled)
+		return -EINVAL;
+
+	if (nid <= NUMA_NO_NODE || nid >= MAX_NUMNODES)
+		return -EINVAL;
+
+	if (!numa_is_remote_node(nid) || !node_online(nid))
+		return -EINVAL;
+
+	ret = offline_and_remove_memory(start, size);
+	if (ret)
+		goto out;
+
+	if (!node_online(nid))
+		numa_remote_reset_distance(nid);
+
+out:
+	return ret;
+}
+EXPORT_SYMBOL_GPL(remove_memory_remote);

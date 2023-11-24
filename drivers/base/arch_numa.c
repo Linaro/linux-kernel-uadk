@@ -389,7 +389,7 @@ static int __init numa_alloc_distance(void)
  * If @from or @to is higher than the highest known node or lower than zero
  * or @distance doesn't make sense, the call is ignored.
  */
-void __init numa_set_distance(int from, int to, int distance)
+void __ref numa_set_distance(int from, int to, int distance)
 {
 	if (!numa_distance) {
 		pr_warn_once("Warning: distance table not allocated yet\n");

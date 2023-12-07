@@ -15,6 +15,8 @@
 #define REMOTE_TO_REMOTE_DISTANCE	254
 
 static bool numa_remote_enabled __ro_after_init;
+static bool numa_remote_nofallback_mode __ro_after_init;
+
 static nodemask_t numa_nodes_remote;
 
 bool numa_is_remote_node(int nid)
@@ -22,6 +24,11 @@ bool numa_is_remote_node(int nid)
 	return !!node_isset(nid, numa_nodes_remote);
 }
 EXPORT_SYMBOL_GPL(numa_is_remote_node);
+
+bool numa_remote_nofallback(int nid)
+{
+	return numa_remote_nofallback_mode && numa_is_remote_node(nid);
+}
 
 static void numa_remote_reset_distance(int nid)
 {
@@ -60,9 +67,26 @@ void __init numa_register_remote_nodes(void)
 	pr_info("%d nodes", nodes_weight(numa_nodes_remote));
 }
 
+/*
+ * Parse a series of numa_remote options.
+ *
+ * 'nofallback': skip remote node from zonelists.
+ */
 static int __init numa_parse_remote_nodes(char *buf)
 {
 	numa_remote_enabled = true;
+
+	if (!buf)
+		return 0;
+
+	while (*buf) {
+		if (!strncmp(buf, "nofallback", 10))
+			numa_remote_nofallback_mode = true;
+
+		buf += strcspn(buf, ",");
+		while (*buf == ',')
+			buf++;
+	}
 
 	return 0;
 }

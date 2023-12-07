@@ -55,6 +55,7 @@
 #include <linux/delayacct.h>
 #include <linux/cacheinfo.h>
 #include <linux/dynamic_pool.h>
+#include <linux/numa_remote.h>
 #include <asm/div64.h>
 #include "internal.h"
 #include "shuffle.h"
@@ -5297,6 +5298,10 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
 
 		/* Don't want a node to appear more than once */
 		if (node_isset(n, *used_node_mask))
+			continue;
+
+		/* Don't fallback to remote node */
+		if (numa_remote_nofallback(n))
 			continue;
 
 		/* Use the distance array to find the distance */

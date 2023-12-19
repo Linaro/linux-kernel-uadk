@@ -277,6 +277,17 @@ EXPORT_SYMBOL_NS_GPL(iommufd_ctx_has_group, IOMMUFD);
  */
 void iommufd_device_unbind(struct iommufd_device *idev)
 {
+	u32 vdev_id = 0;
+
+	/* idev->vdev object should be destroyed prior, yet just in case.. */
+	mutex_lock(&idev->igroup->lock);
+	if (idev->vdev)
+		vdev_id = idev->vdev->obj.id;
+	mutex_unlock(&idev->igroup->lock);
+	/* Relying on xa_lock against a race with iommufd_destroy() */
+	if (vdev_id)
+		iommufd_object_remove(idev->ictx, NULL, vdev_id, 0);
+
 	iommufd_object_destroy_user(idev->ictx, &idev->obj);
 }
 EXPORT_SYMBOL_NS_GPL(iommufd_device_unbind, IOMMUFD);

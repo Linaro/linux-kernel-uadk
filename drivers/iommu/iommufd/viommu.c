@@ -9,6 +9,8 @@ void iommufd_viommu_destroy(struct iommufd_object *obj)
 	struct iommufd_viommu *viommu =
 		container_of(obj, struct iommufd_viommu, obj);
 
+	xa_destroy(&viommu->vdevs);
+
 	if (viommu->ops && viommu->ops->free)
 		viommu->ops->free(viommu);
 	refcount_dec(&viommu->hwpt->common.obj.users);
@@ -72,6 +74,8 @@ int iommufd_viommu_alloc_ioctl(struct iommufd_ucmd *ucmd)
 	 */
 	viommu->iommu_dev = idev->dev->iommu->iommu_dev;
 
+	xa_init(&viommu->vdevs);
+
 	refcount_inc(&viommu->hwpt->common.obj.users);
 
 	cmd->out_viommu_id = viommu->obj.id;
@@ -87,5 +91,92 @@ out_put_hwpt:
 	iommufd_put_object(ucmd->ictx, &hwpt_paging->common.obj);
 out_put_idev:
 	iommufd_put_object(ucmd->ictx, &idev->obj);
+	return rc;
+}
+
+void iommufd_vdevice_destroy(struct iommufd_object *obj)
+{
+	struct iommufd_vdevice *old, *vdev =
+		container_of(obj, struct iommufd_vdevice, obj);
+	struct iommufd_viommu *viommu = vdev->viommu;
+	struct iommufd_device *idev = vdev->idev;
+
+	if (viommu->ops && viommu->ops->vdevice_free)
+		viommu->ops->vdevice_free(vdev);
+
+	old = xa_cmpxchg(&viommu->vdevs, vdev->id, vdev, NULL, GFP_KERNEL);
+	if (old)
+		WARN_ON(old != vdev);
+
+	refcount_dec(&viommu->obj.users);
+	refcount_dec(&idev->obj.users);
+	idev->vdev = NULL;
+}
+
+int iommufd_vdevice_alloc_ioctl(struct iommufd_ucmd *ucmd)
+{
+	struct iommu_vdevice_alloc *cmd = ucmd->cmd;
+	struct iommufd_vdevice *vdev, *curr;
+	struct iommufd_viommu *viommu;
+	struct iommufd_device *idev;
+	u64 virt_id = cmd->virt_id;
+	int rc = 0;
+
+	if (virt_id > ULONG_MAX)
+		return -EINVAL;
+
+	viommu = iommufd_get_viommu(ucmd, cmd->viommu_id);
+	if (IS_ERR(viommu))
+		return PTR_ERR(viommu);
+
+	idev = iommufd_get_device(ucmd, cmd->dev_id);
+	if (IS_ERR(idev)) {
+		rc = PTR_ERR(idev);
+		goto out_put_viommu;
+	}
+
+	mutex_lock(&idev->igroup->lock);
+	if (idev->vdev) {
+		rc = -EEXIST;
+		goto out_unlock_igroup;
+	}
+
+	if (viommu->ops && viommu->ops->vdevice_alloc)
+		vdev = viommu->ops->vdevice_alloc(viommu, idev->dev, virt_id);
+	else
+		vdev = __iommufd_vdevice_alloc(ucmd->ictx, sizeof(*vdev));
+	if (IS_ERR(vdev)) {
+		rc = PTR_ERR(vdev);
+		goto out_unlock_igroup;
+	}
+
+	vdev->idev = idev;
+	vdev->id = virt_id;
+	vdev->viommu = viommu;
+
+	idev->vdev = vdev;
+	refcount_inc(&idev->obj.users);
+	refcount_inc(&viommu->obj.users);
+
+	curr = xa_cmpxchg(&viommu->vdevs, virt_id, NULL, vdev, GFP_KERNEL);
+	if (curr) {
+		rc = xa_err(curr) ? : -EBUSY;
+		goto out_abort;
+	}
+
+	cmd->out_vdevice_id = vdev->obj.id;
+	rc = iommufd_ucmd_respond(ucmd, sizeof(*cmd));
+	if (rc)
+		goto out_abort;
+	iommufd_object_finalize(ucmd->ictx, &vdev->obj);
+	goto out_unlock_igroup;
+
+out_abort:
+	iommufd_object_abort_and_destroy(ucmd->ictx, &vdev->obj);
+out_unlock_igroup:
+	mutex_unlock(&idev->igroup->lock);
+	iommufd_put_object(ucmd->ictx, &idev->obj);
+out_put_viommu:
+	iommufd_put_object(ucmd->ictx, &viommu->obj);
 	return rc;
 }

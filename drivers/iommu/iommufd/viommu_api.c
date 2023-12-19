@@ -55,3 +55,17 @@ __iommufd_viommu_alloc(struct iommufd_ctx *ictx, size_t size,
 	return viommu;
 }
 EXPORT_SYMBOL_NS_GPL(__iommufd_viommu_alloc, IOMMUFD);
+
+struct iommufd_vdevice *
+__iommufd_vdevice_alloc(struct iommufd_ctx *ictx, size_t size)
+{
+	struct iommufd_object *obj;
+
+	if (WARN_ON(size < sizeof(struct iommufd_vdevice)))
+		return ERR_PTR(-EINVAL);
+	obj = iommufd_object_alloc_elm(ictx, size, IOMMUFD_OBJ_VDEVICE);
+	if (IS_ERR(obj))
+		return ERR_CAST(obj);
+	return container_of(obj, struct iommufd_vdevice, obj);
+}
+EXPORT_SYMBOL_NS_GPL(__iommufd_vdevice_alloc, IOMMUFD);

@@ -128,6 +128,7 @@ TEST_F(iommufd, cmd_length)
 	TEST_LENGTH(iommu_ioas_unmap, IOMMU_IOAS_UNMAP, length);
 	TEST_LENGTH(iommu_option, IOMMU_OPTION, val64);
 	TEST_LENGTH(iommu_vfio_ioas, IOMMU_VFIO_IOAS, __reserved);
+	TEST_LENGTH(iommu_viommu_alloc, IOMMU_VIOMMU_ALLOC, out_viommu_id);
 #undef TEST_LENGTH
 }
 
@@ -2384,6 +2385,89 @@ TEST_F(vfio_compat_mock_domain, huge_map)
 					   &unmap_cmd));
 		}
 	}
+}
+
+FIXTURE(iommufd_viommu)
+{
+	int fd;
+	uint32_t ioas_id;
+	uint32_t stdev_id;
+	uint32_t hwpt_id;
+	uint32_t device_id;
+	uint32_t viommu_id;
+};
+
+FIXTURE_VARIANT(iommufd_viommu)
+{
+	unsigned int viommu;
+	unsigned int viommu_type;
+};
+
+FIXTURE_SETUP(iommufd_viommu)
+{
+	self->fd = open("/dev/iommu", O_RDWR);
+	ASSERT_NE(-1, self->fd);
+	test_ioctl_ioas_alloc(&self->ioas_id);
+	test_ioctl_set_default_memory_limit();
+
+	if (variant->viommu) {
+		test_cmd_mock_domain(self->ioas_id, &self->stdev_id, NULL,
+				     &self->device_id);
+
+		/* Negative test -- invalid hwpt */
+		test_err_viommu_alloc(ENOENT, self->device_id, self->hwpt_id,
+				      variant->viommu_type, &self->viommu_id);
+
+		/* Negative test -- not a nesting parent hwpt */
+		test_cmd_hwpt_alloc(self->device_id, self->ioas_id, 0,
+				    &self->hwpt_id);
+		test_err_viommu_alloc(EINVAL, self->device_id, self->hwpt_id,
+				      variant->viommu_type, &self->viommu_id);
+		test_ioctl_destroy(self->hwpt_id);
+
+		/* Allocate a nesting parent HWP */
+		test_cmd_hwpt_alloc(self->device_id, self->ioas_id,
+				    IOMMU_HWPT_ALLOC_NEST_PARENT,
+				    &self->hwpt_id);
+		/* Negative test -- unsupported viommu type */
+		test_err_viommu_alloc(EOPNOTSUPP, self->device_id,
+				      self->hwpt_id, 0xdead, &self->viommu_id);
+		/* Allocate a default type of viommu */
+		test_cmd_viommu_alloc(self->device_id, self->hwpt_id,
+				      variant->viommu_type, &self->viommu_id);
+	} else {
+		test_err_viommu_alloc(ENOENT, self->device_id, self->hwpt_id,
+				      variant->viommu_type, &self->viommu_id);
+	}
+}
+
+FIXTURE_TEARDOWN(iommufd_viommu)
+{
+	if (variant->viommu) {
+		test_ioctl_destroy(self->viommu_id);
+		test_ioctl_destroy(self->hwpt_id);
+	}
+	teardown_iommufd(self->fd, _metadata);
+}
+
+FIXTURE_VARIANT_ADD(iommufd_viommu, no_viommu)
+{
+};
+
+FIXTURE_VARIANT_ADD(iommufd_viommu, viommu_default)
+{
+	.viommu = 1,
+	.viommu_type = IOMMU_VIOMMU_TYPE_DEFAULT,
+};
+
+FIXTURE_VARIANT_ADD(iommufd_viommu, mock_viommu)
+{
+	.viommu = 1,
+	.viommu_type = IOMMU_VIOMMU_TYPE_SELFTEST,
+};
+
+TEST_F(iommufd_viommu, viommu_auto_destroy)
+{
 }
 
 TEST_HARNESS_MAIN

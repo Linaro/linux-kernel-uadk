@@ -3093,7 +3093,30 @@ static int arm_smmu_attach_dev_nested(struct iommu_domain *domain,
 
 static void arm_smmu_domain_nested_free(struct iommu_domain *domain)
 {
-	kfree(container_of(domain, struct arm_smmu_nested_domain, domain));
+	struct arm_smmu_nested_domain *nested_domain =
+		container_of(domain, struct arm_smmu_nested_domain, domain);
+	u32 id_user = nested_domain->sid_user;
+
+	if (!WARN_ON(!id_user)) {
+		struct arm_smmu_device *smmu = nested_domain->s2_parent->smmu;
+		struct arm_smmu_stream *stream;
+
+		xa_lock(&smmu->streams_user);
+		stream = __xa_erase(&smmu->streams_user, id_user);
+		/*
+		 * A mismatched id_user is unlikely to happen, but restore the
+		 * stream back to the xarray for its actual owner to carray on.
+		 */
+		if (unlikely(stream->id_user != id_user)) {
+			WARN_ON(__xa_alloc(&smmu->streams_user, &id_user,
+					   stream, XA_LIMIT(id_user, id_user),
+					   GFP_KERNEL_ACCOUNT));
+		} else
+			stream->id_user = 0;
+		xa_unlock(&smmu->streams_user);
+	}
+
+	kfree(nested_domain);
 }
 
 static struct iommu_domain *
@@ -3126,6 +3149,9 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 	if (!(master->smmu->features & ARM_SMMU_FEAT_NESTING))
 		return ERR_PTR(-EOPNOTSUPP);
 
+	if (master->streams[0].id_user)
+		return ERR_PTR(-EEXIST);
+
 	ret = iommu_copy_struct_from_user(&arg, user_data,
 					  IOMMU_HWPT_DATA_ARM_SMMUV3, ste);
 	if (ret)
@@ -3156,9 +3182,19 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 	if (!nested_domain)
 		return ERR_PTR(-ENOMEM);
 
+	ret = xa_alloc(&smmu_parent->smmu->streams_user, &arg.sid,
+		       &master->streams[0], XA_LIMIT(arg.sid, arg.sid),
+		       GFP_KERNEL_ACCOUNT);
+	if (ret) {
+		kfree(nested_domain);
+		return ERR_PTR(ret);
+	}
+	master->streams[0].id_user = arg.sid;
+
 	nested_domain->domain.type = IOMMU_DOMAIN_NESTED;
 	nested_domain->domain.ops = &arm_smmu_nested_ops;
 	nested_domain->s2_parent = smmu_parent;
+	nested_domain->sid_user = arg.sid;
 	nested_domain->enable_ats = eats == STRTAB_STE_1_EATS_TRANS;
 	nested_domain->ste[0] = arg.ste[0];
 	nested_domain->ste[1] = arg.ste[1] & ~cpu_to_le64(STRTAB_STE_1_EATS);
@@ -3803,6 +3839,7 @@ static int arm_smmu_init_structures(struct arm_smmu_device *smmu)
 
 	mutex_init(&smmu->streams_mutex);
 	smmu->streams = RB_ROOT;
+	xa_init_flags(&smmu->streams_user, XA_FLAGS_ALLOC1 | XA_FLAGS_ACCOUNT);
 
 	ret = arm_smmu_init_queues(smmu);
 	if (ret)

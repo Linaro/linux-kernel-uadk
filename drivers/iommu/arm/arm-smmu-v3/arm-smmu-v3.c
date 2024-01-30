@@ -3134,7 +3134,7 @@ arm_smmu_get_msi_mapping_domain(struct iommu_domain *domain)
 }
 
 static int arm_smmu_fix_user_cmd(struct arm_smmu_nested_domain *nested_domain,
-				 u64 *cmd, u32 *cerror_idx)
+				 u64 *cmd)
 {
 	struct arm_smmu_device *smmu = nested_domain->s2_parent->smmu;
 	struct arm_smmu_stream *stream;
@@ -3162,15 +3162,13 @@ static int arm_smmu_fix_user_cmd(struct arm_smmu_nested_domain *nested_domain,
 		stream = xa_load(&smmu->streams_user,
 				 FIELD_GET(CMDQ_CFGI_0_SID, *cmd));
 		xa_unlock(&smmu->streams_user);
-		if (!stream) {
-			*cerror_idx = CMDQ_ERR_CERROR_ATC_INV_IDX;
+		if (!stream)
 			return -ENODEV;
-		}
+
 		*cmd &= ~CMDQ_CFGI_0_SID;
 		*cmd |= FIELD_PREP(CMDQ_CFGI_0_SID, stream->id);
 		break;
 	default:
-		*cerror_idx = CMDQ_ERR_CERROR_ILL_IDX;
 		return -EINVAL;
 	}
 	pr_debug("Fixed user CMD: %016llx : %016llx\n", cmd[1], cmd[0]);
@@ -3224,8 +3222,7 @@ static bool arm_smmu_cmdq_hit_errata(struct arm_smmu_device *smmu, u64 *cmd,
 }
 
 static int arm_smmu_cache_invalidate_user(struct iommu_domain *domain,
-					  struct iommu_user_data_array *array,
-					  u32 *cerror_idx)
+					  struct iommu_user_data_array *array)
 {
 	struct arm_smmu_nested_domain *nested_domain =
 		container_of(domain, struct arm_smmu_nested_domain, domain);
@@ -3240,10 +3237,8 @@ static int arm_smmu_cache_invalidate_user(struct iommu_domain *domain,
 		return -EINVAL;
 
 	cmds = kcalloc(array->entry_num, sizeof(*cmds) * 2, GFP_KERNEL);
-	if (!cmds) {
-		*cerror_idx = CMDQ_ERR_CERROR_ABT_IDX;
+	if (!cmds)
 		return -ENOMEM;
-	}
 
 	for (data_idx = 0; data_idx < array->entry_num; data_idx++) {
 		struct iommu_hwpt_arm_smmuv3_invalidate *inv =
@@ -3252,14 +3247,12 @@ static int arm_smmu_cache_invalidate_user(struct iommu_domain *domain,
 		ret = iommu_copy_struct_from_user_array(inv, array,
 							IOMMU_HWPT_DATA_ARM_SMMUV3,
 							data_idx, cmd);
-		if (ret) {
-			*cerror_idx = CMDQ_ERR_CERROR_ABT_IDX;
-			goto out;
-		}
-
-		ret = arm_smmu_fix_user_cmd(nested_domain, inv->cmd, cerror_idx);
 		if (ret)
-			goto out; /* cerror_idx is set */
+			goto out;
+
+		ret = arm_smmu_fix_user_cmd(nested_domain, inv->cmd);
+		if (ret)
+			goto out;
 
 		if (arm_smmu_cmdq_hit_errata(smmu, inv->cmd, &has_leaf, &has_cfgi)) {
 			/* WAR is to issue the batch prior, with a CMD_SYNC */

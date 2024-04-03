@@ -8,6 +8,7 @@
 
 #include <linux/err.h>
 #include <linux/errno.h>
+#include <linux/refcount.h>
 #include <linux/types.h>
 
 struct device;
@@ -17,6 +18,14 @@ struct iommufd_access;
 struct iommufd_ctx;
 struct iommufd_device;
 struct page;
+
+/* Base struct for all objects with a userspace ID handle. */
+struct iommufd_object {
+	refcount_t shortterm_users;
+	refcount_t users;
+	unsigned int type; /* enum iommufd_object_type in iommufd_private.h */
+	unsigned int id;
+};
 
 struct iommufd_device *iommufd_device_bind(struct iommufd_ctx *ictx,
 					   struct device *dev, u32 *id);

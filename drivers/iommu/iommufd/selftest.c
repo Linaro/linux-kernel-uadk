@@ -136,6 +136,11 @@ struct mock_viommu {
 	struct iommufd_viommu core;
 };
 
+struct mock_vdevice {
+	struct iommufd_vdevice core;
+	u64 rid;
+};
+
 enum selftest_obj_type {
 	TYPE_IDEV,
 };
@@ -560,8 +565,22 @@ static void mock_viommu_free(struct iommufd_viommu *viommu)
 	/* iommufd core frees mock_viommu and viommu */
 }
 
+static struct iommufd_vdevice *mock_vdevice_alloc(struct iommufd_viommu *viommu,
+						  struct device *dev, u64 id)
+{
+	struct mock_vdevice *mock_vdev;
+
+	mock_vdev = iommufd_vdevice_alloc(viommu->ictx, mock_vdevice, core);
+	if (IS_ERR(mock_vdev))
+		return ERR_CAST(mock_vdev);
+
+	mock_vdev->rid = id;
+	return &mock_vdev->core;
+}
+
 static struct iommufd_viommu_ops mock_viommu_ops = {
 	.free = mock_viommu_free,
+	.vdevice_alloc = mock_vdevice_alloc,
 };
 
 static struct iommufd_viommu *

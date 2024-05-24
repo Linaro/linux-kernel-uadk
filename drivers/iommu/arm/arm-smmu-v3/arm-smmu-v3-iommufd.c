@@ -169,7 +169,8 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 	 * Must support some way to prevent the VM from bypassing the cache
 	 * because VFIO currently does not do any cache maintenance.
 	 */
-	if (!arm_smmu_master_canwbs(master))
+	if (!arm_smmu_master_canwbs(master) &&
+	    !(master->smmu->features & ARM_SMMU_FEAT_S2FWB))
 		return ERR_PTR(-EOPNOTSUPP);
 
 	/*

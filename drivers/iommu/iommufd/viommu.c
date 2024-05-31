@@ -44,7 +44,7 @@ int iommufd_viommu_alloc_ioctl(struct iommufd_ucmd *ucmd)
 
 	if (cmd->type == IOMMU_VIOMMU_TYPE_DEFAULT) {
 		viommu = __iommufd_viommu_alloc(ucmd->ictx, sizeof(*viommu),
-						NULL);
+						ops->default_viommu_ops);
 	} else {
 		if (!ops->viommu_alloc) {
 			rc = -EOPNOTSUPP;

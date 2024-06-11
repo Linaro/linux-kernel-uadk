@@ -644,3 +644,40 @@ static int __init hugetlb_vmemmap_init(void)
 	return 0;
 }
 late_initcall(hugetlb_vmemmap_init);
+
+/* Similar with hugetlb_vmemmap_restore. */
+int fake_online_pages_vmemmap_restore(struct page *head, unsigned long nr_pages)
+{
+	int ret;
+	unsigned long vmemmap_start = (unsigned long)head, vmemmap_end;
+	unsigned long vmemmap_reuse;
+
+	if (!HPageVmemmapOptimized(head))
+		return 0;
+
+	vmemmap_end	= vmemmap_start + nr_pages * sizeof(struct page);
+	vmemmap_reuse	= vmemmap_start;
+	vmemmap_start	+= PAGE_SIZE;
+
+	ret = vmemmap_remap_alloc(vmemmap_start, vmemmap_end, vmemmap_reuse);
+	if (!ret)
+		ClearHPageVmemmapOptimized(head);
+
+	return ret;
+}
+
+/* Similar with hugetlb_vmemmap_optimize. */
+void fake_online_pages_vmemmap_optimize(struct page *head, unsigned long nr_pages)
+{
+	unsigned long vmemmap_start = (unsigned long)head, vmemmap_end;
+	unsigned long vmemmap_reuse;
+
+	vmemmap_end	= vmemmap_start + nr_pages * sizeof(struct page);
+	vmemmap_reuse	= vmemmap_start;
+	vmemmap_start	+= PAGE_SIZE;
+
+	if (vmemmap_remap_free(vmemmap_start, vmemmap_end, vmemmap_reuse))
+		pr_err_ratelimited("optimize vmemmap failed\n");
+	else
+		SetHPageVmemmapOptimized(head);
+}

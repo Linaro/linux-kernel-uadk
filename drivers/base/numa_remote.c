@@ -7,7 +7,12 @@
 #define pr_fmt(fmt) "NUMA remote: " fmt
 
 #include <linux/device.h>
+#include <linux/hugetlb.h>
+#include <linux/page-isolation.h>
+#include <linux/memory.h>
 #include <linux/numa_remote.h>
+#include "../../mm/hugetlb_vmemmap.h"
+#include "../../mm/internal.h"
 
 /* The default distance between local node and remote node */
 #define REMOTE_TO_LOCAL_DISTANCE	100
@@ -16,8 +21,11 @@
 
 static bool numa_remote_enabled __ro_after_init;
 static bool numa_remote_nofallback_mode __ro_after_init;
+static bool numa_remote_preonline_mode __ro_after_init;
 
 static nodemask_t numa_nodes_remote;
+
+static DEFINE_MUTEX(numa_remote_lock);
 
 bool numa_is_remote_node(int nid)
 {
@@ -28,6 +36,11 @@ EXPORT_SYMBOL_GPL(numa_is_remote_node);
 bool numa_remote_nofallback(int nid)
 {
 	return numa_remote_nofallback_mode && numa_is_remote_node(nid);
+}
+
+bool numa_remote_preonline(int nid)
+{
+	return numa_remote_preonline_mode && numa_is_remote_node(nid);
 }
 
 static void numa_remote_reset_distance(int nid)
@@ -71,6 +84,7 @@ void __init numa_register_remote_nodes(void)
  * Parse a series of numa_remote options.
  *
  * 'nofallback': skip remote node from zonelists.
+ * 'preonline': support to online remote memory before it is ready.
  */
 static int __init numa_parse_remote_nodes(char *buf)
 {
@@ -82,6 +96,8 @@ static int __init numa_parse_remote_nodes(char *buf)
 	while (*buf) {
 		if (!strncmp(buf, "nofallback", 10))
 			numa_remote_nofallback_mode = true;
+		else if (!strncmp(buf, "preonline", 9))
+			numa_remote_preonline_mode = true;
 
 		buf += strcspn(buf, ",");
 		while (*buf == ',')
@@ -91,6 +107,188 @@ static int __init numa_parse_remote_nodes(char *buf)
 	return 0;
 }
 early_param("numa_remote", numa_parse_remote_nodes);
+
+static void numa_remote_optimize_vmemmap(unsigned long start_pfn,
+					 unsigned long end_pfn)
+{
+	unsigned long pfn;
+	struct page *page;
+
+	for (pfn = start_pfn; pfn < end_pfn; pfn += MAX_ORDER_NR_PAGES) {
+		page = pfn_to_page(pfn);
+		if (!page)
+			continue;
+
+		fake_online_pages_vmemmap_optimize(page, MAX_ORDER_NR_PAGES);
+	}
+}
+
+static int numa_remote_restore_vmemmap(unsigned long start_pfn,
+				       unsigned long end_pfn)
+{
+	unsigned long pfn;
+	struct page *page;
+	int ret;
+
+	for (pfn = start_pfn; pfn < end_pfn; pfn += MAX_ORDER_NR_PAGES) {
+		page = pfn_to_page(pfn);
+		if (!page)
+			continue;
+
+		ret = fake_online_pages_vmemmap_restore(page, MAX_ORDER_NR_PAGES);
+		if (ret) {
+			numa_remote_optimize_vmemmap(start_pfn, pfn);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static void numa_remote_preonline_going_offline(unsigned long pfn,
+						  unsigned long nr_pages)
+{
+	struct page *page;
+	unsigned long i;
+
+	adjust_managed_page_count(pfn_to_page(pfn), nr_pages);
+	for (i = 0; i < nr_pages; i++) {
+		page = pfn_to_page(pfn + i);
+		if (WARN_ON(!page_ref_dec_and_test(page)))
+			dump_page(page, "preonline page referenced");
+	}
+}
+
+static void numa_remote_preonline_cancel_offline(unsigned long pfn,
+						  unsigned long nr_pages)
+{
+	unsigned long i;
+
+	adjust_managed_page_count(pfn_to_page(pfn), -nr_pages);
+	for (i = 0; i < nr_pages; i++)
+		page_ref_inc(pfn_to_page(pfn + i));
+}
+
+static int numa_remote_memory_notifier_cb(struct notifier_block *nb,
+					 unsigned long action, void *arg)
+{
+	struct memory_notify *mhp = arg;
+	const unsigned long start = PFN_PHYS(mhp->start_pfn);
+	const unsigned long size = PFN_PHYS(mhp->nr_pages);
+
+	if (!check_memory_block_pre_online(start, size, true))
+		return NOTIFY_DONE;
+
+	switch (action) {
+	case MEM_GOING_OFFLINE:
+		numa_remote_preonline_going_offline(mhp->start_pfn, mhp->nr_pages);
+		break;
+	case MEM_CANCEL_OFFLINE:
+		numa_remote_preonline_cancel_offline(mhp->start_pfn, mhp->nr_pages);
+		break;
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
+struct notifier_block numa_remote_memory_notifier = {
+	.notifier_call = numa_remote_memory_notifier_cb,
+};
+
+static void numa_remote_preonline_pages(struct page *page, unsigned int order)
+{
+	unsigned long start_pfn, end_pfn, pfn, nr_pages;
+	struct page *p;
+
+	start_pfn = page_to_pfn(page);
+	nr_pages = 1 << order;
+	end_pfn = start_pfn + nr_pages;
+	for (pfn = start_pfn; pfn < end_pfn; pfn++) {
+		p = pfn_to_page(pfn);
+		__SetPageOffline(p);
+		ClearPageReserved(p);
+	}
+	numa_remote_optimize_vmemmap(start_pfn, end_pfn);
+}
+
+static void numa_remote_online_pages(unsigned long start_pfn, unsigned long end_pfn)
+{
+	unsigned long nr_pages = end_pfn - start_pfn;
+	unsigned long pfn, i;
+	struct page *page;
+
+	for (i = 0; i < nr_pages; ++i) {
+		page = pfn_to_page(start_pfn + i);
+		__ClearPageOffline(page);
+	}
+
+	for (pfn = start_pfn; pfn < end_pfn; pfn += (1UL << MAX_ORDER))
+		generic_online_page(pfn_to_page(pfn), MAX_ORDER);
+}
+
+/*
+ * Undo fake-online a remote node. Have to be called in preonline mode then
+ * the memory on the node can be allocated.
+ */
+static int __ref numa_remote_undo_fake_online(u64 start, u64 size)
+{
+	unsigned long start_pfn = PFN_DOWN(start);
+	unsigned long end_pfn = PFN_DOWN(start + size);
+	struct zone *zone;
+	int nid;
+	int ret = 0;
+
+	mem_hotplug_begin();
+	/* Re-check whether all memory block are pre-online. */
+	if (!check_memory_block_pre_online(start, size, true)) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	zone = page_zone(phys_to_page(start));
+	nid = zone_to_nid(zone);
+	if (!check_memory_block_nid(start, size, nid)) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = numa_remote_restore_vmemmap(start_pfn, end_pfn);
+	if (ret) {
+		pr_err_ratelimited("restore vmemmap failed\n");
+		goto out;
+	}
+
+	set_memory_block_pre_online(start, size, false);
+	numa_remote_online_pages(start_pfn, end_pfn);
+
+	init_per_zone_wmark_min();
+	writeback_set_ratelimit();
+
+out:
+	mem_hotplug_done();
+	return ret;
+}
+
+static int __ref numa_remote_restore_isolation(u64 start, u64 size)
+{
+	unsigned long start_pfn = PFN_DOWN(start);
+	unsigned long end_pfn = PFN_DOWN(start + size);
+	int ret = 0;
+
+	mem_hotplug_begin();
+
+	ret = numa_remote_restore_vmemmap(start_pfn, end_pfn);
+	if (ret) {
+		pr_err_ratelimited("restore vmemmap failed\n");
+		goto out;
+	}
+
+out:
+	mem_hotplug_done();
+	return ret;
+}
 
 static int find_unused_remote_node(void)
 {
@@ -121,6 +319,7 @@ static int find_unused_remote_node(void)
 int add_memory_remote(int nid, u64 start, u64 size, int flags)
 {
 	int real_nid = NUMA_NO_NODE;
+	mhp_t mhp_flags = MHP_MERGE_RESOURCE;
 
 	if (!numa_remote_enabled)
 		return NUMA_NO_NODE;
@@ -131,18 +330,63 @@ int add_memory_remote(int nid, u64 start, u64 size, int flags)
 	if (nid != NUMA_NO_NODE && !numa_is_remote_node(nid))
 		return NUMA_NO_NODE;
 
+	if (!numa_remote_preonline_mode && !(flags & MEMORY_DIRECT_ONLINE))
+		return NUMA_NO_NODE;
+
+	if (flags & ~(MEMORY_KEEP_ISOLATED | MEMORY_DIRECT_ONLINE))
+		return NUMA_NO_NODE;
+
+	if (flags == (MEMORY_KEEP_ISOLATED | MEMORY_DIRECT_ONLINE))
+		return NUMA_NO_NODE;
+
+	mutex_lock(&numa_remote_lock);
+
+	if (numa_remote_preonline_mode && !flags) {
+		if (check_hotplug_memory_range(start, size))
+			goto out;
+		/* Check whether all memory block are pre-online. */
+		if (!check_memory_block_pre_online(start, size, true))
+			goto out;
+
+		real_nid = (nid == NUMA_NO_NODE) ?
+			   page_to_nid(phys_to_page(start)) : nid;
+		if (!check_memory_block_nid(start, size, real_nid)) {
+			real_nid = NUMA_NO_NODE;
+			goto out;
+		}
+
+		if (numa_remote_undo_fake_online(start, size)) {
+			real_nid = NUMA_NO_NODE;
+			goto out;
+		}
+	}
+
 	lock_device_hotplug();
 
 	real_nid = (nid == NUMA_NO_NODE) ? find_unused_remote_node() : nid;
 	if (real_nid == NUMA_NO_NODE)
 		goto unlock;
 
-	if (__add_memory(real_nid, start, size, MHP_MERGE_RESOURCE))
+	if (flags & MEMORY_KEEP_ISOLATED) {
+		int rc;
+
+		rc = set_online_page_callback(&numa_remote_preonline_pages);
+		if (rc) {
+			real_nid = NUMA_NO_NODE;
+			goto unlock;
+		}
+		mhp_flags |= MHP_PREONLINE;
+	}
+
+	if (__add_memory(real_nid, start, size, mhp_flags))
 		real_nid = NUMA_NO_NODE;
 
+	if (flags & MEMORY_KEEP_ISOLATED)
+		restore_online_page_callback(&numa_remote_preonline_pages);
 unlock:
 	unlock_device_hotplug();
-
+out:
+	mutex_unlock(&numa_remote_lock);
 	return real_nid;
 }
 EXPORT_SYMBOL_GPL(add_memory_remote);
@@ -167,6 +411,23 @@ int remove_memory_remote(int nid, u64 start, u64 size)
 	if (!numa_is_remote_node(nid) || !node_online(nid))
 		return -EINVAL;
 
+	mutex_lock(&numa_remote_lock);
+	if (!check_memory_block_nid(start, size, nid))
+		goto out;
+
+	/*
+	 * If all memory block are already online, do nothing here.
+	 * If all memory block are pre-online, restore the isolation
+	 * and count. If mixed, don't allow to offline.
+	 */
+	if (numa_remote_preonline(nid) &&
+	    !check_memory_block_pre_online(start, size, false)) {
+		if (!check_memory_block_pre_online(start, size, true))
+			goto out;
+		if (numa_remote_restore_isolation(start, size))
+			goto out;
+	}
+
 	ret = offline_and_remove_memory(start, size);
 	if (ret)
 		goto out;
@@ -175,6 +436,7 @@ int remove_memory_remote(int nid, u64 start, u64 size)
 		numa_remote_reset_distance(nid);
 
 out:
+	mutex_unlock(&numa_remote_lock);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(remove_memory_remote);
@@ -206,3 +468,20 @@ int numa_remote_set_distance(int target, int *node_ids, int *node_distances,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(numa_remote_set_distance);
+
+static int __init numa_remote_init(void)
+{
+	int ret;
+
+	if (!numa_remote_preonline_mode)
+		return 0;
+
+	ret = register_memory_notifier(&numa_remote_memory_notifier);
+	if (ret) {
+		numa_remote_preonline_mode = false;
+		pr_err("fail to enanble preonline mode\n");
+	}
+
+	return ret;
+}
+late_initcall(numa_remote_init);

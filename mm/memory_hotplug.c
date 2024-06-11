@@ -1303,7 +1303,7 @@ int try_online_node(int nid)
 	return ret;
 }
 
-static int check_hotplug_memory_range(u64 start, u64 size)
+int check_hotplug_memory_range(u64 start, u64 size)
 {
 	/* memory range must be block size aligned */
 	if (!size || !IS_ALIGNED(start, memory_block_size_bytes()) ||
@@ -1495,6 +1495,9 @@ int __ref add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags)
 	register_memory_blocks_under_node(nid, PFN_DOWN(start),
 					  PFN_UP(start + size - 1),
 					  MEMINIT_HOTPLUG);
+
+	if (mhp_flags & MHP_PREONLINE)
+		set_memory_block_pre_online(start, size, true);
 
 	/* create new memmap entry */
 	if (!strcmp(res->name, "System RAM"))

@@ -116,6 +116,12 @@ typedef int __bitwise mhp_t;
 #define MHP_NID_IS_MGID		((__force mhp_t)BIT(2))
 
 /*
+ * Online memory to pre-online state, i.e., memblock device and vmemmap are
+ * created, but pages are keep isolated to avoid being allocated.
+ */
+#define MHP_PREONLINE ((__force mhp_t)BIT(3))
+
+/*
  * Extended parameters for memory hotplug:
  * altmap: alternative allocator for memmap array (optional)
  * pgprot: page protection flags to apply to newly created page tables
@@ -176,6 +182,7 @@ extern int set_online_page_callback(online_page_callback_t callback);
 extern int restore_online_page_callback(online_page_callback_t callback);
 
 extern int try_online_node(int nid);
+extern int check_hotplug_memory_range(u64 start, u64 size);
 
 extern int arch_add_memory(int nid, u64 start, u64 size,
 			   struct mhp_params *params);

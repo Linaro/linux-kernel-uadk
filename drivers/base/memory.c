@@ -25,6 +25,7 @@
 
 #include <linux/atomic.h>
 #include <linux/uaccess.h>
+#include <linux/numa_remote.h>
 
 #define MEMORY_CLASS_NAME	"memory"
 
@@ -915,6 +916,62 @@ void remove_memory_block_devices(unsigned long start, unsigned long size)
 		remove_memory_block(mem);
 	}
 }
+
+#ifdef CONFIG_NUMA_REMOTE
+bool check_memory_block_nid(unsigned long start, unsigned long size, int nid)
+{
+	unsigned long start_block_id = pfn_to_block_id(PFN_DOWN(start));
+	unsigned long end_block_id = pfn_to_block_id(PFN_DOWN(start + size));
+	unsigned long block_id;
+	struct memory_block *mem;
+
+	for (block_id = start_block_id; block_id != end_block_id; block_id++) {
+		mem = find_memory_block_by_id(block_id);
+		if (!mem)
+			return false;
+
+		if (mem->nid != nid)
+			return false;
+	}
+	return true;
+}
+
+bool check_memory_block_pre_online(unsigned long start, unsigned long size,
+				   bool pre_online)
+{
+	unsigned long start_block_id = pfn_to_block_id(PFN_DOWN(start));
+	unsigned long end_block_id = pfn_to_block_id(PFN_DOWN(start + size));
+	unsigned long block_id;
+	struct memory_block *mem;
+
+	for (block_id = start_block_id; block_id != end_block_id; block_id++) {
+		mem = find_memory_block_by_id(block_id);
+		if (!mem)
+			return false;
+
+		if (mem->pre_online != pre_online)
+			return false;
+	}
+	return true;
+}
+
+void set_memory_block_pre_online(unsigned long start, unsigned long size,
+				   bool pre_online)
+{
+	unsigned long start_block_id = pfn_to_block_id(PFN_DOWN(start));
+	unsigned long end_block_id = pfn_to_block_id(PFN_DOWN(start + size));
+	unsigned long block_id;
+	struct memory_block *mem;
+
+	for (block_id = start_block_id; block_id != end_block_id; block_id++) {
+		mem = find_memory_block_by_id(block_id);
+		if (!mem)
+			continue;
+
+		mem->pre_online = pre_online;
+	}
+}
+#endif
 
 static struct attribute *memory_root_attrs[] = {
 #ifdef CONFIG_ARCH_MEMORY_PROBE

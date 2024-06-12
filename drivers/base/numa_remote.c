@@ -154,3 +154,31 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(remove_memory_remote);
+
+int numa_remote_set_distance(int target, int *node_ids, int *node_distances,
+			     int count)
+{
+	int i;
+
+	if (!numa_remote_enabled)
+		return -EINVAL;
+
+	if (target <= NUMA_NO_NODE || target >= MAX_NUMNODES)
+		return -EINVAL;
+
+	if (!numa_is_remote_node(target))
+		return -EINVAL;
+
+	for (i = 0; i < count; i++) {
+		if (numa_is_remote_node(node_ids[i]))
+			return -EINVAL;
+	}
+
+	for (i = 0; i < count; i++) {
+		numa_set_distance(target, node_ids[i], node_distances[i]);
+		numa_set_distance(node_ids[i], target, node_distances[i]);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(numa_remote_set_distance);

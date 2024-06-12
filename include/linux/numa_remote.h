@@ -13,6 +13,8 @@ bool numa_is_remote_node(int nid);
 void numa_register_remote_nodes(void);
 int add_memory_remote(int nid, u64 start, u64 size, int flags);
 int remove_memory_remote(int nid, u64 start, u64 size);
+int numa_remote_set_distance(int target, int *node_ids, int *node_distances,
+			     int count);
 #else
 static inline bool numa_is_remote_node(int nid)
 {
@@ -29,6 +31,12 @@ static inline int add_memory_remote(int nid, u64 start, u64 size, int flags)
 }
 
 static inline int remove_memory_remote(int nid, u64 start, u64 size)
+{
+	return -EINVAL;
+}
+
+static inline int numa_remote_set_distance(int target, int *node_ids,
+					   int *node_distances, int count)
 {
 	return -EINVAL;
 }

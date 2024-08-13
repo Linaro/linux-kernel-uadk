@@ -3475,7 +3475,8 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 	 */
 	if (!(fwspec->flags & IOMMU_FWSPEC_PCI_RC_CANWBS) &&
 	    !(master->smmu->features & ARM_SMMU_FEAT_S2FWB))
-		return ERR_PTR(-EOPNOTSUPP);
+		printk("gzf %s hack\n", __func__);
+		//return ERR_PTR(-EOPNOTSUPP);
 
 	/*
 	 * FORCE_SYNC is not set with FEAT_NESTING. Some study of the exact HW
@@ -3966,6 +3967,7 @@ static struct iommu_ops arm_smmu_ops = {
 	.def_domain_type	= arm_smmu_def_domain_type,
 	.pgsize_bitmap		= -1UL, /* Restricted during device attach */
 	.owner			= THIS_MODULE,
+	.user_pasid_table	= 1,
 	.default_domain_ops = &(const struct iommu_domain_ops) {
 		.attach_dev		= arm_smmu_attach_dev,
 		.enforce_cache_coherency = arm_smmu_enforce_cache_coherency,

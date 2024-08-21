@@ -1,9 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0-only
+config IOMMUFD_DRIVER_CORE
+	tristate
+	default IOMMUFD_DRIVER || IOMMUFD
+
 config IOMMUFD
 	tristate "IOMMU Userspace API"
 	select INTERVAL_TREE
 	select INTERVAL_TREE_SPAN_ITER
 	select IOMMU_API
+	select IOMMUFD_DRIVER_CORE
 	default n
 	help
 	  Provides /dev/iommu, the user API to control the IOMMU subsystem as

@@ -3854,6 +3854,11 @@ __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 	pflags = PSI_GLOBAL_RECLAIM;
 	psi_memstall_enter(&pflags);
 	*did_some_progress = __perform_reclaim(gfp_mask, order, ac);
+
+	if (unlikely(*did_some_progress < min(1UL << order, SWAP_CLUSTER_MAX)))
+		*did_some_progress += do_reclaim_notify(RR_DIRECT_RECLAIM,
+							(const void *)ac);
+
 	if (unlikely(!(*did_some_progress)))
 		goto out;
 

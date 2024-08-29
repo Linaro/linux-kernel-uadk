@@ -6917,6 +6917,13 @@ restart:
 		if (sc.priority < DEF_PRIORITY - 2)
 			sc.may_writepage = 1;
 
+		/*
+		 * If we're still in reclaiming trouble state, try to notify
+		 * some modules concerned about this.
+		 */
+		if (sc.priority == DEF_PRIORITY - 3 || sc.priority == 1)
+			do_reclaim_notify(RR_KSWAPD, (const void *)pgdat);
+
 		/* Call soft limit reclaim before calling shrink_node. */
 		sc.nr_scanned = 0;
 		nr_soft_scanned = 0;

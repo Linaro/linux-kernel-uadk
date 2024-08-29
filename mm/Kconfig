@@ -1259,6 +1259,15 @@ config PTE_MARKER_UFFD_WP
 	  purposes.  It is required to enable userfaultfd write protection on
 	  file-backed memory types like shmem and hugetlbfs.
 
+config RECLAIM_NOTIFY
+	bool "notify call for memory recliam"
+	depends on NUMA_REMOTE
+	default n
+	help
+	  Add a notifer chain to the memory reclaim.  If one of the registered
+	  callbacks could release some memory, do not reclaim anymore and avoid
+	  possible oom.
+
 config USERSWAP
 	bool "Enable User Swap"
 	depends on MMU && USERFAULTFD

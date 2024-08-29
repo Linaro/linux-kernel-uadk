@@ -19,7 +19,7 @@
 /* The default distance between two remtoe node */
 #define REMOTE_TO_REMOTE_DISTANCE	254
 
-static bool numa_remote_enabled __ro_after_init;
+bool numa_remote_enabled __ro_after_init;
 static bool numa_remote_nofallback_mode __ro_after_init;
 static bool numa_remote_preonline_mode __ro_after_init;
 static bool numa_remote_hugetlb_nowatermark_mode __ro_after_init;

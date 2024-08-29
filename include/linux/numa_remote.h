@@ -13,6 +13,7 @@
 #define MEMORY_DIRECT_ONLINE 2
 
 #ifdef CONFIG_NUMA_REMOTE
+extern bool numa_remote_enabled;
 bool numa_is_remote_node(int nid);
 bool numa_remote_nofallback(int nid);
 bool numa_remote_preonline(int nid);
@@ -28,6 +29,7 @@ void numa_remote_unregister_node(struct node *node);
 void numa_remote_report_meminfo(struct seq_file *m);
 int numa_remote_report_node_meminfo(char *buf, int len, int nid);
 #else
+#define numa_remote_enabled	false
 static inline bool numa_is_remote_node(int nid)
 {
 	return false;

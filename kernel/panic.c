@@ -58,6 +58,7 @@ static int pause_on_oops;
 static int pause_on_oops_flag;
 static DEFINE_SPINLOCK(pause_on_oops_lock);
 bool crash_kexec_post_notifiers;
+EXPORT_SYMBOL_GPL(crash_kexec_post_notifiers);
 int panic_on_warn __read_mostly;
 unsigned long panic_on_taint;
 bool panic_on_taint_nousertaint = false;
@@ -76,8 +77,10 @@ EXPORT_SYMBOL_GPL(panic_timeout);
 unsigned long panic_print;
 
 ATOMIC_NOTIFIER_HEAD(panic_notifier_list);
+ATOMIC_NOTIFIER_HEAD(panic_early_notifier_list);
 
 EXPORT_SYMBOL(panic_notifier_list);
+EXPORT_SYMBOL(panic_early_notifier_list);
 
 #ifdef CONFIG_SYSCTL
 static struct ctl_table kern_panic_table[] = {
@@ -346,6 +349,9 @@ void panic(const char *fmt, ...)
 	 * running on them.
 	 */
 	kgdb_panic(buf);
+
+	/* Run any panic handlers before cpu shutdown. */
+	atomic_notifier_call_chain(&panic_early_notifier_list, 0, buf);
 
 	/*
 	 * If we have crashed and we have a crash kernel loaded let it handle

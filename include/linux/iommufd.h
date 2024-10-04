@@ -14,6 +14,7 @@
 struct device;
 struct file;
 struct iommu_group;
+struct iommu_user_data_array;
 struct iommufd_access;
 struct iommufd_ctx;
 struct iommufd_device;
@@ -95,12 +96,21 @@ struct iommufd_vdevice {
  * @vdevice_free: Free a driver-managed iommufd_vdevice to de-init its structure
  *                or HW procedure. The memory of the vdevice will be free-ed by
  *                iommufd core.
+ * @cache_invalidate: Flush hardware cache used by a vIOMMU. It can be used for
+ *                    any IOMMU hardware specific cache: TLB and device cache.
+ *                    The @array passes in the cache invalidation requests, in
+ *                    form of a driver data structure. A driver must update the
+ *                    array->entry_num to report the number of handled requests.
+ *                    The data structure of the array entry must be defined in
+ *                    include/uapi/linux/iommufd.h
  */
 struct iommufd_viommu_ops {
 	void (*free)(struct iommufd_viommu *viommu);
 	struct iommufd_vdevice *(*vdevice_alloc)(struct iommufd_viommu *viommu,
 						 struct device *dev, u64 id);
 	void (*vdevice_free)(struct iommufd_vdevice *vdev);
+	int (*cache_invalidate)(struct iommufd_viommu *viommu,
+				struct iommu_user_data_array *array);
 };
 
 #if IS_ENABLED(CONFIG_IOMMUFD)

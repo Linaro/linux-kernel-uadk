@@ -85,6 +85,7 @@ struct iommufd_vdevice {
 	struct iommufd_viommu *viommu;
 	u64 id; /* per-vIOMMU virtual ID */
 };
+struct device *vdev_to_dev(struct iommufd_vdevice *vdev);
 
 /**
  * struct iommufd_viommu_ops - vIOMMU specific operations
@@ -134,6 +135,7 @@ __iommufd_viommu_alloc(struct iommufd_ctx *ictx, size_t size,
 		       const struct iommufd_viommu_ops *ops);
 struct iommufd_vdevice *
 __iommufd_vdevice_alloc(struct iommufd_ctx *ictx, size_t size);
+struct device *vdev_to_dev(struct iommufd_vdevice *vdev);
 #else /* !CONFIG_IOMMUFD */
 static inline struct iommufd_ctx *iommufd_ctx_from_file(struct file *file)
 {
@@ -186,6 +188,11 @@ static inline struct iommufd_vdevice *
 __iommufd_vdevice_alloc(struct iommufd_ctx *ictx, size_t size)
 {
 	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline struct device *vdev_to_dev(struct iommufd_vdevice *vdev)
+{
+	return NULL;
 }
 #endif /* CONFIG_IOMMUFD */
 

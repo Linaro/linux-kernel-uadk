@@ -202,6 +202,17 @@ out_abort:
 	return ERR_PTR(rc);
 }
 
+static inline bool
+iommufd_hwpt_nested_has_invalidate_op(struct iommufd_hwpt_nested *hwpt_nested)
+{
+	struct iommufd_viommu *viommu = hwpt_nested->viommu;
+
+	if (viommu)
+		return viommu->ops && viommu->ops->cache_invalidate;
+	else
+		return hwpt_nested->common.domain->ops->cache_invalidate_user;
+}
+
 /**
  * iommufd_hwpt_nested_alloc() - Get a NESTED iommu_domain for a device
  * @ictx: iommufd context
@@ -257,7 +268,7 @@ iommufd_hwpt_nested_alloc(struct iommufd_ctx *ictx,
 	hwpt->domain->owner = ops;
 
 	if (WARN_ON_ONCE(hwpt->domain->type != IOMMU_DOMAIN_NESTED ||
-			 !hwpt->domain->ops->cache_invalidate_user)) {
+			 !iommufd_hwpt_nested_has_invalidate_op(hwpt_nested))) {
 		rc = -EINVAL;
 		goto out_abort;
 	}

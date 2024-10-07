@@ -2661,7 +2661,7 @@ to_smmu_domain_devices(struct iommu_domain *domain)
 	    domain->type == IOMMU_DOMAIN_SVA)
 		return to_smmu_domain(domain);
 	if (domain->type == IOMMU_DOMAIN_NESTED)
-		return to_smmu_nested_domain(domain)->s2_parent;
+		return to_smmu_nested_domain(domain)->vsmmu->s2_parent;
 	return NULL;
 }
 
@@ -3126,13 +3126,9 @@ arm_smmu_domain_alloc_user(struct device *dev, u32 flags,
 	struct arm_smmu_domain *smmu_domain;
 	int ret;
 
-	if (parent)
-		return arm_smmu_domain_alloc_nesting(dev, flags, parent,
-						     user_data);
-
 	if (flags & ~PAGING_FLAGS)
 		return ERR_PTR(-EOPNOTSUPP);
-	if (user_data)
+	if (parent || user_data)
 		return ERR_PTR(-EOPNOTSUPP);
 
 	smmu_domain = arm_smmu_domain_alloc();
@@ -3541,6 +3537,7 @@ static struct iommu_ops arm_smmu_ops = {
 	.dev_disable_feat	= arm_smmu_dev_disable_feature,
 	.page_response		= arm_smmu_page_response,
 	.def_domain_type	= arm_smmu_def_domain_type,
+	.viommu_alloc		= arm_vsmmu_alloc,
 	.user_pasid_table	= 1,
 	.pgsize_bitmap		= -1UL, /* Restricted during device attach */
 	.owner			= THIS_MODULE,

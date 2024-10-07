@@ -212,3 +212,27 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 
 	return &nested_domain->domain;
 }
+
+struct iommufd_viommu *
+arm_vsmmu_alloc(struct iommu_device *iommu_dev, struct iommu_domain *parent,
+		struct iommufd_ctx *ictx, unsigned int viommu_type)
+{
+	struct arm_smmu_device *smmu =
+		container_of(iommu_dev, struct arm_smmu_device, iommu);
+	struct arm_smmu_domain *s2_parent = to_smmu_domain(parent);
+	struct arm_vsmmu *vsmmu;
+
+	if (viommu_type != IOMMU_VIOMMU_TYPE_ARM_SMMUV3)
+		return ERR_PTR(-EOPNOTSUPP);
+
+	vsmmu = iommufd_viommu_alloc(ictx, arm_vsmmu, core, NULL);
+	if (IS_ERR(vsmmu))
+		return ERR_CAST(vsmmu);
+
+	vsmmu->smmu = smmu;
+	vsmmu->s2_parent = s2_parent;
+	/* FIXME Move VMID allocation from the S2 domain allocation to here */
+	vsmmu->vmid = s2_parent->s2_cfg.vmid;
+
+	return &vsmmu->core;
+}

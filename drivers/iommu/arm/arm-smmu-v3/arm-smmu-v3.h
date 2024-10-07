@@ -10,6 +10,7 @@
 
 #include <linux/bitfield.h>
 #include <linux/iommu.h>
+#include <linux/iommufd.h>
 #include <linux/kernel.h>
 #include <linux/mmzone.h>
 #include <linux/sizes.h>
@@ -1005,18 +1006,35 @@ tegra241_cmdqv_probe(struct arm_smmu_device *smmu)
 }
 #endif /* CONFIG_TEGRA241_CMDQV */
 
+struct arm_vsmmu {
+	struct iommufd_viommu core;
+	struct arm_smmu_device *smmu;
+	struct arm_smmu_domain *s2_parent;
+	u16 vmid;
+};
+
 #if IS_ENABLED(CONFIG_ARM_SMMU_V3_IOMMUFD)
 void *arm_smmu_hw_info(struct device *dev, u32 *length, u32 *type);
 struct iommu_domain *
 arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 			      struct iommu_domain *parent,
 			      const struct iommu_user_data *user_data);
+struct iommufd_viommu *
+arm_vsmmu_alloc(struct iommu_device *iommu_dev, struct iommu_domain *parent,
+		struct iommufd_ctx *ictx, unsigned int viommu_type);
 #else
 #define arm_smmu_hw_info NULL
 static inline struct iommu_domain *
 arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 			      struct iommu_domain *parent,
 			      const struct iommu_user_data *user_data)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline struct iommufd_viommu *
+arm_vsmmu_alloc(struct iommu_device *iommu_dev, struct iommu_domain *parent,
+		struct iommufd_ctx *ictx, unsigned int viommu_type)
 {
 	return ERR_PTR(-EOPNOTSUPP);
 }

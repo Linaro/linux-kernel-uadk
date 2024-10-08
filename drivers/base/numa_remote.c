@@ -25,7 +25,18 @@ static bool numa_remote_preonline_mode __ro_after_init;
 
 static nodemask_t numa_nodes_remote;
 
+struct undo_fake_online_control {
+	u64 start;
+	u64 size;
+	struct llist_node llist;
+};
+
+static LLIST_HEAD(undo_fake_online_list);
+
+static atomic_long_t undo_fake_online_pages_node[MAX_NUMNODES];
+
 static DEFINE_MUTEX(numa_remote_lock);
+static DECLARE_RWSEM(numa_remote_state_lock);
 
 bool numa_is_remote_node(int nid)
 {
@@ -236,6 +247,7 @@ static int __ref numa_remote_undo_fake_online(u64 start, u64 size)
 {
 	unsigned long start_pfn = PFN_DOWN(start);
 	unsigned long end_pfn = PFN_DOWN(start + size);
+	unsigned long nr_pages = end_pfn - start_pfn;
 	struct zone *zone;
 	int nid;
 	int ret = 0;
@@ -262,6 +274,7 @@ static int __ref numa_remote_undo_fake_online(u64 start, u64 size)
 
 	set_memory_block_pre_online(start, size, false);
 	numa_remote_online_pages(start_pfn, end_pfn);
+	atomic_long_add(-nr_pages, &undo_fake_online_pages_node[nid]);
 
 	init_per_zone_wmark_min();
 	writeback_set_ratelimit();
@@ -287,6 +300,61 @@ static int __ref numa_remote_restore_isolation(u64 start, u64 size)
 
 out:
 	mem_hotplug_done();
+	return ret;
+}
+
+static void undo_fake_online_work_fn(struct work_struct *work)
+{
+	struct undo_fake_online_control *uic;
+	struct llist_node *node;
+
+	node = llist_del_all(&undo_fake_online_list);
+
+	while (node) {
+		uic = container_of(node, struct undo_fake_online_control, llist);
+		node = node->next;
+
+		mutex_lock(&numa_remote_lock);
+		numa_remote_undo_fake_online(uic->start, uic->size);
+		mutex_unlock(&numa_remote_lock);
+		kfree(uic);
+	}
+}
+
+static DECLARE_WORK(undo_fake_online_work, undo_fake_online_work_fn);
+
+static void numa_remote_wait_undo_fake_online(void)
+{
+	flush_work(&undo_fake_online_work);
+}
+
+bool numa_remote_try_wait_undo_fake_online(int nid)
+{
+	int ret = false;
+
+	if (!numa_remote_preonline(nid))
+		return ret;
+
+	if (!atomic_long_read(&undo_fake_online_pages_node[nid]))
+		return ret;
+
+	/*
+	 * Avoid circular locking lockdep warnings. Preonline and
+	 * offline require numa_remote_lock and vma lock. undo_fake_online_work
+	 * requires numa_remote_lock. handle_mm_fault() may flush undo_fake_online_work
+	 * with vma lock held. This forms circular locking dependency. However,
+	 * numa_remote_state_lock guarantees when preonline or offline is doing,
+	 * handle_mm_fault() won't flush undo_fake_online_work. False positive.
+	 */
+	lockdep_off();
+	if (!down_read_trylock(&numa_remote_state_lock))
+		goto out;
+
+	numa_remote_wait_undo_fake_online();
+	up_read(&numa_remote_state_lock);
+	ret = true;
+out:
+	lockdep_on();
 	return ret;
 }
 
@@ -339,9 +407,15 @@ int add_memory_remote(int nid, u64 start, u64 size, int flags)
 	if (flags == (MEMORY_KEEP_ISOLATED | MEMORY_DIRECT_ONLINE))
 		return NUMA_NO_NODE;
 
+	if (flags & (MEMORY_KEEP_ISOLATED | MEMORY_DIRECT_ONLINE)) {
+		numa_remote_wait_undo_fake_online();
+		down_write(&numa_remote_state_lock);
+	}
 	mutex_lock(&numa_remote_lock);
 
 	if (numa_remote_preonline_mode && !flags) {
+		struct undo_fake_online_control *uic;
+
 		if (check_hotplug_memory_range(start, size))
 			goto out;
 		/* Check whether all memory block are pre-online. */
@@ -355,10 +429,19 @@ int add_memory_remote(int nid, u64 start, u64 size, int flags)
 			goto out;
 		}
 
-		if (numa_remote_undo_fake_online(start, size)) {
+		uic = kzalloc(sizeof(struct undo_fake_online_control),
+					GFP_KERNEL);
+		if (!uic) {
 			real_nid = NUMA_NO_NODE;
 			goto out;
 		}
+
+		atomic_long_add(size / PAGE_SIZE, &undo_fake_online_pages_node[real_nid]);
+		uic->start = start;
+		uic->size = size;
+		if (llist_add(&uic->llist, &undo_fake_online_list))
+			schedule_work(&undo_fake_online_work);
+		goto out;
 	}
 
 	lock_device_hotplug();
@@ -387,6 +470,8 @@ unlock:
 	unlock_device_hotplug();
 out:
 	mutex_unlock(&numa_remote_lock);
+	if (flags & (MEMORY_KEEP_ISOLATED | MEMORY_DIRECT_ONLINE))
+		up_write(&numa_remote_state_lock);
 	return real_nid;
 }
 EXPORT_SYMBOL_GPL(add_memory_remote);
@@ -411,6 +496,9 @@ int remove_memory_remote(int nid, u64 start, u64 size)
 	if (!numa_is_remote_node(nid) || !node_online(nid))
 		return -EINVAL;
 
+	numa_remote_wait_undo_fake_online();
+
+	down_write(&numa_remote_state_lock);
 	mutex_lock(&numa_remote_lock);
 	if (!check_memory_block_nid(start, size, nid))
 		goto out;
@@ -437,6 +525,7 @@ int remove_memory_remote(int nid, u64 start, u64 size)
 
 out:
 	mutex_unlock(&numa_remote_lock);
+	up_write(&numa_remote_state_lock);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(remove_memory_remote);

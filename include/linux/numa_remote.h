@@ -16,6 +16,7 @@ bool numa_is_remote_node(int nid);
 bool numa_remote_nofallback(int nid);
 bool numa_remote_preonline(int nid);
 void numa_register_remote_nodes(void);
+bool numa_remote_try_wait_undo_fake_online(int nid);
 int add_memory_remote(int nid, u64 start, u64 size, int flags);
 int remove_memory_remote(int nid, u64 start, u64 size);
 int numa_remote_set_distance(int target, int *node_ids, int *node_distances,
@@ -38,6 +39,11 @@ static inline bool numa_remote_preonline(int nid)
 
 static inline void numa_register_remote_nodes(void)
 {
+}
+
+static inline bool numa_remote_try_wait_undo_fake_online(int nid)
+{
+	return false;
 }
 
 static inline int add_memory_remote(int nid, u64 start, u64 size, int flags)

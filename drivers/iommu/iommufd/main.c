@@ -89,6 +89,26 @@ struct iommufd_object *iommufd_get_object(struct iommufd_ctx *ictx, u32 id,
 	return obj;
 }
 
+int iommufd_verify_unfinalized_object(struct iommufd_ctx *ictx,
+				      struct iommufd_object *to_verify)
+{
+	XA_STATE(xas, &ictx->objects, 0);
+	struct iommufd_object *obj;
+	int rc = 0;
+
+	if (!to_verify || !to_verify->id)
+		return -EINVAL;
+	xas.xa_index = to_verify->id;
+
+	xa_lock(&ictx->objects);
+	obj = xas_load(&xas);
+	/* Being an unfinalized object, the loaded obj is a reserved space */
+	if (obj != XA_ZERO_ENTRY)
+		rc = -ENOENT;
+	xa_unlock(&ictx->objects);
+	return rc;
+}
+
 static int iommufd_object_dec_wait_shortterm(struct iommufd_ctx *ictx,
 					     struct iommufd_object *to_destroy)
 {

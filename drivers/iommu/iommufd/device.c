@@ -277,6 +277,11 @@ EXPORT_SYMBOL_NS_GPL(iommufd_ctx_has_group, IOMMUFD);
  */
 void iommufd_device_unbind(struct iommufd_device *idev)
 {
+	mutex_lock(&idev->igroup->lock);
+	/* idev->vdev object should be destroyed prior, yet just in case.. */
+	if (idev->vdev)
+		iommufd_object_remove(idev->ictx, NULL, idev->vdev->obj.id, 0);
+	mutex_unlock(&idev->igroup->lock);
 	iommufd_object_destroy_user(idev->ictx, &idev->obj);
 }
 EXPORT_SYMBOL_NS_GPL(iommufd_device_unbind, IOMMUFD);

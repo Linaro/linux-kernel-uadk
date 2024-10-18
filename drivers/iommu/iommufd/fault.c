@@ -11,6 +11,7 @@
 #include <linux/mutex.h>
 #include <linux/pci.h>
 #include <linux/poll.h>
+#include <linux/pci-ats.h>
 #include <uapi/linux/iommufd.h>
 
 #include "../iommu-priv.h"
@@ -27,10 +28,13 @@ static int iommufd_fault_iopf_enable(struct iommufd_device *idev)
 	 * resource between PF and VFs. There is no coordination for this
 	 * shared capability. This waits for a vPRI reset to recover.
 	 */
-	if (dev_is_pci(dev) && to_pci_dev(dev)->is_virtfn) {
-		printk("gzf %s hack\n", __func__);
-		//return -EINVAL;
+	if (dev_is_pci(dev)) {
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		if (pdev->is_virtfn && pci_pri_supported(pdev))
+			return -EINVAL;
 	}
+
 
 	mutex_lock(&idev->iopf_lock);
 	/* Device iopf has already been on. */

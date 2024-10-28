@@ -3570,6 +3570,7 @@ static struct iommu_ops arm_smmu_ops = {
 	.viommu_alloc		= arm_vsmmu_alloc,
 	.pgsize_bitmap		= -1UL, /* Restricted during device attach */
 	.owner			= THIS_MODULE,
+	.user_pasid_table	= 1,
 	.default_domain_ops = &(const struct iommu_domain_ops) {
 		.attach_dev		= arm_smmu_attach_dev,
 		.enforce_cache_coherency = arm_smmu_enforce_cache_coherency,

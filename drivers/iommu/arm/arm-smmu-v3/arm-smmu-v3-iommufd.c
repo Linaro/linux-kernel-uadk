@@ -203,7 +203,8 @@ arm_smmu_domain_alloc_nesting(struct device *dev, u32 flags,
 	 */
 	if (!arm_smmu_master_canwbs(master) &&
 	    !(master->smmu->features & ARM_SMMU_FEAT_S2FWB))
-		return ERR_PTR(-EOPNOTSUPP);
+		printk("gzf %s hack\n", __func__);
+		//return ERR_PTR(-EOPNOTSUPP);
 
 	/*
 	 * The core code checks that parent was created with
@@ -297,7 +298,7 @@ arm_vsmmu_convert_user_cmd(struct arm_vsmmu *vsmmu,
 		break;
 	case CMDQ_OP_ATC_INV:
 	case CMDQ_OP_CFGI_CD:
-	case CMDQ_OP_CFGI_CD_ALL:
+	case CMDQ_OP_CFGI_CD_ALL: {
 		u32 sid, vsid = FIELD_GET(CMDQ_CFGI_0_SID, cmd->cmd[0]);
 
 		if (arm_vsmmu_vsid_to_sid(vsmmu, vsid, &sid))
@@ -305,6 +306,7 @@ arm_vsmmu_convert_user_cmd(struct arm_vsmmu *vsmmu,
 		cmd->cmd[0] &= ~CMDQ_CFGI_0_SID;
 		cmd->cmd[0] |= FIELD_PREP(CMDQ_CFGI_0_SID, sid);
 		break;
+	}
 	default:
 		return -EIO;
 	}

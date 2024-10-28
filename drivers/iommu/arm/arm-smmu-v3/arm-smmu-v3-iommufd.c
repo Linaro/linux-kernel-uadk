@@ -375,7 +375,8 @@ struct iommufd_viommu *arm_vsmmu_alloc(struct device *dev,
 	 */
 	if (!arm_smmu_master_canwbs(master) &&
 	    !(smmu->features & ARM_SMMU_FEAT_S2FWB))
-		return ERR_PTR(-EOPNOTSUPP);
+		printk("gzf %s hack\n", __func__);
+		//return ERR_PTR(-EOPNOTSUPP);
 
 	vsmmu = iommufd_viommu_alloc(ictx, struct arm_vsmmu, core,
 				     &arm_vsmmu_ops);

@@ -279,8 +279,9 @@ iommufd_viommu_alloc_hwpt_nested(struct iommufd_viommu *viommu, u32 flags,
 	struct iommufd_hw_pagetable *hwpt;
 	int rc;
 
-	if (flags)
-		return ERR_PTR(-EOPNOTSUPP);
+printk("gzf %s flags=0x%x\n", __func__, flags);
+//	if (flags)
+//		return ERR_PTR(-EOPNOTSUPP);
 	if (!viommu->ops || !viommu->ops->alloc_domain_nested)
 		return ERR_PTR(-EOPNOTSUPP);
 

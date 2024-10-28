@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
+#include <linux/pci-ats.h>
 #include <linux/poll.h>
 #include <uapi/linux/iommufd.h>
 
@@ -27,8 +28,12 @@ static int iommufd_fault_iopf_enable(struct iommufd_device *idev)
 	 * resource between PF and VFs. There is no coordination for this
 	 * shared capability. This waits for a vPRI reset to recover.
 	 */
-	if (dev_is_pci(dev) && to_pci_dev(dev)->is_virtfn)
-		return -EINVAL;
+	if (dev_is_pci(dev)) {
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		if (pdev->is_virtfn && pci_pri_supported(pdev))
+			return -EINVAL;
+	}
 
 	mutex_lock(&idev->iopf_lock);
 	/* Device iopf has already been on. */
@@ -40,6 +45,10 @@ static int iommufd_fault_iopf_enable(struct iommufd_device *idev)
 	ret = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_IOPF);
 	if (ret)
 		--idev->iopf_enabled;
+	ret = iommu_dev_enable_feature(idev->dev, IOMMU_DEV_FEAT_SVA);
+	if (ret) {
+		return ret;
+	}
 	mutex_unlock(&idev->iopf_lock);
 
 	return ret;
@@ -48,6 +57,7 @@ static int iommufd_fault_iopf_enable(struct iommufd_device *idev)
 static void iommufd_fault_iopf_disable(struct iommufd_device *idev)
 {
 	mutex_lock(&idev->iopf_lock);
+	iommu_dev_disable_feature(idev->dev, IOMMU_DEV_FEAT_SVA);
 	if (!WARN_ON(idev->iopf_enabled == 0)) {
 		if (--idev->iopf_enabled == 0)
 			iommu_dev_disable_feature(idev->dev, IOMMU_DEV_FEAT_IOPF);

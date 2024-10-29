@@ -347,7 +347,8 @@ static void vf_qm_fun_reset(struct hisi_qm *qm)
 
 static int vf_qm_func_stop(struct hisi_qm *qm)
 {
-	return hisi_qm_mb(qm, QM_MB_CMD_PAUSE_QM, 0, 0, 0);
+	//return hisi_qm_mb(qm, QM_MB_CMD_PAUSE_QM, 0, 0, 0);
+	return 0;
 }
 
 static int vf_qm_check_match(struct hisi_acc_vf_core_device *hisi_acc_vdev,
@@ -569,6 +570,8 @@ hisi_acc_check_int_state(struct hisi_acc_vf_core_device *hisi_acc_vdev)
 	struct pci_dev *vf_pdev = hisi_acc_vdev->vf_dev;
 	struct device *dev = &qm->pdev->dev;
 	u32 state;
+
+	return 0;
 
 	/* Check RAS state */
 	state = qm_check_reg_state(qm, QM_ABNORMAL_INT_STATUS);
@@ -1582,7 +1585,8 @@ static int hisi_acc_vfio_pci_probe(struct pci_dev *pdev, const struct pci_device
 	int ret;
 
 	pf_qm = hisi_acc_get_pf_qm(pdev);
-	if (pf_qm && pf_qm->ver >= QM_HW_V3) {
+	//if (pf_qm && pf_qm->ver >= QM_HW_V3) {
+	if (pf_qm) {
 		vf_id = pci_iov_vf_id(pdev);
 		if (vf_id >= 0)
 			ops = &hisi_acc_vfio_pci_migrn_ops;

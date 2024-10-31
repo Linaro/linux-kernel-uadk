@@ -193,8 +193,10 @@ arm_vsmmu_alloc_domain_nested(struct iommufd_viommu *viommu, u32 flags,
 	bool enable_ats = false;
 	int ret;
 
-	if (flags)
-		return ERR_PTR(-EOPNOTSUPP);
+	if (flags) {
+		printk("%s hack flags=%x\n", __func__, flags);
+		//return ERR_PTR(-EOPNOTSUPP);
+	}
 
 	ret = iommu_copy_struct_from_user(&arg, user_data,
 					  IOMMU_HWPT_DATA_ARM_SMMUV3, ste);
@@ -387,7 +389,8 @@ struct iommufd_viommu *arm_vsmmu_alloc(struct device *dev,
 	 */
 	if (!arm_smmu_master_canwbs(master) &&
 	    !(smmu->features & ARM_SMMU_FEAT_S2FWB))
-		return ERR_PTR(-EOPNOTSUPP);
+		printk("%s hack\n", __func__);
+		//return ERR_PTR(-EOPNOTSUPP);
 
 	vsmmu = iommufd_viommu_alloc(ictx, struct arm_vsmmu, core,
 				     &arm_vsmmu_ops);

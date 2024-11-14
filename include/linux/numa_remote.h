@@ -25,6 +25,8 @@ int numa_remote_set_distance(int target, int *node_ids, int *node_distances,
 			     int count);
 void numa_remote_register_node(struct node *node);
 void numa_remote_unregister_node(struct node *node);
+void numa_remote_report_meminfo(struct seq_file *m);
+int numa_remote_report_node_meminfo(char *buf, int len, int nid);
 #else
 static inline bool numa_is_remote_node(int nid)
 {
@@ -77,6 +79,15 @@ static inline void numa_remote_register_node(struct node *node)
 
 static inline void numa_remote_unregister_node(struct node *node)
 {
+}
+
+static inline void numa_remote_report_meminfo(struct seq_file *m)
+{
+}
+
+static inline int numa_remote_report_node_meminfo(char *buf, int len, int nid)
+{
+	return 0;
 }
 #endif
 #endif /* _LINUX_REMOTE_MEMORY_H_ */

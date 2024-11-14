@@ -487,6 +487,7 @@ static ssize_t node_read_meminfo(struct device *dev,
 #endif
 			    );
 	len += hugetlb_report_node_meminfo(buf, len, nid);
+	len += numa_remote_report_node_meminfo(buf, len, nid);
 	return len;
 }
 

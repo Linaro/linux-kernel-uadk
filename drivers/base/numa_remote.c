@@ -35,6 +35,8 @@ struct undo_fake_online_control {
 static LLIST_HEAD(undo_fake_online_list);
 
 static atomic_long_t undo_fake_online_pages_node[MAX_NUMNODES];
+static atomic_long_t pre_online_pages_node[MAX_NUMNODES];
+static atomic_long_t pre_online_pages;
 
 static DEFINE_MUTEX(numa_remote_lock);
 static DECLARE_RWSEM(numa_remote_state_lock);
@@ -221,6 +223,7 @@ struct notifier_block numa_remote_memory_notifier = {
 static void numa_remote_preonline_pages(struct page *page, unsigned int order)
 {
 	unsigned long start_pfn, end_pfn, pfn, nr_pages;
+	int nid = page_to_nid(page);
 	struct page *p;
 
 	start_pfn = page_to_pfn(page);
@@ -232,6 +235,8 @@ static void numa_remote_preonline_pages(struct page *page, unsigned int order)
 		ClearPageReserved(p);
 	}
 	numa_remote_optimize_vmemmap(start_pfn, end_pfn);
+	atomic_long_add(nr_pages, &pre_online_pages_node[nid]);
+	atomic_long_add(nr_pages, &pre_online_pages);
 }
 
 static void numa_remote_online_pages(unsigned long start_pfn, unsigned long end_pfn)
@@ -283,6 +288,8 @@ static int __ref numa_remote_undo_fake_online(u64 start, u64 size)
 	}
 
 	set_memory_block_pre_online(start, size, false);
+	atomic_long_add(-nr_pages, &pre_online_pages_node[nid]);
+	atomic_long_add(-nr_pages, &pre_online_pages);
 	numa_remote_online_pages(start_pfn, end_pfn);
 	atomic_long_add(-nr_pages, &undo_fake_online_pages_node[nid]);
 
@@ -298,6 +305,9 @@ static int __ref numa_remote_restore_isolation(u64 start, u64 size)
 {
 	unsigned long start_pfn = PFN_DOWN(start);
 	unsigned long end_pfn = PFN_DOWN(start + size);
+	unsigned long nr_pages = end_pfn - start_pfn;
+	struct zone *zone = page_zone(phys_to_page(start));
+	int nid = zone_to_nid(zone);
 	int ret = 0;
 
 	mem_hotplug_begin();
@@ -308,6 +318,8 @@ static int __ref numa_remote_restore_isolation(u64 start, u64 size)
 		goto out;
 	}
 
+	atomic_long_add(-nr_pages, &pre_online_pages_node[nid]);
+	atomic_long_add(-nr_pages, &pre_online_pages);
 out:
 	mem_hotplug_done();
 	return ret;
@@ -585,6 +597,41 @@ void numa_remote_unregister_node(struct node *node)
 {
 	if (numa_remote_enabled)
 		device_remove_file(&node->dev, &dev_attr_remote);
+}
+
+void numa_remote_report_meminfo(struct seq_file *m)
+{
+	pg_data_t *pgdat;
+	struct zone *zone;
+	unsigned long total_pages = 0;
+	unsigned long free_pages = 0;
+
+	if (!numa_remote_enabled)
+		return;
+
+	for_each_online_pgdat(pgdat) {
+		zone = &pgdat->node_zones[ZONE_EXTMEM];
+		if (populated_zone(zone)) {
+			total_pages += zone_managed_pages(zone);
+			free_pages += zone_page_state(zone, NR_FREE_PAGES);
+		}
+	}
+
+	seq_printf(m, "RemoteMemTotal: %8lu kB\n"
+			"RemoteMemFree:  %8lu kB\n"
+			"RemoteMemPreonline: %4lu kB\n",
+			K(total_pages), K(free_pages),
+			K(atomic_long_read(&pre_online_pages)));
+}
+
+int numa_remote_report_node_meminfo(char *buf, int len, int nid)
+{
+	if (!numa_remote_enabled)
+		return 0;
+
+	return sysfs_emit_at(buf, len,
+			     "Node %d RemoteMemPreonline: %4lu kB\n",
+			     nid, K(atomic_long_read(&pre_online_pages_node[nid])));
 }
 
 static int __init numa_remote_init(void)

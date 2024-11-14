@@ -568,6 +568,25 @@ int numa_remote_set_distance(int target, int *node_ids, int *node_distances,
 }
 EXPORT_SYMBOL_GPL(numa_remote_set_distance);
 
+static ssize_t remote_show(struct device *dev,
+			   struct device_attribute *dev_attr, char *buf)
+{
+	return sprintf(buf, "%d\n", numa_is_remote_node(dev->id));
+}
+static DEVICE_ATTR_RO(remote);
+
+void numa_remote_register_node(struct node *node)
+{
+	if (numa_remote_enabled)
+		device_create_file(&node->dev, &dev_attr_remote);
+}
+
+void numa_remote_unregister_node(struct node *node)
+{
+	if (numa_remote_enabled)
+		device_remove_file(&node->dev, &dev_attr_remote);
+}
+
 static int __init numa_remote_init(void)
 {
 	int ret;

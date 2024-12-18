@@ -1032,7 +1032,7 @@ struct zone {
 
 	CACHELINE_PADDING(_pad3_);
 
-	KABI_RESERVE(1)
+	KABI_USE(1, unsigned long nr_free_highatomic)
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)

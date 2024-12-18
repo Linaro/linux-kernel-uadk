@@ -1339,13 +1339,11 @@ struct page *__pageblock_pfn_to_page(unsigned long start_pfn,
  *
  * -- nyc
  */
-static inline void add_to_free_list(struct page *page, struct zone *zone,
-				    unsigned int order, int migratetype,
-				    bool tail);
 static inline void expand(struct zone *zone, struct page *page,
 	int low, int high, int migratetype)
 {
 	unsigned long size = 1 << high;
+	unsigned long nr_added = 0;
 
 	while (high > low) {
 		high--;
@@ -1361,9 +1359,11 @@ static inline void expand(struct zone *zone, struct page *page,
 		if (set_page_guard(zone, &page[size], high))
 			continue;
 
-		add_to_free_list(&page[size], zone, high, migratetype, false);
+		__add_to_free_list(&page[size], zone, high, migratetype, false);
 		set_buddy_order(&page[size], high);
+		nr_added += size;
 	}
+	account_freepages(zone, nr_added, migratetype);
 }
 
 static void check_new_page_bad(struct page *page)

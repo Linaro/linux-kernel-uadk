@@ -4265,4 +4265,7 @@ static inline unsigned long do_reclaim_notify(enum reclaim_reason reason,
 }
 #endif
 
+#ifdef CONFIG_PFN_RANGE_ALLOC
+extern unsigned long contig_mem_pool_percent;
+#endif
 #endif /* _LINUX_MM_H */

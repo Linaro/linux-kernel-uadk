@@ -4669,6 +4669,14 @@
 	pm_debug_messages	[SUSPEND,KNL]
 			Enable suspend/resume debug messages during boot up.
 
+	pmd_mapping=	[ARM64,KNL]
+			Format: nn%
+			Allows to allocate contiguous memory from special pfn
+			range, the linear mapping granule of this range is never
+			larger than PMD. pmd_mapping specifies the percent of
+			memory of each node. pmd_mapping=100% is used for hugetlb
+			scenarios, the whole linear mapping isn't large than PMD.
+
 	pnp.debug=1	[PNP]
 			Enable PNP debug messages (depends on the
 			CONFIG_PNP_DEBUG_MESSAGES option).  Change at run-time

@@ -16,6 +16,9 @@
 struct pmd_lm_range {
 	unsigned long start_pfn;
 	unsigned long end_pfn;
+	spinlock_t	lock;
+	unsigned long *bitmap;
+	unsigned long bitmap_maxno;
 };
 
 unsigned long contig_mem_pool_percent __ro_after_init;
@@ -189,3 +192,148 @@ void __init pmd_mapping_reserve_and_remap(void)
 out:
 	static_branch_enable(&pmd_mapping_initialized);
 }
+
+static int __init activate_reserved_range(void)
+{
+	int nid;
+	unsigned long pfn, end_pfn;
+	unsigned long bitmap_maxno;
+
+	if (!pmd_linear_mapping_enabled())
+		return 0;
+
+	for_each_online_node(nid) {
+		pfn = reserved_range[nid].start_pfn;
+		end_pfn = reserved_range[nid].end_pfn;
+
+		if (pfn == end_pfn)
+			continue;
+
+		bitmap_maxno = (end_pfn - pfn) / (PFN_RANGE_ALLOC_SIZE / PAGE_SIZE);
+		reserved_range[nid].bitmap_maxno = bitmap_maxno;
+		reserved_range[nid].bitmap = bitmap_zalloc(bitmap_maxno, GFP_KERNEL);
+		if (!reserved_range[nid].bitmap) {
+			reserved_range[nid].start_pfn = 0;
+			reserved_range[nid].end_pfn = 0;
+			pr_warn("reserved_range %d fails to be initialized\n", nid);
+			continue;
+		}
+		spin_lock_init(&reserved_range[nid].lock);
+	}
+
+	return 0;
+}
+core_initcall(activate_reserved_range);
+
+struct folio *pfn_range_alloc(unsigned int nr_pages, int nid)
+{
+	unsigned long min_align = PFN_RANGE_ALLOC_NR_PAGES;
+	gfp_t gfp_mask = (GFP_KERNEL | __GFP_COMP) & ~__GFP_RECLAIM;
+	unsigned long start, bitmap_no, bitmap_count, mask, offset;
+	struct pmd_lm_range *mem_range;
+	struct folio *folio = ERR_PTR(-EINVAL);
+	unsigned long pfn;
+	int ret;
+
+	if (in_interrupt())
+		goto out;
+
+	if (nid < 0 || nid >= MAX_NUMNODES)
+		goto out;
+
+	if (!IS_ALIGNED(nr_pages, min_align))
+		goto out;
+
+	if (can_set_direct_map() || should_pmd_linear_mapping()) {
+		int order = ilog2(nr_pages);
+
+		folio = NULL;
+		gfp_mask |= __GFP_THISNODE;
+		if (nr_pages <= MAX_ORDER_NR_PAGES)
+			folio = __folio_alloc_node(gfp_mask | __GFP_NOWARN, order, nid);
+		if (!folio)
+			folio = folio_alloc_gigantic(order, gfp_mask, nid, NULL);
+		if (!folio)
+			folio = ERR_PTR(-ENOMEM);
+
+		goto out;
+	}
+
+	mem_range = &reserved_range[nid];
+	if (!mem_range->bitmap) {
+		folio = ERR_PTR(-ENOMEM);
+		goto out;
+	}
+
+	start = 0;
+	bitmap_count = nr_pages / min_align;
+	mask = bitmap_count - 1;
+	offset = (mem_range->start_pfn & (nr_pages - 1)) / min_align;
+	for (;;) {
+		spin_lock(&mem_range->lock);
+		bitmap_no = bitmap_find_next_zero_area_off(mem_range->bitmap,
+				mem_range->bitmap_maxno, start, bitmap_count, mask, offset);
+		if (bitmap_no >= mem_range->bitmap_maxno) {
+			spin_unlock(&mem_range->lock);
+			break;
+		}
+		bitmap_set(mem_range->bitmap, bitmap_no, bitmap_count);
+		spin_unlock(&mem_range->lock);
+		pfn = mem_range->start_pfn + bitmap_no * min_align;
+		ret = alloc_contig_range(pfn, pfn + nr_pages, MIGRATE_MOVABLE, gfp_mask);
+		if (!ret) {
+			folio = pfn_folio(pfn);
+			goto out;
+		}
+
+		spin_lock(&mem_range->lock);
+		bitmap_clear(mem_range->bitmap, bitmap_no, bitmap_count);
+		spin_unlock(&mem_range->lock);
+		start = bitmap_no + bitmap_count;
+	}
+
+	folio = ERR_PTR(-ENOMEM);
+out:
+	return folio;
+}
+EXPORT_SYMBOL_GPL(pfn_range_alloc);
+
+int pfn_range_free(struct folio *folio)
+{
+	struct pmd_lm_range *mem_range;
+	unsigned long start_pfn, end_pfn;
+	unsigned long bitmap_no, bitmap_count;
+	unsigned long nr_pages = folio_nr_pages(folio);
+	unsigned long min_align = PFN_RANGE_ALLOC_NR_PAGES;
+	int ret = 0;
+
+	if (in_interrupt()) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (can_set_direct_map() || should_pmd_linear_mapping()) {
+		folio_put(folio);
+		goto out;
+	}
+
+	mem_range = &reserved_range[folio_nid(folio)];
+	start_pfn = folio_pfn(folio);
+	end_pfn = start_pfn + nr_pages;
+
+	if (start_pfn < mem_range->start_pfn || end_pfn > mem_range->end_pfn) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	free_contig_range(start_pfn, nr_pages);
+	bitmap_no = (start_pfn - mem_range->start_pfn) / min_align;
+	bitmap_count = nr_pages / min_align;
+	spin_lock(&mem_range->lock);
+	bitmap_clear(mem_range->bitmap, bitmap_no, bitmap_count);
+	spin_unlock(&mem_range->lock);
+
+out:
+	return ret;
+}
+EXPORT_SYMBOL_GPL(pfn_range_free);

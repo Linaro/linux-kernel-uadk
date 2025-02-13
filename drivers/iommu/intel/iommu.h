@@ -1317,6 +1317,49 @@ void intel_iommu_drain_pasid_prq(struct device *dev, u32 pasid);
 int intel_iommu_enable_iopf(struct device *dev);
 void intel_iommu_disable_iopf(struct device *dev);
 
+static inline int iopf_for_domain_set(struct iommu_domain *domain,
+				      struct device *dev)
+{
+	if (!domain || !domain->iopf_handler)
+		return 0;
+
+	return intel_iommu_enable_iopf(dev);
+}
+
+static inline void iopf_for_domain_remove(struct iommu_domain *domain,
+					  struct device *dev)
+{
+	if (!domain || !domain->iopf_handler)
+		return;
+
+	intel_iommu_disable_iopf(dev);
+}
+
+static inline int iopf_for_domain_replace(struct iommu_domain *new,
+					  struct iommu_domain *old,
+					  struct device *dev)
+{
+	if (!old)
+		return iopf_for_domain_set(new, dev);
+
+	if (!new) {
+		iopf_for_domain_remove(old, dev);
+		return 0;
+	}
+
+	/*
+	 * Replace a non-iopf-capable domain with an iopf-capable one requires
+	 * to enable PRI on the device. On the contrary, disable it.
+	 */
+	if (new->iopf_handler && !old->iopf_handler)
+		return intel_iommu_enable_iopf(dev);
+
+	if (!new->iopf_handler && old->iopf_handler)
+		intel_iommu_disable_iopf(dev);
+
+	return 0;
+}
+
 #ifdef CONFIG_INTEL_IOMMU_SVM
 void intel_svm_check(struct intel_iommu *iommu);
 struct iommu_domain *intel_svm_domain_alloc(struct device *dev,

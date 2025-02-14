@@ -37,6 +37,9 @@
 #include <linux/mm_inline.h>
 #include <linux/share_pool.h>
 #include <linux/dynamic_pool.h>
+#ifndef __GENKSYMS__
+#include <trace/events/kmem.h>
+#endif
 
 #include <asm/page.h>
 #include <asm/pgalloc.h>
@@ -7954,6 +7957,7 @@ struct folio *hugetlb_pool_alloc(int nid)
 		folio = ERR_PTR(-ENOMEM);
 
 out:
+	trace_hugetlb_pool_alloc(folio, nid);
 	return folio;
 }
 EXPORT_SYMBOL_GPL(hugetlb_pool_alloc);
@@ -7968,6 +7972,7 @@ int hugetlb_pool_free(struct folio *folio)
 	ret = 0;
 	folio_put(folio);
 out:
+	trace_hugetlb_pool_free(folio, ret);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(hugetlb_pool_free);

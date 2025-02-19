@@ -10,7 +10,6 @@
 #include <linux/pci.h>
 #include <linux/pm_runtime.h>
 #include <linux/topology.h>
-#include <linux/uacce.h>
 #include "hpre.h"
 
 #define CAP_FILE_PERMISSION		0444

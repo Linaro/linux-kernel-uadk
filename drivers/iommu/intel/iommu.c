@@ -3970,9 +3970,6 @@ intel_iommu_dev_enable_feat(struct device *dev, enum iommu_dev_features feat)
 	case IOMMU_DEV_FEAT_IOPF:
 		return intel_iommu_enable_iopf(dev);
 
-	case IOMMU_DEV_FEAT_SVA:
-		return 0;
-
 	default:
 		return -ENODEV;
 	}
@@ -3984,9 +3981,6 @@ intel_iommu_dev_disable_feat(struct device *dev, enum iommu_dev_features feat)
 	switch (feat) {
 	case IOMMU_DEV_FEAT_IOPF:
 		return intel_iommu_disable_iopf(dev);
-
-	case IOMMU_DEV_FEAT_SVA:
-		return 0;
 
 	default:
 		return -ENODEV;

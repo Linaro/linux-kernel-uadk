@@ -47,6 +47,7 @@
 #include <linux/hugetlb_cgroup.h>
 #include <linux/node.h>
 #include <linux/page_owner.h>
+#include <linux/numa_remote.h>
 #include "internal.h"
 #include "hugetlb_vmemmap.h"
 #include <linux/page-isolation.h>
@@ -2304,7 +2305,13 @@ static int alloc_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 	gfp_t gfp_mask = htlb_alloc_mask(h) | __GFP_THISNODE;
 
 	for_each_node_mask_to_alloc(h, nr_nodes, node, nodes_allowed) {
-		folio = alloc_fresh_hugetlb_folio(h, gfp_mask, node,
+		gfp_t gfp = 0;
+
+		/* Use __GFP_MEMALLOC to make sure all pages can be allocated */
+		if (numa_remote_hugetlb_nowatermark(node))
+			gfp |= __GFP_MEMALLOC;
+
+		folio = alloc_fresh_hugetlb_folio(h, gfp_mask | gfp, node,
 					nodes_allowed, node_alloc_noretry);
 		if (folio) {
 			free_huge_folio(folio); /* free it into the hugepage allocator */
@@ -3723,6 +3730,23 @@ found:
 	return 1;
 }
 
+#ifdef CONFIG_ZONE_EXTMEM
+static void hugetlb_drain_remote_pcp(struct hstate *h, int nid)
+{
+	pg_data_t *pgdat = NODE_DATA(nid);
+	struct zone *zone;
+
+	zone = &pgdat->node_zones[ZONE_EXTMEM];
+
+	if (zone_managed_pages(zone))
+		drain_all_pages(zone);
+}
+#else
+static inline void hugetlb_drain_remote_pcp(struct hstate *h, int nid)
+{
+}
+#endif
+
 #define persistent_huge_pages(h) (h->nr_huge_pages - h->surplus_huge_pages)
 static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 			      nodemask_t *nodes_allowed)
@@ -3732,6 +3756,7 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 	struct page *page;
 	LIST_HEAD(page_list);
 	NODEMASK_ALLOC(nodemask_t, node_alloc_noretry, GFP_KERNEL);
+	bool drained = false;
 
 	/*
 	 * Bit mask controlling how hard we retry per-node allocations.
@@ -3816,6 +3841,11 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 
 		/* yield cpu to avoid soft lockup */
 		cond_resched();
+
+		if (numa_remote_hugetlb_nowatermark(nid) && !drained && (nid != NUMA_NO_NODE)) {
+			hugetlb_drain_remote_pcp(h, nid);
+			drained = true;
+		}
 
 		ret = alloc_pool_huge_page(h, nodes_allowed,
 						node_alloc_noretry);

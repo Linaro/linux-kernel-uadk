@@ -1545,6 +1545,8 @@ static inline bool zone_is_zone_extmem(struct zone *zone)
 {
 	return zone_idx(zone) == ZONE_EXTMEM;
 }
+
+#define get_extmem_zone(nid) (&NODE_DATA((nid))->node_zones[ZONE_EXTMEM])
 #else
 static inline bool is_zone_extmem_page(const struct page *page)
 {
@@ -1555,6 +1557,8 @@ static inline bool zone_is_zone_extmem(struct zone *zone)
 {
 	return false;
 }
+
+#define get_extmem_zone(nid) NULL
 #endif
 
 /*

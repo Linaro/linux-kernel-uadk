@@ -15,6 +15,7 @@
 bool numa_is_remote_node(int nid);
 bool numa_remote_nofallback(int nid);
 bool numa_remote_preonline(int nid);
+bool numa_remote_hugetlb_nowatermark(int nid);
 void numa_register_remote_nodes(void);
 bool numa_remote_try_wait_undo_fake_online(int nid);
 int add_memory_remote(int nid, u64 start, u64 size, int flags);
@@ -33,6 +34,11 @@ static inline bool numa_remote_nofallback(int nid)
 }
 
 static inline bool numa_remote_preonline(int nid)
+{
+	return false;
+}
+
+static inline bool numa_remote_hugetlb_nowatermark(int nid)
 {
 	return false;
 }

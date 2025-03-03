@@ -22,6 +22,7 @@
 static bool numa_remote_enabled __ro_after_init;
 static bool numa_remote_nofallback_mode __ro_after_init;
 static bool numa_remote_preonline_mode __ro_after_init;
+static bool numa_remote_hugetlb_nowatermark_mode __ro_after_init;
 
 static nodemask_t numa_nodes_remote;
 
@@ -52,6 +53,11 @@ bool numa_remote_nofallback(int nid)
 bool numa_remote_preonline(int nid)
 {
 	return numa_remote_preonline_mode && numa_is_remote_node(nid);
+}
+
+bool numa_remote_hugetlb_nowatermark(int nid)
+{
+	return numa_remote_hugetlb_nowatermark_mode && numa_is_remote_node(nid);
 }
 
 static void numa_remote_reset_distance(int nid)
@@ -109,6 +115,10 @@ static int __init numa_parse_remote_nodes(char *buf)
 			numa_remote_nofallback_mode = true;
 		else if (!strncmp(buf, "preonline", 9))
 			numa_remote_preonline_mode = true;
+#ifdef CONFIG_HUGETLB_PAGE
+		else if (!strncmp(buf, "hugetlb_nowatermark", 19))
+			numa_remote_hugetlb_nowatermark_mode = true;
+#endif
 
 		buf += strcspn(buf, ",");
 		while (*buf == ',')

@@ -6760,6 +6760,35 @@ static void split_free_pages(struct list_head *list, gfp_t gfp_mask)
 	}
 }
 
+static void split_pages_to_order0(struct list_head *list)
+{
+	int order;
+
+	for (order = 1; order < NR_PAGE_ORDERS; order++) {
+		struct page *page, *next;
+		int nr_pages = 1 << order;
+
+		list_for_each_entry_safe(page, next, &list[order], lru) {
+			int i;
+
+			list_del(&page->lru);
+			for (i = 0; i < nr_pages; i++)
+				list_add_tail(&page[i].lru, &list[0]);
+		}
+	}
+}
+
+static void free_pfn_range(unsigned long start, unsigned long end, gfp_t gfp_mask)
+{
+	struct page *page;
+	unsigned long i;
+
+	page = pfn_to_page(start);
+	for (i = 0; i < end - start; ++i, ++page)
+		post_alloc_hook(page, 0, gfp_mask);
+	free_contig_range(start, end - start);
+}
+
 static int __alloc_contig_verify_gfp_mask(gfp_t gfp_mask, gfp_t *gfp_cc_mask)
 {
 	const gfp_t reclaim_mask = __GFP_IO | __GFP_FS | __GFP_RECLAIM;
@@ -6820,6 +6849,7 @@ static int __alloc_contig_verify_gfp_mask(gfp_t gfp_mask, gfp_t *gfp_cc_mask)
 int alloc_contig_range(unsigned long start, unsigned long end,
 		       unsigned migratetype, gfp_t gfp_mask)
 {
+	int range_order = ilog2(end - start);
 	unsigned long outer_start, outer_end;
 	int ret = 0;
 
@@ -6837,6 +6867,14 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 	gfp_mask = current_gfp_context(gfp_mask);
 	if (__alloc_contig_verify_gfp_mask(gfp_mask, (gfp_t *)&cc.gfp_mask))
 		return -EINVAL;
+
+	/* __GFP_COMP may only be used for certain aligned+sized ranges. */
+	if ((gfp_mask & __GFP_COMP) &&
+		(!is_power_of_2(end - start) || !IS_ALIGNED(start, 1 << range_order))) {
+		WARN_ONCE(true, "PFN range: requested [%lu, %lu) is not suitable for __GFP_COMP\n",
+				start, end);
+		return -EINVAL;
+	}
 
 	/*
 	 * What we do here is we mark all pageblocks in range as
@@ -6921,6 +6959,11 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 		goto done;
 	}
 
+	/*
+	 * With __GFP_COMP and the requested order < MAX_PAGE_ORDER,
+	 * isolated free pages can have higher order than the requested
+	 * one. Use split_free_pages() to free out of range pages.
+	 */
 	if (!(gfp_mask & __GFP_COMP)) {
 		split_free_pages(cc.freepages, gfp_mask);
 
@@ -6929,16 +6972,20 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 			free_contig_range(outer_start, start - outer_start);
 		if (end != outer_end)
 			free_contig_range(end, outer_end - end);
-	} else if (start == outer_start && end == outer_end && is_power_of_2(end - start)) {
-		struct page *head = pfn_to_page(start);
-		int order = ilog2(end - start);
-
-		check_new_pages(head, order);
-		prep_new_page(head, order, gfp_mask, 0);
 	} else {
-		ret = -EINVAL;
-		WARN(true, "PFN range: requested [%lu, %lu), allocated [%lu, %lu)\n",
-		     start, end, outer_start, outer_end);
+		struct page *head = pfn_to_page(start);
+
+		if ((outer_start != start) || (end != outer_end)) {
+			split_pages_to_order0(cc.freepages);
+			if (start != outer_start)
+				free_pfn_range(outer_start, start, gfp_mask);
+
+			if (end != outer_end)
+				free_pfn_range(end, outer_end, gfp_mask);
+		}
+
+		check_new_pages(head, range_order);
+		prep_new_page(head, range_order, gfp_mask, 0);
 	}
 done:
 	undo_isolate_page_range(start, end, migratetype);

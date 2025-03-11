@@ -1970,6 +1970,7 @@ static void quirk_huawei_pcie_sva(struct pci_dev *pdev)
 {
 	struct property_entry properties[] = {
 		PROPERTY_ENTRY_BOOL("dma-can-stall"),
+		PROPERTY_ENTRY_BOOL("canwbs"),
 		{},
 	};
 

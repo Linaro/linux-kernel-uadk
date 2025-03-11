@@ -110,6 +110,12 @@ Optional properties:
   may attempt to retrieve pages from secondary storage in a stalled
   domain, leading to a deadlock.
 
+- canwbs: When present, indicates that the hardware supports the CANWBS
+  feature defined in the IORT spec, Issue E.f (April 2024).
+  This guarantees that memory accesses to Conventional Memory will
+  maintain coherency even if the memory attributes provided by the device
+  or the IOMMU (e.g., in nested translation scenarios) differ from
+  Inner/Outer Write-Back Cacheable Shareable attributes.
 
 Notes:
 ======

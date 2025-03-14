@@ -1053,6 +1053,7 @@ struct arm_vsmmu {
 	struct arm_smmu_device *smmu;
 	struct arm_smmu_domain *s2_parent;
 	u16 vmid;
+	struct kvm *kvm;
 
 	struct list_head vsmmus_elm; /* arm_smmu_domain::vsmmus::list */
 };

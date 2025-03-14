@@ -3,6 +3,7 @@
  * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES
  */
 
+#include <linux/kvm_host.h>
 #include <uapi/linux/iommufd.h>
 
 #include "arm-smmu-v3.h"
@@ -39,6 +40,48 @@ arm_smmu_get_msi_mapping_domain(struct iommu_domain *domain)
 	return &nested_domain->vsmmu->s2_parent->domain;
 }
 
+static int arm_vsmmu_alloc_vmid(struct arm_smmu_device *smmu, struct kvm *kvm,
+				bool *kvm_used)
+{
+#ifdef CONFIG_KVM
+	/*
+	 * There can only be one allocator for VMIDs active at once. If BTM is
+	 * turned on then KVM's allocator always supplies the VMID, and the
+	 * VMID is matched by CPU invalidation of the KVM S2. Right now there
+	 * is no API to get an unused VMID from KVM so this also means BTM systems
+	 * cannot support S2 without an associated KVM.
+	 */
+	if ((smmu->features & ARM_SMMU_FEAT_BTM)) {
+		int vmid;
+
+		if (!kvm || !kvm_get_kvm_safe(kvm))
+			return -EOPNOTSUPP;
+		vmid = kvm_arm_pinned_vmid_get(kvm);
+		if (vmid < 0)
+			kvm_put_kvm(kvm);
+		else
+			*kvm_used = true;
+		return vmid;
+	}
+#endif
+	return ida_alloc_range(&smmu->vmid_map, 1, (1 << smmu->vmid_bits) - 1,
+			       GFP_KERNEL);
+}
+
+static void arm_vsmmu_free_vmid(struct arm_smmu_device *smmu, u16 vmid,
+				struct kvm *kvm)
+{
+#ifdef CONFIG_KVM
+	if ((smmu->features & ARM_SMMU_FEAT_BTM)) {
+		if (kvm) {
+			kvm_arm_pinned_vmid_put(kvm);
+			return kvm_put_kvm(kvm);
+		}
+	}
+#endif
+	ida_free(&smmu->vmid_map, vmid);
+}
+
 static void arm_vsmmu_destroy(struct iommufd_viommu *viommu)
 {
 	struct arm_vsmmu *vsmmu = container_of(viommu, struct arm_vsmmu, core);
@@ -53,7 +96,7 @@ static void arm_vsmmu_destroy(struct iommufd_viommu *viommu)
 	list_del(&vsmmu->vsmmus_elm);
 	spin_unlock_irqrestore(&vsmmu->s2_parent->vsmmus.lock, flags);
 	arm_smmu_cmdq_issue_cmd_with_sync(smmu, &cmd);
-	ida_free(&smmu->vmid_map, vsmmu->vmid);
+	arm_vsmmu_free_vmid(smmu, vsmmu->vmid, vsmmu->kvm);
 }
 
 static void arm_smmu_make_nested_cd_table_ste(
@@ -379,6 +422,7 @@ struct iommufd_viommu *arm_vsmmu_alloc(struct device *dev,
 		iommu_get_iommu_dev(dev, struct arm_smmu_device, iommu);
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
 	struct arm_smmu_domain *s2_parent = to_smmu_domain(parent);
+	bool kvm_used = false;
 	struct arm_vsmmu *vsmmu;
 	unsigned long flags;
 	int vmid;
@@ -409,21 +453,22 @@ struct iommufd_viommu *arm_vsmmu_alloc(struct device *dev,
 	    !(smmu->features & ARM_SMMU_FEAT_S2FWB))
 		return ERR_PTR(-EOPNOTSUPP);
 
-	vmid = ida_alloc_range(&smmu->vmid_map, 1, (1 << smmu->vmid_bits) - 1,
-			       GFP_KERNEL);
+	vmid = arm_vsmmu_alloc_vmid(smmu, kvm, &kvm_used);
 	if (vmid < 0)
 		return ERR_PTR(vmid);
 
 	vsmmu = iommufd_viommu_alloc(ictx, struct arm_vsmmu, core,
 				     &arm_vsmmu_ops);
 	if (IS_ERR(vsmmu)) {
-		ida_free(&smmu->vmid_map, vmid);
+		arm_vsmmu_free_vmid(smmu, vmid, kvm);
 		return ERR_CAST(vsmmu);
 	}
 
 	vsmmu->smmu = smmu;
 	vsmmu->vmid = (u16)vmid;
 	vsmmu->s2_parent = s2_parent;
+	if (kvm_used)
+		vsmmu->kvm = kvm;
 	spin_lock_irqsave(&s2_parent->vsmmus.lock, flags);
 	list_add_tail(&vsmmu->vsmmus_elm, &s2_parent->vsmmus.list);
 	spin_unlock_irqrestore(&s2_parent->vsmmus.lock, flags);

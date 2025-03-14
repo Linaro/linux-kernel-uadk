@@ -4119,10 +4119,13 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu)
 	writel_relaxed(reg, smmu->base + ARM_SMMU_CR1);
 
 	/* CR2 (random crap) */
-	reg = CR2_PTM | CR2_RECINVSID;
+	reg = CR2_RECINVSID;
 
 	if (smmu->features & ARM_SMMU_FEAT_E2H)
 		reg |= CR2_E2H;
+
+	if (!(smmu->features & ARM_SMMU_FEAT_BTM))
+		reg |= CR2_PTM;
 
 	writel_relaxed(reg, smmu->base + ARM_SMMU_CR2);
 
@@ -4289,6 +4292,7 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 {
 	u32 reg;
 	bool coherent = smmu->features & ARM_SMMU_FEAT_COHERENCY;
+	bool vhe = cpus_have_cap(ARM64_HAS_VIRT_HOST_EXTN);
 
 	/* IDR0 */
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR0);
@@ -4341,7 +4345,7 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 
 	if (reg & IDR0_HYP) {
 		smmu->features |= ARM_SMMU_FEAT_HYP;
-		if (cpus_have_cap(ARM64_HAS_VIRT_HOST_EXTN))
+		if (vhe)
 			smmu->features |= ARM_SMMU_FEAT_E2H;
 	}
 
@@ -4368,6 +4372,22 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 
 	if (reg & IDR0_S2P)
 		smmu->features |= ARM_SMMU_FEAT_TRANS_S2;
+	/*
+	 * If S1 is supported, verify that BTM can be enabled.  If S2 is available
+	 * and BTM is enabled, S2 will be used exclusively for nested domains,
+	 * ensuring a KVM VMID is obtained.
+	 * BTM is beneficial when the CPU shares page tables with SMMUv3 (e.g., vSVA).
+	 */
+	if (reg & IDR0_S1P) {
+		/*
+		 * If the CPU is using VHE, but the SMMU doesn't support it, the SMMU
+		 * will create TLB entries for NH-EL1 world and will miss the
+		 * broadcasted TLB invalidations that target EL2-E2H world. Don't enable
+		 * BTM in that case.
+		 */
+		if (reg & IDR0_BTM && (!vhe || reg & IDR0_HYP))
+			smmu->features |= ARM_SMMU_FEAT_BTM;
+	}
 
 	if (!(reg & (IDR0_S1P | IDR0_S2P))) {
 		dev_err(smmu->dev, "no translation support!\n");

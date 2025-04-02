@@ -678,6 +678,7 @@ static void hisi_acc_vf_start_device(struct hisi_acc_vf_core_device *hisi_acc_vd
 {
 	struct hisi_qm *vf_qm = &hisi_acc_vdev->vf_qm;
 
+	return;
 	if (hisi_acc_vdev->vf_qm_state != QM_READY)
 		return;
 
@@ -693,6 +694,7 @@ static int hisi_acc_vf_load_state(struct hisi_acc_vf_core_device *hisi_acc_vdev)
 	struct hisi_acc_vf_migration_file *migf = hisi_acc_vdev->resuming_migf;
 	int ret;
 
+	return 0;
 	/* Recover data to VF */
 	ret = vf_qm_load_data(hisi_acc_vdev, migf);
 	if (ret) {

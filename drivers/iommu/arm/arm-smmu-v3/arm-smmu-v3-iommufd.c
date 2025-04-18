@@ -419,7 +419,8 @@ struct iommufd_viommu *arm_vsmmu_alloc(struct device *dev,
 	 * effected.
 	 */
 	if (!arm_smmu_master_canwbs(master) &&
-	    !(smmu->features & ARM_SMMU_FEAT_S2FWB))
+	    !(smmu->features & ARM_SMMU_FEAT_S2FWB) &&
+	    !device_property_read_bool(dev, "canwbs"))
 		return ERR_PTR(-EOPNOTSUPP);
 
 	vsmmu = iommufd_viommu_alloc(ictx, struct arm_vsmmu, core,

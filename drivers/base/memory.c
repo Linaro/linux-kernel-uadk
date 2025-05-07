@@ -478,6 +478,17 @@ out:
 static DEVICE_ATTR_RO(valid_zones);
 #endif
 
+#ifdef CONFIG_NUMA_REMOTE
+static ssize_t preonline_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct memory_block *mem = to_memory_block(dev);
+
+	return sysfs_emit_at(buf, 0, "%d\n", mem->pre_online);
+}
+static DEVICE_ATTR_RO(preonline);
+#endif
+
 static DEVICE_ATTR_RO(phys_index);
 static DEVICE_ATTR_RW(state);
 static DEVICE_ATTR_RO(phys_device);
@@ -653,6 +664,9 @@ static struct attribute *memory_memblk_attrs[] = {
 	&dev_attr_removable.attr,
 #ifdef CONFIG_MEMORY_HOTREMOVE
 	&dev_attr_valid_zones.attr,
+#endif
+#ifdef CONFIG_NUMA_REMOTE
+	&dev_attr_preonline.attr,
 #endif
 	NULL
 };

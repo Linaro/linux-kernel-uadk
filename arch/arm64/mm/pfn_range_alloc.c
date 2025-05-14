@@ -13,6 +13,9 @@
 #include <linux/set_memory.h>
 #include <trace/events/kmem.h>
 #include <linux/pagewalk.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/numa_remote.h>
 #include "internal.h"
 
 struct pmd_lm_range {
@@ -534,3 +537,36 @@ int set_linear_mapping_nc(unsigned long start_pfn, unsigned long end_pfn, bool s
 	return 0;
 }
 EXPORT_SYMBOL_GPL(set_linear_mapping_nc);
+
+#ifdef CONFIG_DEBUG_FS
+static int reserved_range_show(struct seq_file *m, void *v)
+{
+	int nid;
+
+	for_each_online_node(nid) {
+		if (numa_is_remote_node(nid))
+			continue;
+
+		seq_printf(m, "%d, %llx-%llx\n", nid,
+				PFN_PHYS(reserved_range[nid].start_pfn),
+				PFN_PHYS(reserved_range[nid].end_pfn));
+	}
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(reserved_range);
+
+static int __init reserved_range_debug_init(void)
+{
+	if (!pmd_linear_mapping_enabled())
+		return 0;
+
+	if (can_set_direct_map() || should_pmd_linear_mapping())
+		return 0;
+
+	debugfs_create_file("pmd_mapping_reserved_range", 0400, NULL,
+			    NULL, &reserved_range_fops);
+	return 0;
+}
+late_initcall(reserved_range_debug_init);
+#endif

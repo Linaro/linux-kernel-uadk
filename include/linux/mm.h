@@ -4273,6 +4273,7 @@ static inline unsigned long do_reclaim_notify(enum reclaim_reason reason,
 extern unsigned long contig_mem_pool_percent;
 struct folio *pfn_range_alloc(unsigned int nr_pages, int nid);
 int pfn_range_free(struct folio *folio);
+int set_linear_mapping_nc(unsigned long start_pfn, unsigned long end_pfn, bool set_nc);
 int set_linear_mapping_invalid(unsigned long start_pfn, unsigned long end_pfn,
 										bool set_invalid);
 #else
@@ -4281,6 +4282,11 @@ static inline struct folio *pfn_range_alloc(unsigned int nr_pages, int nid)
 	return ERR_PTR(-EINVAL);
 }
 static inline int pfn_range_free(struct folio *folio)
+{
+	return -EINVAL;
+}
+static inline
+int set_linear_mapping_nc(unsigned long start_pfn, unsigned long end_pfn, bool set_nc)
 {
 	return -EINVAL;
 }

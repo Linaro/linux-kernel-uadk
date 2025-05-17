@@ -305,14 +305,7 @@ static inline int hugetlb_insert_hugepage_pte_by_pa(struct mm_struct *mm,
 }
 #endif /* CONFIG_HUGETLB_INSERT_PAGE */
 
-#ifdef CONFIG_ASCEND_FEATURES
 struct folio *alloc_hugetlb_folio_size(int nid, unsigned long size);
-#else
-static inline struct folio *alloc_hugetlb_folio_size(int nid, unsigned long size)
-{
-	return NULL;
-}
-#endif
 
 #else /* !CONFIG_HUGETLB_PAGE */
 
@@ -1375,5 +1368,19 @@ hugetlb_walk(struct vm_area_struct *vma, unsigned long addr, unsigned long sz)
 #endif
 	return huge_pte_offset(vma->vm_mm, addr, sz);
 }
+
+#ifdef CONFIG_PFN_RANGE_ALLOC
+struct folio *hugetlb_pool_alloc(int nid);
+int hugetlb_pool_free(struct folio *folio);
+#else
+static inline struct folio *hugetlb_pool_alloc(int nid)
+{
+	return ERR_PTR(-EINVAL);
+}
+static inline int hugetlb_pool_free(struct folio *folio)
+{
+	return -EINVAL;
+}
+#endif
 
 #endif /* _LINUX_HUGETLB_H */

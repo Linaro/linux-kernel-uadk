@@ -11,6 +11,7 @@
 #include <linux/memblock.h>
 #include <linux/page-isolation.h>
 #include <linux/set_memory.h>
+#include <trace/events/kmem.h>
 #include "internal.h"
 
 struct pmd_lm_range {
@@ -294,6 +295,7 @@ struct folio *pfn_range_alloc(unsigned int nr_pages, int nid)
 
 	folio = ERR_PTR(-ENOMEM);
 out:
+	trace_pfn_range_alloc(folio, nr_pages, nid);
 	return folio;
 }
 EXPORT_SYMBOL_GPL(pfn_range_alloc);
@@ -334,6 +336,7 @@ int pfn_range_free(struct folio *folio)
 	spin_unlock(&mem_range->lock);
 
 out:
+	trace_pfn_range_free(folio, ret);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(pfn_range_free);

@@ -636,6 +636,31 @@ TRACE_EVENT(hugetlb_pool_free,
 		__entry->folio, folio_pfn(__entry->folio), __entry->ret)
 );
 
+TRACE_EVENT(hugetlb_pool_alloc_size,
+
+	TP_PROTO(struct folio *folio, int nid, unsigned long size),
+
+	TP_ARGS(folio, nid, size),
+
+	TP_STRUCT__entry(
+		__field(struct folio*, folio)
+		__field(int, nid)
+		__field(unsigned long, size)
+	),
+
+	TP_fast_assign(
+		__entry->folio = folio;
+		__entry->nid = nid;
+		__entry->size = size;
+	),
+
+	TP_printk("folio=%p pfn=0x%lx err=%ld nid=%d size=0x%lx",
+		!IS_ERR(__entry->folio) ? __entry->folio : NULL,
+		!IS_ERR(__entry->folio) ? folio_pfn(__entry->folio) : 0,
+		!IS_ERR(__entry->folio) ? 0 : PTR_ERR(__entry->folio),
+		__entry->nid, __entry->size)
+);
+
 #endif
 #endif /* _TRACE_KMEM_H */
 

@@ -7976,4 +7976,24 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(hugetlb_pool_free);
+
+struct folio *hugetlb_pool_alloc_size(int nid, unsigned long size)
+{
+	struct folio *folio = ERR_PTR(-EINVAL);
+
+	if (nid < 0 || nid >= MAX_NUMNODES)
+		goto out;
+
+	if ((size != PMD_SIZE) && (size != PUD_SIZE))
+		goto out;
+
+	folio = alloc_hugetlb_folio_size(nid, size);
+	if (!folio)
+		folio = ERR_PTR(-ENOMEM);
+
+out:
+	trace_hugetlb_pool_alloc_size(folio, nid, size);
+	return folio;
+}
+EXPORT_SYMBOL_GPL(hugetlb_pool_alloc_size);
 #endif

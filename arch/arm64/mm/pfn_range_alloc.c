@@ -12,6 +12,7 @@
 #include <linux/page-isolation.h>
 #include <linux/set_memory.h>
 #include <trace/events/kmem.h>
+#include <linux/pagewalk.h>
 #include "internal.h"
 
 struct pmd_lm_range {
@@ -340,3 +341,112 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(pfn_range_free);
+
+static inline int check_update_lm_arg(unsigned long start_pfn, unsigned long end_pfn)
+{
+	unsigned long start, end;
+	struct page *start_page;
+	int nid;
+
+	start_page = pfn_to_page(start_pfn);
+	nid = page_to_nid(start_page);
+	start = (unsigned long)page_to_virt(start_page);
+	end = start + (end_pfn - start_pfn) * PAGE_SIZE;
+	if ((start_pfn >= reserved_range[nid].start_pfn &&
+	    end_pfn <= reserved_range[nid].end_pfn)
+	    || should_pmd_linear_mapping()
+	    || can_set_direct_map()) {
+		if (!IS_ALIGNED(start, PFN_RANGE_ALLOC_SIZE) ||
+			!IS_ALIGNED(end, PFN_RANGE_ALLOC_SIZE)) {
+			return -EINVAL;
+		}
+	} else if (!IS_ALIGNED(start, PUD_SIZE) || !IS_ALIGNED(end, PUD_SIZE)) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int invalid_pud_entry(pud_t *pudp, unsigned long addr,
+				unsigned long next, struct mm_walk *walk)
+{
+	bool set_invalid = (bool)walk->private;
+	pud_t pud;
+
+	pud = pudp_get(pudp);
+	if (pud_table(pud))
+		return 0;
+
+	if (set_invalid)
+		pud_val(pud) &= ~PTE_VALID;
+	else
+		pud_val(pud) |= PTE_VALID;
+	set_pud(pudp, pud);
+
+	return 0;
+}
+
+static int invalid_pmd_entry(pmd_t *pmdp, unsigned long addr,
+				unsigned long next, struct mm_walk *walk)
+{
+	bool set_invalid = (bool)walk->private;
+	pmd_t pmd;
+
+	pmd = pmdp_get(pmdp);
+	if (pmd_table(pmd))
+		return 0;
+
+	if (set_invalid)
+		pmd_val(pmd) &= ~PTE_VALID;
+	else
+		pmd_val(pmd) |= PTE_VALID;
+	set_pmd(pmdp, pmd);
+
+	return 0;
+}
+
+static int invalid_pte_entry(pte_t *ptep, unsigned long addr,
+				unsigned long next, struct mm_walk *walk)
+{
+	bool set_invalid = (bool)walk->private;
+	pte_t pte;
+
+	pte = ptep_get(ptep);
+
+	if (set_invalid)
+		pte_val(pte) &= ~PTE_VALID;
+	else
+		pte_val(pte) |= PTE_VALID;
+	set_pte(ptep, pte);
+
+	return 0;
+}
+
+static const struct mm_walk_ops invalid_ops = {
+	.pud_entry = invalid_pud_entry,
+	.pmd_entry = invalid_pmd_entry,
+	.pte_entry = invalid_pte_entry,
+};
+
+int set_linear_mapping_invalid(unsigned long start_pfn, unsigned long end_pfn,
+										bool set_invalid)
+{
+	unsigned long start, end;
+	int ret;
+
+	ret = check_update_lm_arg(start_pfn, end_pfn);
+	if (ret)
+		return ret;
+
+	start = (unsigned long)page_to_virt(pfn_to_page(start_pfn));
+	end = start + (end_pfn - start_pfn) * PAGE_SIZE;
+	mmap_write_lock(&init_mm);
+	walk_page_range_novma(&init_mm, start, end,
+				&invalid_ops, NULL, (void *)set_invalid);
+	mmap_write_unlock(&init_mm);
+	if (set_invalid)
+		flush_tlb_kernel_range(start, end);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(set_linear_mapping_invalid);

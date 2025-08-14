@@ -7,3 +7,13 @@ menuconfig FWCTL
 	  support a wide range of lockdown compatible device behaviors including
 	  manipulating device FLASH, debugging, and other activities that don't
 	  fit neatly into an existing subsystem.
+
+if FWCTL
+config FWCTL_UB
+	tristate "ub_fwctl depend on fwctl driver"
+	help
+	  ub_fwctl provides users with various information related to
+	  querying UB (UnifiedBus) registers or devices.
+
+	  If you don't know what to do here, say N.
+endif

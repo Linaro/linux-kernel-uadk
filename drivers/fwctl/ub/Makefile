@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0+
+obj-$(CONFIG_FWCTL_UB) += ub_fwctl.o
+
+ub_fwctl-y += main.o ub_cmd_reg.o

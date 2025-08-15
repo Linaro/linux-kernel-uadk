@@ -15,6 +15,45 @@
 
 extern struct platform_driver ummu_driver;
 
+struct ummu_ll_queue {
+	union {
+		u64 val;
+		struct {
+			u32 prod;
+			u32 cons;
+		};
+		struct {
+			atomic_t prod;
+			atomic_t cons;
+		} atomic;
+		u8 __pad[SMP_CACHE_BYTES];
+	} ____cacheline_aligned_in_smp;
+	u32 log2size;
+};
+
+struct ummu_queue {
+	struct ummu_ll_queue llq;
+	__le64 *base;
+	phys_addr_t base_pa;
+	u64 q_base;
+
+	size_t ent_dwords;
+	u32 __iomem *prod_reg;
+	u32 __iomem *cons_reg;
+};
+
+struct ummu_mcmdq {
+	struct ummu_queue q;
+	atomic_long_t *valid_map;
+	atomic_t owner_prod;
+	u32 mcmdq_prod;
+	rwlock_t mcmdq_lock;
+	atomic_t lock;
+	int configured;
+	int shared;
+	void __iomem *base;
+};
+
 struct ummu_evtq {
 	u32 max_stalls;
 };
@@ -86,6 +125,9 @@ struct ummu_device {
 	void __iomem *base;
 
 	struct ummu_capability cap;
+
+	u32 nr_mcmdq;
+	struct ummu_mcmdq *__percpu *mcmdq;
 	struct ummu_evtq evtq;
 
 	struct ummu_core_device core_dev;

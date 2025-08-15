@@ -11,6 +11,7 @@
 #include <linux/iopoll.h>
 #include <ub/ubfi/ubfi.h>
 
+#include "queue.h"
 #include "regs.h"
 #include "ummu.h"
 
@@ -75,6 +76,19 @@ static int ummu_device_register(struct ummu_device *ummu)
 static void ummu_device_unregister(struct ummu_device *ummu)
 {
 	iommu_device_sysfs_remove(&ummu->core_dev.iommu);
+}
+
+static int ummu_init_structures(struct ummu_device *ummu)
+{
+	int ret;
+
+	ret = ummu_init_queues(ummu);
+	if (ret) {
+		dev_err(ummu->dev, "init queues failed\n");
+		return ret;
+	}
+
+	return 0;
 }
 
 static void ummu_device_hw_probe_ver(struct ummu_device *ummu)
@@ -502,6 +516,10 @@ static int ummu_device_reset(struct ummu_device *ummu)
 	/* set configuration table and queue memory attributes */
 	ummu_device_set_mem_attr(ummu);
 
+	ret = ummu_device_mcmdq_init_cfg(ummu);
+	if (ret)
+		return ret;
+
 	return ummu_device_enable(ummu);
 }
 
@@ -569,6 +587,11 @@ static int ummu_device_probe(struct platform_device *pdev)
 
 	/* hardware init */
 	ret = ummu_device_hw_init(ummu);
+	if (ret)
+		return ret;
+
+	/* Initialise in-memory data structures */
+	ret = ummu_init_structures(ummu);
 	if (ret)
 		return ret;
 

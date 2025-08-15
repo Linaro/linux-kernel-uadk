@@ -15,6 +15,12 @@
 
 extern struct platform_driver ummu_driver;
 
+enum ummu_device_msi_index {
+	EVTQ_MSI_INDEX,
+	GERROR_MSI_INDEX,
+	UMMU_MAX_MSIS,
+};
+
 struct ummu_ll_queue {
 	union {
 		u64 val;

@@ -11,6 +11,7 @@
 #include <linux/iopoll.h>
 #include <ub/ubfi/ubfi.h>
 
+#include "interrupt.h"
 #include "queue.h"
 #include "regs.h"
 #include "ummu.h"
@@ -519,6 +520,8 @@ static int ummu_device_reset(struct ummu_device *ummu)
 	ret = ummu_device_mcmdq_init_cfg(ummu);
 	if (ret)
 		return ret;
+
+	ummu_setup_irqs(ummu);
 
 	return ummu_device_enable(ummu);
 }

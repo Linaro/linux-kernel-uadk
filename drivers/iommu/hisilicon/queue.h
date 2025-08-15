@@ -128,6 +128,37 @@
 #define SUB_OP_CHECK_PA_CONTI_0_ID GENMASK_ULL(40, 32)
 #define SUB_OP_CHECK_PA_CONTI_1_ADDR GENMASK_ULL(63, 12)
 
+/* event queue */
+#define EVTQ_ENT_SZ_SHIFT 6
+#define EVTQ_ENT_DWORDS (1UL << EVTQ_ENT_SZ_SHIFT >> 3)
+#define EVTQ_MAX_SZ_SHIFT (Q_MAX_SZ_SHIFT - EVTQ_ENT_SZ_SHIFT)
+
+#define UMMU_EVTQ_OFFSET 0x1100
+#define UMMU_EVTQ_PROD_OFFSET 0x1108
+#define UMMU_EVTQ_CONS_OFFSET 0x110C
+
+#define EVTQ_ENT0_CODE GENMASK(7, 0)
+#define EVTQ_ENT0_RNW (1U << 11)
+#define EVTQ_ENT0_IND (1U << 12)
+#define EVTQ_ENT0_PNU (1U << 13)
+#define EVTQ_ENT0_CLS GENMASK(15, 14)
+#define EVTQ_ENT0_NSIPA (1U << 16)
+#define EVTQ_ENT0_S2 (1U << 17)
+#define EVTQ_ENT0_STALL (1U << 18)
+#define EVTQ_ENT0_TTRNW (1U << 19)
+#define EVTQ_ENT0_TID GENMASK_ULL(51, 32)
+
+#define EVTQ_ENT1_STAG GENMASK(15, 0)
+#define EVTQ_ENT1_IMPL_DEF GENMASK(31, 16)
+#define EVTQ_ENT1_REASON GENMASK_ULL(63, 32)
+
+#define EVTQ_ENT2_IPA GENMASK_ULL(51, 12)
+#define EVTQ_ENT3_IADDR GENMASK_ULL(63, 0)
+#define EVTQ_ENT4_TECTE_TAG GENMASK(15, 0)
+#define EVTQ_ENT4_EID_LOW GENMASK_ULL(63, 0)
+#define EVTQ_ENT5_EID_HIGH GENMASK_ULL(63, 0)
+#define EVTQ_ENT6_FTADDR GENMASK_ULL(51, 3)
+
 struct ummu_mcmdq_batch {
 	u64 cmds[MCMDQ_BATCH_ENTRIES * MCMDQ_ENT_DWORDS];
 	int num;
@@ -275,6 +306,7 @@ void ummu_queue_read(u64 *dst, __le64 *src, size_t n_dwords);
 int ummu_queue_remove_raw(struct ummu_queue *q, u64 *ent);
 int ummu_queue_sync_prod_in(struct ummu_queue *q);
 bool ummu_queue_empty(struct ummu_ll_queue *q);
+int ummu_write_evtq_regs(struct ummu_device *ummu);
 int ummu_init_queues(struct ummu_device *ummu);
 int ummu_device_mcmdq_init_cfg(struct ummu_device *ummu);
 int ummu_mcmdq_issue_cmd(struct ummu_device *ummu, struct ummu_mcmdq_ent *ent);

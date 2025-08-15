@@ -521,6 +521,10 @@ static int ummu_device_reset(struct ummu_device *ummu)
 	if (ret)
 		return ret;
 
+	ret = ummu_write_evtq_regs(ummu);
+	if (ret)
+		return ret;
+
 	ummu_setup_irqs(ummu);
 
 	return ummu_device_enable(ummu);

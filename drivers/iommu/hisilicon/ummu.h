@@ -61,6 +61,7 @@ struct ummu_mcmdq {
 };
 
 struct ummu_evtq {
+	struct ummu_queue q;
 	u32 max_stalls;
 };
 

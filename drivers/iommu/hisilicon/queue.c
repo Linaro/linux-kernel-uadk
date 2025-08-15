@@ -359,6 +359,32 @@ int ummu_device_mcmdq_init_cfg(struct ummu_device *ummu)
 	return ummu_write_mcmdq_regs(ummu);
 }
 
+int ummu_write_evtq_regs(struct ummu_device *ummu)
+{
+	u32 cr0 = readl_relaxed(ummu->base + UMMU_CR0);
+	struct ummu_queue *q = &ummu->evtq.q;
+
+	/* evtq disabled in function ummu_device_disable */
+	writeq_relaxed(q->q_base, ummu->base + UMMU_EVTQ_OFFSET);
+
+	writel_relaxed(q->llq.prod, ummu->base + UMMU_EVTQ_PROD_OFFSET);
+	writel_relaxed(q->llq.cons, ummu->base + UMMU_EVTQ_CONS_OFFSET);
+
+	cr0 |= CR0_EVENTQ_EN;
+
+	return ummu_write_reg_sync(ummu, cr0, UMMU_CR0, UMMU_CR0ACK);
+}
+
+static int ummu_evtq_init(struct ummu_device *ummu)
+{
+	struct ummu_queue *q = &ummu->evtq.q;
+
+	q->llq.log2size = min(EVTQ_MAX_SZ_SHIFT, ummu->cap.evtq_log2size);
+	q->prod_reg = (u32 *)(ummu->base + UMMU_EVTQ_PROD_OFFSET);
+	q->cons_reg = (u32 *)(ummu->base + UMMU_EVTQ_CONS_OFFSET);
+	return ummu_common_init_queue(ummu, q, EVTQ_ENT_DWORDS);
+}
+
 int ummu_init_queues(struct ummu_device *ummu)
 {
 	if (!(ummu->cap.features & UMMU_FEAT_MCMDQ) ||
@@ -366,6 +392,9 @@ int ummu_init_queues(struct ummu_device *ummu)
 		return -EOPNOTSUPP;
 
 	if (ummu_mcmdq_init(ummu))
+		return -ENOMEM;
+
+	if (ummu_evtq_init(ummu))
 		return -ENOMEM;
 
 	return 0;

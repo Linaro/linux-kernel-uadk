@@ -14,6 +14,13 @@
 #include <linux/init.h>
 
 extern struct platform_driver ummu_driver;
+#define EID_HIGH_SZ_SHIFT 64
+
+/* target context table structures */
+struct ummu_l1_tct_desc {
+	__le64		*l2ptr;
+	phys_addr_t	l2ptr_phys;
+};
 
 enum ummu_device_msi_index {
 	EVTQ_MSI_INDEX,
@@ -23,10 +30,26 @@ enum ummu_device_msi_index {
 
 struct ummu_tct_desc {
 	u32	asid;
+	u64	ttbr;
+	u32	tcr0;
+	u32	tcr1;
+	u64	mair;
+	u8	blk_tbl_size_order;
+};
+
+struct ummu_tct_desc_cfg {
+	__le64				*tct_ptr;
+	phys_addr_t			tct_phys_addr;
+	struct ummu_l1_tct_desc		*l1_tct_desc;
+	unsigned int			l1_tcte_num;
+	u8				tct_fmt;
+	u8				tcte_max_bits;
+	struct kref			ref;
 };
 
 /* translation stage1 table config */
 struct ummu_s1_cfg {
+	struct ummu_tct_desc_cfg *tct_cfg;
 	struct ummu_tct_desc tct;
 };
 
@@ -146,6 +169,21 @@ struct ummu_capability {
 	u16 prod_ver;
 };
 
+struct ummu_hash_table_cfg {
+	u16 bank_depth;
+	u8 bank_num;
+	u8 hash_width;
+	u8 hash_sel;
+	void *kv_tbl_vaddr;
+	u64 kv_tbl_reg_addr;
+	u32 kv_tbl_reg_cfg;
+
+	u16 cam_tbl_depth;
+	void *cam_tbl_vaddr;
+	u64 cam_tbl_reg_addr;
+	u32 cam_tbl_reg_cfg;
+};
+
 struct ummu_device {
 	struct device *dev;
 	void __iomem *base;
@@ -155,6 +193,10 @@ struct ummu_device {
 	u32 nr_mcmdq;
 	struct ummu_mcmdq *__percpu *mcmdq;
 	struct ummu_evtq evtq;
+
+	struct ummu_tect_cfg *tect_cfg;
+	struct ummu_hash_table_cfg hash_tbl_cfg;
+	struct ummu_tct_desc_cfg *local_tct_cfg;
 
 	struct ummu_core_device core_dev;
 	const struct ummu_device_helper *helper_ops;

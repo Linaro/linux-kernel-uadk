@@ -5,4 +5,5 @@ obj-$(CONFIG_UB_UMMU) += ummu.o
 ummu-y := ummu_main.o \
 	  queue.o \
 	  interrupt.o \
+	  cfg_table.o \
 	  flush.o

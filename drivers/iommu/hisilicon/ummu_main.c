@@ -16,6 +16,7 @@
 #include "regs.h"
 #include "flush.h"
 #include "ummu.h"
+#include "cfg_table.h"
 
 #define UMMU_DRV_NAME "ummu"
 
@@ -90,6 +91,16 @@ static int ummu_init_structures(struct ummu_device *ummu)
 		return ret;
 	}
 
+	ret = ummu_prepare_tect_tct(ummu);
+	if (ret) {
+		dev_err(ummu->dev, "prepare tect failed\n");
+		return ret;
+	}
+
+	ret = ummu_device_init_hash_table(ummu);
+	if (ret)
+		return ret;
+
 	return 0;
 }
 
@@ -134,6 +145,8 @@ static void ummu_device_hw_probe_cap0(struct ummu_device *ummu)
 	ummu->core_dev.iommu.max_pasids = min(ubrt_pasids, pasids);
 	/* TECTE_TAG size */
 	ummu->cap.deid_bits = FIELD_GET(CAP0_DEIDSIZE_MASK, reg);
+	if (ummu->cap.deid_bits < TECT_SPLIT)
+		ummu->cap.features &= ~UMMU_FEAT_2_LVL_TECT;
 }
 
 static void ummu_device_hw_probe_cap1(struct ummu_device *ummu)
@@ -518,6 +531,9 @@ static int ummu_device_reset(struct ummu_device *ummu)
 	/* set configuration table and queue memory attributes */
 	ummu_device_set_mem_attr(ummu);
 
+	ummu_device_set_tect(ummu);
+
+	ummu_device_config_hash_table(ummu);
 	ret = ummu_device_mcmdq_init_cfg(ummu);
 	if (ret)
 		return ret;
@@ -600,6 +616,10 @@ static int ummu_device_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	ret = ummu_check_cap(ummu);
+	if (ret)
+		return ret;
+
 	/* Initialise in-memory data structures */
 	ret = ummu_init_structures(ummu);
 	if (ret)
@@ -626,6 +646,8 @@ static int ummu_device_remove(struct platform_device *pdev)
 	ummu_device_disable(ummu);
 	ummu_device_unregister(ummu);
 
+	ummu_put_tct_table(ummu->local_tct_cfg);
+	ummu_put_tect_table(ummu->tect_cfg);
 	dev_dbg(&pdev->dev, "Remove ummu successful!\n");
 	return 0;
 }
@@ -661,7 +683,26 @@ struct platform_driver ummu_driver = {
 	.shutdown = ummu_device_shutdown,
 };
 
-module_driver(ummu_driver, platform_driver_register, platform_driver_unregister);
+static int __init ummu_driver_register(struct platform_driver *drv)
+{
+	int ret;
+
+	ret = ummu_init_global_meta();
+	if (ret) {
+		pr_err("global meta resource init failed, ret = %d\n", ret);
+		ummu_free_global_meta();
+		return ret;
+	}
+	return platform_driver_register(drv);
+}
+
+static void __exit ummu_driver_unregister(struct platform_driver *drv)
+{
+	platform_driver_unregister(drv);
+	ummu_free_global_meta();
+}
+
+module_driver(ummu_driver, ummu_driver_register, ummu_driver_unregister);
 
 MODULE_IMPORT_NS(UMMU_CORE_DRIVER);
 MODULE_DESCRIPTION("Hisilicon ummu driver");

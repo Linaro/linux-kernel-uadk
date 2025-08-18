@@ -881,7 +881,19 @@ int ummu_write_tct_desc(struct ummu_device *ummu, struct ummu_domain_cfgs *cfgs,
 		}
 		tcte[1] = cpu_to_le64(tct_desc->tcr1);
 		tcte[2] = cpu_to_le64(tct_desc->ttbr & TCT_ENT2_TTBA);
+		if (tct_desc->mapt_en) {
+			val = cpu_to_le64(TCT_ENT3_MAPT_BBA & tct_desc->mapt_blk_phys) |
+			      FIELD_PREP(TCT_ENT3_MAPT_BBA_SZ, tct_desc->blk_size_order) |
+			      FIELD_PREP(TCT_ENT3_MAPT_BBA_MA, TCT_TCR_RGN_WBWA) |
+			      FIELD_PREP(TCT_ENT3_MAPT_BBA_SH, TCT_MSD_IS);
+			tcte[3] = cpu_to_le64(val);
 
+			val = cpu_to_le64(TCT_ENT4_MAPT_BTA & tct_desc->mapt_blk_tbl_phys) |
+			      FIELD_PREP(TCT_ENT4_MAPT_BTA_SZ, tct_desc->blk_tbl_size_order) |
+			      FIELD_PREP(TCT_ENT4_MAPT_BTA_MA, TCT_TCR_RGN_WBWA) |
+			      FIELD_PREP(TCT_ENT4_MAPT_BTA_SH, TCT_MSD_IS);
+			tcte[4] = cpu_to_le64(val);
+		}
 		tcte[5] = cpu_to_le64(tct_desc->mair);
 		val = tct_desc->tcr0 |
 #ifdef __BIG_ENDIAN

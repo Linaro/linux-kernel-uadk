@@ -11,6 +11,7 @@
 #include <linux/maple_tree.h>
 
 #define UMMU_MAX_TOKEN_NUM 2
+#define MAPT_PER_LVL_BLOCK_CNT 4
 
 struct ummu_mapt_entry_node {
 	u32 valid : 1;
@@ -36,18 +37,70 @@ struct ummu_mapt_entry_node {
 	u32 token_val_1;
 };
 
+struct ummu_mapt_table_node {
+	u32 valid : 1;
+	u32 type : 1;
+	u32 next_block : 1;
+	u32 e_bit : 1;
+	u32 permission : 6;
+	u32 reserved_0 : 2;
+	u32 next_lv_offset_low : 20;
+
+	u32 next_lv_offset_high : 10;
+	u32 reserved_1 : 6;
+	u32 next_lv_index : 16;
+
+	u32 base_low;
+	u32 base_high : 7;
+	u32 reserved_2 : 21;
+	u32 reserved_3 : 3;
+	u32 token_check : 1;
+
+	u32 limit_low;
+	u32 limit_high : 7;
+	u32 reserved_4 : 21;
+	u32 flag : 2;
+	u32 nonce : 2;
+
+	u32 token_val_0;
+	u32 token_val_1;
+};
+
+struct io_pt_blk_table {
+	phys_addr_t blk_tbl_phys;
+	u8 blk_tbl_size_order;
+};
+
+struct ummu_mapt_block {
+	void *block_addr;
+	size_t blk_size;
+	u32 block_id;
+	u16 level_cnt;
+	u16 level_entry_cnt[MAPT_PER_LVL_BLOCK_CNT];
+};
+
 #define ADDR_FULL(low, high) (((u64)(high) << 32) | (u64)(low))
 
 struct ummu_mapt_table_ctx {
+	bool expan;
+	u16 block_cnt;
+	size_t blk_exp_size;
+	unsigned long *level_block_bitmap;
 	struct maple_tree *granted_addr_mng;
+
+	struct ummu_mapt_block *mapt_block_base;
+	struct xarray xa;
 };
 
 struct ummu_mapt_info {
+	struct iommu_domain *domain;
 	enum ummu_mapt_mode mode;
 	union {
 		struct ummu_mapt_entry_node *entry_block;
 		struct ummu_mapt_table_ctx *table_ctx;
 	} block_base;
+
+	u16 valid;
 };
 
 struct ummu_seg_info {
@@ -78,5 +131,19 @@ struct ummu_data_info {
 	int bytoken;
 	enum ummu_ebit_state e_bit;
 };
+
+struct ummu_domain;
+
+int ummu_init_sva_mapt_context(struct ummu_domain *ummu_domain, enum ummu_mapt_mode mode);
+
+int ummu_alloc_mapt_blk_mem(struct ummu_domain *ummu_domain, struct block_args *blk_para);
+
+void ummu_release_domain_mapt_mem(struct ummu_domain *ummu_domain);
+
+void ummu_release_mapt_blk_mem(struct ummu_domain *ummu_domain, struct block_args *blk_para);
+
+int ummu_init_ksva_mapt(struct ummu_domain *domain, enum ummu_mapt_mode mode);
+
+void ummu_release_ksva_mapt(struct ummu_domain *domain);
 
 #endif /* __UMMU_PERM_TABLE_H__ */

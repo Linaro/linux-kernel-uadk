@@ -13,6 +13,8 @@
 #include <linux/sizes.h>
 #include <linux/init.h>
 
+#include "perm_table.h"
+
 extern struct platform_driver ummu_driver;
 #define EID_HIGH_SZ_SHIFT 64
 
@@ -20,6 +22,11 @@ extern struct platform_driver ummu_driver;
 struct ummu_l1_tct_desc {
 	__le64		*l2ptr;
 	phys_addr_t	l2ptr_phys;
+};
+
+enum ummu_ver {
+	NO_PROD_ID = 0,
+	MAX_VER,
 };
 
 enum ummu_device_msi_index {
@@ -34,7 +41,13 @@ struct ummu_tct_desc {
 	u32	tcr0;
 	u32	tcr1;
 	u64	mair;
-	u8	blk_tbl_size_order;
+	u8		mapt_en;
+	u8		token_en;
+	u8		mapt_mode;
+	phys_addr_t	mapt_blk_phys;
+	u8		blk_size_order;
+	phys_addr_t	mapt_blk_tbl_phys;
+	u8		blk_tbl_size_order;
 };
 
 struct ummu_tct_desc_cfg {
@@ -51,6 +64,7 @@ struct ummu_tct_desc_cfg {
 struct ummu_s1_cfg {
 	struct ummu_tct_desc_cfg *tct_cfg;
 	struct ummu_tct_desc tct;
+	struct ummu_mapt_info io_pt_cfg;
 };
 
 /* translation stage2 table config */
@@ -223,6 +237,7 @@ struct ummu_domain_cfgs {
 };
 
 struct ummu_domain {
+	struct mutex init_mutex; /* protect domain resources */
 	struct ummu_base_domain base_domain;
 	struct ummu_domain_cfgs cfgs;
 };
@@ -249,5 +264,20 @@ static inline struct ummu_domain *to_ummu_domain(struct iommu_domain *dom)
 
 int ummu_write_reg_sync(struct ummu_device *ummu, u32 val,
 			u32 reg_off, u32 ack_off);
+
+/**
+ * Indicates whether the UMMU supports mapt blk extension.
+ *
+ * Return: true on success or false on error.
+ */
+bool ummu_get_mapt_blk_exp(void);
+
+/**
+ * Obtain the size of the mapt block.
+ *
+ * Return: The default value or >2M returns 64K.
+ * otherwise, it returns the configuration parameter.
+ */
+size_t ummu_get_mapt_base_blk_size(void);
 
 #endif /* __UMMU_H__ */

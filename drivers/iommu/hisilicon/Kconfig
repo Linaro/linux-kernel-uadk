@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# Hisilicon UMMU support
+#
+
+source "drivers/iommu/hisilicon/ummu-core/Kconfig"
+
+config UB_UMMU
+	tristate "Hisilicon UB MMU Support"
+	depends on ARM64 && ARCH_HISI
+	depends on UB_UBUS && UB_UBFI && UB_UBRT_PLAT_DEV
+	default n
+	select IOMMU_API
+	select IOMMU_IO_PGTABLE_LPAE
+	select GENERIC_MSI_IRQ
+	select IOMMUFD_DRIVER if IOMMUFD
+	select UMMU_CORE
+	help
+	  Support for implementations of the hisilicon UMMU architecture.
+	  UMMU provides address translation for device access to the
+	  local host.
+	  Say Y here if your Soc includes an UMMU device implementing
+	  the Hisilicon UMMU architecture.

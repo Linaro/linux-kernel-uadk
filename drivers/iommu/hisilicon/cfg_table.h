@@ -147,6 +147,15 @@ struct ummu_tecte_data {
 #define TCT_ENT0_ASID GENMASK_ULL(47, 32)
 
 #define TCT_ENT1_TTWD (1UL << 8)
+#define TCT_TCR_RGN_NC 0
+#define TCT_TCR_RGN_WBWA 1
+#define TCT_TCR_RGN_WT 2
+#define TCT_TCR_RGN_WB 3
+
+#define TCT_ENT1_MSD GENMASK(14, 13)
+#define TCT_MSD_NS 0
+#define TCT_MSD_OS 2
+#define TCT_MSD_IS 3
 
 #define TCT_ENT2_HWU59 (1UL << 0)
 #define TCT_ENT2_HWU60 (1UL << 1)
@@ -156,6 +165,16 @@ struct ummu_tecte_data {
 #define TCT_ENT2_NS (1ULL << 61)
 #define TCT_ENT2_HAD (1ULL << 62)
 #define TCT_ENT2_UPRID (1ULL << 63)
+
+#define TCT_ENT3_MAPT_BBA_MA GENMASK(1, 0)
+#define TCT_ENT3_MAPT_BBA_SH GENMASK(3, 2)
+#define TCT_ENT3_MAPT_BBA GENMASK_ULL(47, 5)
+#define TCT_ENT3_MAPT_BBA_SZ GENMASK_ULL(63, 60)
+
+#define TCT_ENT4_MAPT_BTA_MA GENMASK(1, 0)
+#define TCT_ENT4_MAPT_BTA_SH GENMASK(3, 2)
+#define TCT_ENT4_MAPT_BTA GENMASK_ULL(47, 5)
+#define TCT_ENT4_MAPT_BTA_SZ GENMASK_ULL(62, 60)
 
 /* USER LOGIC DEFINE */
 #define UMMU_KV_TABLE_BASE_OFFSET 0x3800

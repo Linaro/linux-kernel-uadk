@@ -201,8 +201,14 @@ struct ummu_device {
 	struct ummu_tct_desc_cfg *local_tct_cfg;
 
 	struct ummu_core_device core_dev;
+	struct ummu_dev_impl_ops *impl_ops;
 	const struct ummu_device_helper *helper_ops;
 	struct list_head list;
+};
+
+struct ummu_dev_impl_ops {
+	int (*hw_probe)(struct ummu_device *ummu);
+	int (*mcmdq_cfg)(struct ummu_device *ummu);
 };
 
 struct ummu_domain_cfgs {

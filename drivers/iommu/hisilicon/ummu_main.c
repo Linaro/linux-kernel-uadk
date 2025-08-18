@@ -11,6 +11,7 @@
 #include <linux/iopoll.h>
 #include <ub/ubfi/ubfi.h>
 
+#include "ummu_impl.h"
 #include "interrupt.h"
 #include "queue.h"
 #include "regs.h"
@@ -396,6 +397,8 @@ static int ummu_device_hw_probe_cap4(struct ummu_device *ummu)
 	hw_permq_ent = 1 << FIELD_GET(CAP4_UCPLQ_LOG2SIZE, reg);
 	ummu->cap.permq_ent_num.cplq_num = hw_permq_ent;
 
+	if (ummu->impl_ops && ummu->impl_ops->hw_probe)
+		return ummu->impl_ops->hw_probe(ummu);
 	return 0;
 }
 
@@ -602,6 +605,8 @@ static int ummu_device_probe(struct platform_device *pdev)
 		dev_err(dev, "IO resource is null\n");
 		return -EINVAL;
 	}
+
+	ummu_impl_init(ummu);
 
 	/*
 	 * Don't map the IMPLEMENTATION DEFINED regions, since they may contain

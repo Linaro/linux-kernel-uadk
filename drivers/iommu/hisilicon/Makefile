@@ -8,4 +8,6 @@ ummu-y := ummu_main.o \
 	  cfg_table.o \
 	  flush.o  \
 	  seg_tree.o \
-	  seg_mng.o
+	  seg_mng.o \
+	  ummu_impl.o \
+	  ummu_cfg_v1.o

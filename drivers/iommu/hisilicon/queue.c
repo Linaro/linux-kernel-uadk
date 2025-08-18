@@ -356,6 +356,14 @@ static int ummu_write_mcmdq_regs(struct ummu_device *ummu)
 
 int ummu_device_mcmdq_init_cfg(struct ummu_device *ummu)
 {
+	int ret;
+
+	if (ummu->impl_ops && ummu->impl_ops->mcmdq_cfg) {
+		ret = ummu->impl_ops->mcmdq_cfg(ummu);
+		if (ret)
+			return ret;
+	}
+
 	return ummu_write_mcmdq_regs(ummu);
 }
 

@@ -21,6 +21,25 @@ enum ummu_device_msi_index {
 	UMMU_MAX_MSIS,
 };
 
+struct ummu_tct_desc {
+	u32	asid;
+};
+
+/* translation stage1 table config */
+struct ummu_s1_cfg {
+	struct ummu_tct_desc tct;
+};
+
+/* translation stage2 table config */
+struct ummu_s2_cfg {
+	u16	vmid;
+};
+
+enum ummu_domain_stage {
+	UMMU_DOMAIN_S1 = 0,
+	UMMU_DOMAIN_S2,
+};
+
 struct ummu_ll_queue {
 	union {
 		u64 val;
@@ -141,6 +160,36 @@ struct ummu_device {
 	const struct ummu_device_helper *helper_ops;
 	struct list_head list;
 };
+
+struct ummu_domain_cfgs {
+	enum ummu_domain_stage stage;
+
+	u32 tecte_tag;
+
+	union {
+		struct ummu_s1_cfg	s1_cfg;
+		struct ummu_s2_cfg	s2_cfg;
+	};
+};
+
+struct ummu_domain {
+	struct ummu_base_domain base_domain;
+	struct ummu_domain_cfgs cfgs;
+};
+
+static inline
+struct ummu_device *core_to_ummu_device(struct ummu_core_device *ummu_core_dev)
+{
+	return container_of(ummu_core_dev, struct ummu_device, core_dev);
+}
+
+static inline struct ummu_domain *to_ummu_domain(struct iommu_domain *dom)
+{
+	struct ummu_base_domain *base_dom =
+			container_of(dom, struct ummu_base_domain, domain);
+
+	return container_of(base_dom, struct ummu_domain, base_domain);
+}
 
 int ummu_write_reg_sync(struct ummu_device *ummu, u32 val,
 			u32 reg_off, u32 ack_off);

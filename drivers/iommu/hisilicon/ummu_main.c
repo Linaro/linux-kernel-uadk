@@ -14,6 +14,7 @@
 #include "interrupt.h"
 #include "queue.h"
 #include "regs.h"
+#include "flush.h"
 #include "ummu.h"
 
 #define UMMU_DRV_NAME "ummu"
@@ -526,6 +527,8 @@ static int ummu_device_reset(struct ummu_device *ummu)
 		return ret;
 
 	ummu_setup_irqs(ummu);
+	ummu_sync_tect_all(ummu);
+	ummu_init_flush_iotlb(ummu);
 
 	return ummu_device_enable(ummu);
 }

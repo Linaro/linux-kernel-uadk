@@ -8,11 +8,14 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
+#include <ub/ubfi/ubfi.h>
 
+#include "ummu.h"
 #include "ubc.h"
 #include "ubrt.h"
 
 #define UBIOS_SIG_UBC "ubc"
+#define UBIOS_SIG_UMMU "ummu"
 
 struct acpi_table_ubrt *acpi_table;
 struct ubios_root_table *ubios_table;
@@ -72,6 +75,7 @@ void ub_table_put(void *va)
 
 void uninit_ub_nodes(void)
 {
+	ubrt_fwnode_del_all();
 	destroy_ubc();
 }
 
@@ -88,6 +92,9 @@ int handle_acpi_ubrt(void)
 		switch (sub_table->type) {
 		case UB_BUS_CONTROLLER_TABLE:
 			ret = handle_ubc_table(sub_table->pointer);
+			break;
+		case UMMU_TABLE:
+			ret = handle_ummu_table(sub_table->pointer);
 			break;
 		default:
 			pr_warn("Ignore sub table: type %u\n", sub_table->type);
@@ -129,6 +136,8 @@ int handle_dts_ubrt(void)
 
 		if (!strncmp(name, UBIOS_SIG_UBC, strlen(UBIOS_SIG_UBC)))
 			ret = handle_ubc_table(ubios_table->sub_tables[i]);
+		else if (!strncmp(name, UBIOS_SIG_UMMU, strlen(UBIOS_SIG_UMMU)))
+			ret = handle_ummu_table(ubios_table->sub_tables[i]);
 		else
 			pr_warn("Ignore sub table: %s\n", name);
 

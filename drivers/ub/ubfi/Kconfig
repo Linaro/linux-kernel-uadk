@@ -15,4 +15,16 @@ config UB_UBFI
 	  within Linux. To compile this driver as a module, choose M here.
 	  Say 'M' here unless you know what you are doing
 
+config UB_UBRT_PLAT_DEV
+	bool "Enable UBRT platform device support"
+	depends on UB_UBUS
+	default n
+	help
+	  This option enables the configuration of platform devices related to
+	  the ub ubrt table.
+	  If enabled, the UBRT-related platform device will obtain the
+	  interrupt ID from the ubrt table instead of the IORT table.
+	  The obtained interrupt ID will be used for the MSI interrupt of the
+	  UBRT-related platform device.
+
 endif

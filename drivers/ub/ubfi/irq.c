@@ -7,6 +7,7 @@
 #include <linux/irqdomain.h>
 #include <linux/msi.h>
 #include <linux/platform_device.h>
+#include <ub/ubfi/ubfi.h>
 
 int ubrt_register_gsi(u32 hwirq, int trigger, int polarity, const char *name,
 		      struct resource *res)
@@ -41,3 +42,33 @@ void ubrt_unregister_gsi(u32 hwirq)
 #endif
 }
 EXPORT_SYMBOL_GPL(ubrt_unregister_gsi);
+
+#if IS_ENABLED(CONFIG_UB_UBRT_PLAT_DEV)
+int ubrt_pmsi_get_interrupt_id(struct device *dev, u32 *interrupt_id)
+{
+	struct ubrt_fwnode *fw;
+	struct ummu_node *node;
+
+	if (!dev->fwnode)
+		return -EINVAL;
+
+	fw = ubrt_fwnode_get(dev->fwnode);
+	if (!fw)
+		return -ENODEV;
+
+	switch (fw->type) {
+	case UBRT_UMMU:
+		node = (struct ummu_node *)fw->ubrt_node;
+		*interrupt_id = node->intr_id;
+		break;
+	case UBRT_UMMU_PMU:
+		node = (struct ummu_node *)fw->ubrt_node;
+		*interrupt_id = node->pmu_intr_id;
+		break;
+	default:
+		return -ENODEV;
+	}
+	dev_info(dev, "ubct pmsi successfully obtained interrupt id[0x%x].\n", *interrupt_id);
+	return 0;
+}
+#endif

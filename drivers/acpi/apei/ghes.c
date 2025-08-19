@@ -489,8 +489,7 @@ static void memory_failure_cb(struct callback_head *twork)
 	if (!ret || ret == -EHWPOISON || ret == -EOPNOTSUPP)
 		return;
 
-	pr_err("Sending SIGBUS to current task due to memory error not recovered");
-	force_sig(SIGBUS);
+	kill_accessing_process(twcb->pfn, twcb->flags, true);
 }
 
 static bool ghes_do_memory_failure(u64 physical_addr, int flags)

@@ -122,14 +122,19 @@ enum ummu_grant_op_type {
 };
 
 struct ummu_data_info {
+	void *data;
 	size_t data_size;
 	enum ummu_mapt_perm perm;
+	struct ummu_token_info *token;
 	u32 tokenval;
 	u64 data_base;
 	u64 data_limit;
 	u32 token_check;
 	int bytoken;
 	enum ummu_ebit_state e_bit;
+	enum ummu_grant_op_type op;
+	struct ummu_mapt_info *mapt_info;
+	uint8_t lvl;
 };
 
 struct ummu_domain;
@@ -142,8 +147,16 @@ void ummu_release_domain_mapt_mem(struct ummu_domain *ummu_domain);
 
 void ummu_release_mapt_blk_mem(struct ummu_domain *ummu_domain, struct block_args *blk_para);
 
+bool ummu_perm_table_mode_is_valid(enum ummu_mapt_mode mode);
+
 int ummu_init_ksva_mapt(struct ummu_domain *domain, enum ummu_mapt_mode mode);
 
 void ummu_release_ksva_mapt(struct ummu_domain *domain);
+
+int ummu_perm_grant(struct iommu_domain *domain, void *va, size_t size,
+		    int perm, void *cookie, struct iommu_plb_gather *plb_gather);
+
+int ummu_perm_ungrant(struct iommu_domain *domain, void *va, size_t size,
+		      void *cookie, struct iommu_plb_gather *plb_gather);
 
 #endif /* __UMMU_PERM_TABLE_H__ */

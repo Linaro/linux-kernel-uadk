@@ -7,6 +7,7 @@
 #define pr_fmt(fmt) "UMMU: " fmt
 
 #include <linux/cleanup.h>
+#include <linux/random.h>
 
 #include "ummu.h"
 #include "flush.h"
@@ -25,6 +26,12 @@
 #define BLK_ADDR_MASK GENMASK_ULL(47, 5)
 #define BLK_SIZE_ORDER_MASK GENMASK_ULL(63, 60)
 
+/* the size of one mapt block is 64K */
+#define MAPT_BLOCK_SIZE_SHIFT 16
+
+/* the size of one level block is 16K */
+#define MAPT_LEVEL_BLOCK_SHIFT 14
+
 #define MAPT_VPAGE_SHIFT 12
 
 /* the size of mapt is calculated at a granularity of 4KB */
@@ -40,8 +47,56 @@
 #define MAPT_MAX_ENTRY_INDEX 512
 #define MAPT_MAX_LVL_ID_BIT_SIZE (UMMU_BLKTBL_MAX_ENTRIES << 2)
 
+#define BITS_TO_BITMAP_SHIFT 6
+
+#define INDEX_BITMAP_SIZE (UMMU_BLKTBL_MAX_ENTRIES >> BITS_TO_BITMAP_SHIFT)
+
+#define INDEX_LEVEL_BITMAP_SIZE (UMMU_BLKTBL_MAX_ENTRIES >> 4)
+
+#define MAX_ADDRESS_BITS 48
+
+static const u32 g_mapt_range_bits[MAPT_MAX_LVL_INDEX + 1][2] = { { 47, 39 },
+								 { 38, 30 },
+								 { 29, 21 },
+								 { 20, 12 } };
+
+#define GET_BITS_MASK(bits) (((u64)1 << (bits)) - 1)
+
+#define GET_LEVEL_RANGE_MASK(level) \
+	(GET_BITS_MASK(g_mapt_range_bits[level][1]))
+
+#define GET_LEVEL_BASE(addr, level)               \
+	((u64)(addr) & \
+	 (u64)GET_LEVEL_RANGE_MASK(level))
+
+#define GET_LEVEL_BLOCK_INDEX(addr, level)                   \
+	(((u64)(addr) >> g_mapt_range_bits[level][1]) & \
+	 (GET_BITS_MASK(g_mapt_range_bits[level][0] -        \
+			g_mapt_range_bits[level][1] + 1)))
+
+#define GET_LEVEL_INDEX_RANGE(base, limit, lvl, base_index, limit_index,   \
+			      cross_level)                                 \
+	do {                                                               \
+		(base_index) = GET_LEVEL_BLOCK_INDEX(base, lvl);           \
+		if ((limit) >> (g_mapt_range_bits[lvl][0] + 1) ==          \
+		    (base) >> (g_mapt_range_bits[lvl][0] + 1)) {           \
+			(limit_index) = GET_LEVEL_BLOCK_INDEX(limit, lvl); \
+			cross_level = false;                               \
+		} else {                                                   \
+			(limit_index) = MAPT_MAX_ENTRY_INDEX - 1;          \
+			cross_level = true;                                \
+		}                                                          \
+	} while (0)
+
+#define ENTRY_ADDR_LOW(addr) FIELD_GET(GENMASK(31, 0), (addr))
+#define ENTRY_ADDR_HIGH(addr) FIELD_GET(GENMASK(47, 32), (addr))
+
+#define TABLE_ADDR_LOW(addr) FIELD_GET(GENMASK(31, 0), (addr))
+#define TABLE_ADDR_HIGH(addr) FIELD_GET(GENMASK(38, 32), (addr))
 #define LVL_OFFSET_LOW(offset) FIELD_GET(GENMASK(19, 0), (offset))
 #define LVL_OFFSET_HIGH(offset) FIELD_GET(GENMASK(29, 20), (offset))
+
+#define TABLE_LVL_OFFSET(low, high) (((u32)(high) << 20) | (u32)(low))
 
 static int ummu_alloc_mapt_block_tbl(struct io_pt_blk_table *blk_table)
 {
@@ -374,6 +429,206 @@ void ummu_release_mapt_blk_mem(struct ummu_domain *ummu_domain,
 	ummu_release_mapt_info_by_index(ummu_domain, blk_para->index);
 }
 
+static int ummu_check_perm(enum ummu_mapt_perm perm)
+{
+	switch (perm) {
+	case MAPT_PERM_R:
+		break;
+	case MAPT_PERM_W:
+		break;
+	case MAPT_PERM_RW:
+		break;
+	case MAPT_PERM_ATOMIC_R:
+		break;
+	case MAPT_PERM_ATOMIC_W:
+		break;
+	case MAPT_PERM_ATOMIC_RW:
+		break;
+	default:
+		pr_err("failed to check perm = %u\n", perm);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int ummu_check_ebit(enum ummu_ebit_state e_bit)
+{
+	if (e_bit >= UMMU_EBIT_END || e_bit < UMMU_EBIT_OFF) {
+		pr_err("e_bit = %d is invalid\n", e_bit);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void ummu_gen_random(u32 *value)
+{
+	u32 val;
+
+	get_random_bytes(&val, sizeof(u32));
+	*value = val;
+}
+
+static void ummu_get_token(struct ummu_token_info *token, u32 *value)
+{
+	if (token->input == 0) {
+		*value = token->tokenVal;
+	} else if (token->input == 1) {
+		ummu_gen_random(value);
+		token->tokenVal = *value;
+	}
+}
+
+static int ummu_check_data(enum ummu_mapt_mode mode,
+			   struct ummu_data_info *data_info)
+{
+	if (data_info->data_size == 0) {
+		pr_err("invalid argument data_size\n");
+		return -EINVAL;
+	}
+
+	if ((u64)data_info->data >> MAX_ADDRESS_BITS ||
+	    ((u64)data_info->data_size - 1) >> MAX_ADDRESS_BITS ||
+	    ((u64)data_info->data + (u64)data_info->data_size - 1) >> MAX_ADDRESS_BITS) {
+		pr_err("the address or memory size exceeds the upper limit\n");
+		return -EINVAL;
+	}
+
+	if (ummu_check_perm(data_info->perm) != 0 ||
+	    ummu_check_ebit(data_info->e_bit) != 0)
+		return -EINVAL;
+
+	if (data_info->token != NULL &&
+	    data_info->token->input != 0 && data_info->token->input != 1) {
+		pr_err("token input invalid\n");
+		return -EINVAL;
+	}
+
+	if (mode == MAPT_MODE_TABLE &&
+	    !IS_ALIGNED((u64)data_info->data, BIT_ULL(MAPT_VPAGE_SHIFT))) {
+		pr_err("table mode, data_base must be 4K aligned\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+bool ummu_perm_table_mode_is_valid(enum ummu_mapt_mode mode)
+{
+	if (mode >= MAPT_MODE_END || mode < MAPT_MODE_TABLE)
+		return false;
+
+	return true;
+}
+
+static void ummu_perm_data_preproc(struct ummu_data_info *data_info)
+{
+	data_info->token_check = (data_info->token != NULL) ? 1UL : 0UL;
+	if (data_info->token_check)
+		ummu_get_token(data_info->token, &data_info->tokenval);
+
+	data_info->data_base = (u64)data_info->data;
+	data_info->data_limit = (u64)data_info->data +
+				(u64)data_info->data_size - 1;
+}
+
+static void ummu_entry_fill_node(struct ummu_mapt_entry_node *node,
+				 struct ummu_data_info *data_info)
+{
+	node->permission = (u32)data_info->perm;
+	node->base_low = ENTRY_ADDR_LOW(data_info->data_base);
+	node->base_high = ENTRY_ADDR_HIGH(data_info->data_base);
+	node->limit_low = ENTRY_ADDR_LOW(data_info->data_limit);
+	node->limit_high = ENTRY_ADDR_HIGH(data_info->data_limit);
+	node->token_check = data_info->token_check;
+	node->e_bit = (u32)data_info->e_bit;
+	if (data_info->token_check == 1) {
+		node->token_val_0 = data_info->tokenval;
+		node->token_val_1 = data_info->tokenval;
+		node->nonce = 1;
+	}
+	node->valid = 1;
+	dma_wmb();
+}
+
+static int ummu_add_token(void *mapt_node, struct ummu_data_info *data_info)
+{
+	struct ummu_mapt_entry_node *node =
+		(struct ummu_mapt_entry_node *)mapt_node;
+
+	if (node->valid == 1 && node->nonce == 1) {
+		node->token_val_1 = data_info->tokenval;
+		node->nonce = UMMU_MAX_TOKEN_NUM;
+		return 0;
+	}
+
+	pr_err("node invalid or nonce error\n");
+	return -EINVAL;
+}
+
+static int ummu_remove_token(void *mapt_node, struct ummu_data_info *data_info)
+{
+	struct ummu_mapt_entry_node *node = (struct ummu_mapt_entry_node *)mapt_node;
+
+	if (node->token_val_0 == data_info->tokenval) {
+		node->token_val_0 = node->token_val_1;
+	} else if (node->token_val_1 == data_info->tokenval) {
+		node->token_val_1 = node->token_val_0;
+	} else {
+		pr_err("invalid tokenval\n");
+		return -EINVAL;
+	}
+
+	node->nonce = 1;
+	return 0;
+}
+
+static int ummu_update_token(void *mapt_node, struct ummu_data_info *data_info)
+{
+	switch (data_info->op) {
+	case UMMU_ADD_TOKEN:
+		return ummu_add_token(mapt_node, data_info);
+	case UMMU_REMOVE_TOKEN:
+		return ummu_remove_token(mapt_node, data_info);
+	default:
+		pr_err("invalid op type = %d\n", data_info->op);
+		return -EINVAL;
+	}
+}
+
+static void ummu_table_fill_node(struct ummu_mapt_table_node *node,
+	u64 base, u64 limit, struct ummu_data_info *data_info)
+{
+	node->type = 1;
+	node->permission = (u64)data_info->perm;
+	node->base_low = TABLE_ADDR_LOW(base);
+	node->base_high = TABLE_ADDR_HIGH(base);
+	node->limit_low = TABLE_ADDR_LOW(limit);
+	node->limit_high = TABLE_ADDR_HIGH(limit);
+	node->token_check = data_info->token_check;
+	node->e_bit = (u64)data_info->e_bit;
+	if (data_info->token_check == 1) {
+		node->token_val_0 = data_info->tokenval;
+		node->token_val_1 = data_info->tokenval;
+		node->nonce = 1;
+	}
+	node->valid = 1;
+	dma_wmb();
+}
+
+static inline void ummu_modify_entry_cnt(struct ummu_mapt_block *block,
+					 u64 lv_offset, int cnt)
+{
+	u32 index = lv_offset / MAPT_MAX_ENTRY_INDEX;
+
+	if (cnt > 0) {
+		block->level_entry_cnt[index] += (u16)cnt;
+		return;
+	}
+	block->level_entry_cnt[index] -= (u16)(-cnt);
+}
+
 static struct ummu_mapt_block *ummu_alloc_new_mapt_block(struct ummu_mapt_info *mapt_info,
 							 size_t blk_size,
 							 u32 blk_idx,
@@ -469,6 +724,612 @@ struct ummu_mapt_table_node *ummu_alloc_level_block(struct ummu_mapt_info *mapt_
 	mapt_blk->level_cnt++;
 
 	return node;
+}
+
+static int ummu_table_fill_node_by_level(struct ummu_data_info *data_info,
+					 u32 level, struct ummu_mapt_table_node *pre_node,
+					 u64 lvl_base, u64 lvl_limit)
+{
+	struct ummu_mapt_table_node *lvl_blk_base, *next_lvl_blk_base, *cur_node;
+	u64 node_base, node_limit, lvl_msk, lvl_offset;
+	struct ummu_mapt_block *mapt_blk;
+	u16 base_idx, limit_idx;
+	int ret;
+
+	if (level > MAPT_MAX_LVL_INDEX) {
+		pr_err("level overflow\n");
+		return -EINVAL;
+	}
+
+	lvl_offset = (u64)TABLE_LVL_OFFSET(pre_node->next_lv_offset_low,
+					   pre_node->next_lv_offset_high);
+	mapt_blk = xa_load(&data_info->mapt_info->block_base.table_ctx->xa,
+			   pre_node->next_lv_index);
+	if (mapt_blk == NULL) {
+		pr_err("invalid mapt_block\n");
+		return -EINVAL;
+	}
+	lvl_blk_base = (struct ummu_mapt_table_node *)mapt_blk->block_addr + lvl_offset;
+
+	base_idx = (u16)GET_LEVEL_BLOCK_INDEX(lvl_base, level);
+	limit_idx = (u16)GET_LEVEL_BLOCK_INDEX(lvl_limit, level);
+	lvl_msk = GET_LEVEL_RANGE_MASK(level);
+
+	for (u16 i = base_idx; i <= limit_idx; i++) {
+		cur_node = lvl_blk_base + i;
+		node_base = (i == base_idx) ? (lvl_base & lvl_msk) : 0U;
+		node_limit = (i == limit_idx) ? (lvl_limit & lvl_msk) : lvl_msk;
+		/* middle rtes */
+		if (base_idx < i && i < limit_idx) {
+			if (cur_node->valid == 1) {
+				pr_err("node suppose to be invalid\n");
+				return -EINVAL;
+			}
+			ummu_table_fill_node(cur_node, node_base, node_limit, data_info);
+			ummu_modify_entry_cnt(mapt_blk, lvl_offset, 1);
+			continue;
+		}
+
+		/* head or tail rte */
+		if (cur_node->valid == 1) {
+			if (cur_node->type == 1) {
+				next_lvl_blk_base = ummu_alloc_level_block(data_info->mapt_info,
+									   cur_node, mapt_blk);
+				if (IS_ERR_OR_NULL(next_lvl_blk_base)) {
+					pr_err("alloc new level_block failed\n");
+					return -ENOMEM;
+				}
+				cur_node->type = 0;
+			}
+			ret = ummu_table_fill_node_by_level(data_info,
+				level + 1U, cur_node, node_base, node_limit);
+			if (ret != 0)
+				return ret;
+		} else {
+			ummu_table_fill_node(cur_node, node_base, node_limit, data_info);
+			ummu_modify_entry_cnt(mapt_blk, lvl_offset, 1);
+		}
+	}
+
+	return 0;
+}
+
+static void ummu_free_level_block(struct ummu_mapt_info *mapt_info,
+				  struct ummu_mapt_table_node *prev_node)
+{
+	struct ummu_mapt_table_ctx *table_ctx = mapt_info->block_base.table_ctx;
+	u32 lv_offset, lvl_id, lv_index;
+	struct block_args blk_para = { 0 };
+	struct ummu_mapt_block *mapt_blk;
+	struct ummu_domain *u_domain;
+
+	if (IS_ERR_OR_NULL(mapt_info->domain))
+		return;
+
+	lv_offset = 0;
+	lv_index = 0;
+	if (prev_node != NULL) {
+		lv_offset = TABLE_LVL_OFFSET(prev_node->next_lv_offset_low,
+					     prev_node->next_lv_offset_high);
+		lv_index = prev_node->next_lv_index;
+	}
+
+	mapt_blk = xa_load(&table_ctx->xa, lv_index);
+	if (mapt_blk == NULL) {
+		pr_err("invalid level id = %u\n", lv_index);
+		return;
+	}
+
+	lvl_id = (mapt_blk->block_id * MAPT_PER_LVL_BLOCK_CNT) +
+		  lv_offset / MAPT_MAX_ENTRY_INDEX;
+	if (lvl_id) {
+		mapt_blk->level_cnt--;
+		clear_bit(lvl_id, table_ctx->level_block_bitmap);
+	}
+
+	u_domain = to_ummu_domain(mapt_info->domain);
+	if (mapt_blk->level_cnt == 0 && table_ctx->block_cnt > 1) {
+		xa_erase(&table_ctx->xa, mapt_blk->block_id);
+		table_ctx->block_cnt--;
+		blk_para.index = mapt_blk->block_id;
+		ummu_release_mapt_blk_mem(u_domain, &blk_para);
+		kfree(mapt_blk);
+	}
+}
+
+static void ummu_swap_node_info(struct ummu_mapt_table_node *node,
+				struct ummu_mapt_table_node *next_node,
+				u64 index, u32 level)
+{
+	u64 limit = ADDR_FULL(next_node->limit_low, next_node->limit_high) |
+				   (index << g_mapt_range_bits[level + 1][1]);
+	u64 base = ADDR_FULL(next_node->base_low, next_node->base_high) |
+				  (index << g_mapt_range_bits[level + 1][1]);
+
+	node->base_low = TABLE_ADDR_LOW(base);
+	node->base_high = TABLE_ADDR_HIGH(base);
+	node->limit_low = TABLE_ADDR_LOW(limit);
+	node->limit_high = TABLE_ADDR_HIGH(limit);
+	node->nonce = next_node->nonce;
+	node->token_val_0 = next_node->token_val_0;
+	node->token_val_1 = next_node->token_val_1;
+	node->permission = next_node->permission;
+	node->e_bit = next_node->e_bit;
+	node->token_check = next_node->token_check;
+}
+
+static void ummu_swap_next_level_node(struct ummu_mapt_table_node *node,
+				      u32 level,
+				      struct ummu_mapt_info *mapt_info)
+{
+	struct ummu_mapt_table_node *next_lvl_blk_base, *next_node;
+	struct ummu_mapt_block *mapt_blk;
+	u32 next_lvl_offset;
+	u8 index;
+	int i;
+
+	if (level > MAPT_MAX_LVL_INDEX)
+		return;
+
+	mapt_blk = xa_load(&mapt_info->block_base.table_ctx->xa, node->next_lv_index);
+	if (mapt_blk == NULL) {
+		pr_err("invalid mapt\n");
+		return;
+	}
+	next_lvl_offset = TABLE_LVL_OFFSET(node->next_lv_offset_low,
+					   node->next_lv_offset_high);
+	next_lvl_blk_base = (struct ummu_mapt_table_node *)mapt_blk->block_addr +
+			    next_lvl_offset;
+
+	index = next_lvl_offset / MAPT_MAX_ENTRY_INDEX;
+
+	for (i = 0; i < MAPT_MAX_ENTRY_INDEX; i++) {
+		next_node = &next_lvl_blk_base[i];
+		if (next_node->valid == 0)
+			continue;
+
+		ummu_swap_node_info(node, next_node, i, level);
+		if (next_node->type == 0) {
+			ummu_swap_next_level_node(next_node, level + 1, mapt_info);
+		} else {
+			next_node->valid = 0;
+			next_node->nonce = 0;
+			mapt_blk->level_entry_cnt[index]--;
+			if (mapt_blk->level_entry_cnt[index] == 0) {
+				ummu_free_level_block(mapt_info, node);
+				node->type = 1;
+				node->next_block = 0;
+				node->next_lv_offset_high = 0;
+				node->next_lv_offset_low = 0;
+				node->next_lv_index = 0;
+			}
+		}
+		break;
+	}
+}
+
+static void ummu_table_clear_node(struct ummu_mapt_table_node *node,
+				  u32 level, struct ummu_mapt_info *mapt_info,
+				  struct ummu_mapt_table_node *pre_node)
+{
+	u32 lv_offset = TABLE_LVL_OFFSET(pre_node->next_lv_offset_low,
+					 pre_node->next_lv_offset_high);
+	struct ummu_mapt_block *mapt_blk;
+
+	mapt_blk = xa_load(&mapt_info->block_base.table_ctx->xa, pre_node->next_lv_index);
+	if (mapt_blk == NULL) {
+		pr_err("invalid mapt_block\n");
+		return;
+	}
+
+	if (node->type == 1) {
+		memset(node, 0, sizeof(*node));
+		ummu_modify_entry_cnt(mapt_blk, lv_offset, -1);
+		if (mapt_blk->level_entry_cnt[lv_offset / MAPT_MAX_ENTRY_INDEX] == 0) {
+			ummu_free_level_block(mapt_info, pre_node);
+			pre_node->type = 1;
+			pre_node->next_block = 0;
+			pre_node->next_lv_offset_high = 0;
+			pre_node->next_lv_offset_low = 0;
+			pre_node->next_lv_index = 0;
+		}
+	} else {
+		ummu_swap_next_level_node(node, level, mapt_info);
+	}
+}
+
+static int ummu_table_clear_node_by_level(struct ummu_data_info *data_info,
+					  u32 level, struct ummu_mapt_table_node *pre_node,
+					  u64 lvl_base, u64 lvl_limit);
+static int ummu_table_clear_head_node(struct ummu_data_info *data_info,
+				      u32 level, struct ummu_mapt_table_node *pre_node,
+				      struct ummu_mapt_table_node *cur_node, u64 node_base,
+	u64 node_limit)
+{
+	u16 loop_cnt, max_loop = MAPT_MAX_ENTRY_INDEX << MAPT_MAX_LVL_INDEX;
+	u64 rest_node_base, cur_base, cur_limit;
+	int ret;
+
+	cur_base = ADDR_FULL(cur_node->base_low, cur_node->base_high);
+	cur_limit = ADDR_FULL(cur_node->limit_low, cur_node->limit_high);
+
+	if (cur_base == node_base) {
+		loop_cnt = 0;
+		do {
+			data_info->lvl = min(level, data_info->lvl);
+			rest_node_base = cur_limit + 1UL;
+			ummu_table_clear_node(cur_node, level,
+					      data_info->mapt_info, pre_node);
+			if (++loop_cnt >= max_loop) {
+				pr_err("unexpected loop cnt\n");
+				return -EINVAL;
+			}
+			if (pre_node->type == 0 && cur_node->valid == 1) {
+				cur_base = ADDR_FULL(cur_node->base_low,
+						     cur_node->base_high);
+				cur_limit = ADDR_FULL(cur_node->limit_low,
+						      cur_node->limit_high);
+			} else {
+				break;
+			}
+		} while (rest_node_base == cur_base && cur_limit <= node_limit);
+
+		if (pre_node->type == 0 && rest_node_base <= node_limit &&
+		    cur_node->valid == 1 && cur_node->type == 0) {
+			ret = ummu_table_clear_node_by_level(data_info,
+				level + 1U, cur_node, rest_node_base, node_limit);
+			if (ret != 0)
+				return ret;
+		}
+	} else if (cur_node->type == 0) {
+		ret = ummu_table_clear_node_by_level(data_info,
+			level + 1U, cur_node, node_base, node_limit);
+		if (ret != 0)
+			return ret;
+	} else {
+		pr_err("unexpected failed\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int ummu_table_clear_node_by_level(struct ummu_data_info *data_info,
+					  u32 level, struct ummu_mapt_table_node *pre_node,
+					  u64 lvl_base, u64 lvl_limit)
+{
+	struct ummu_mapt_table_node *lvl_blk_base, *cur_node;
+	u64 node_base, node_limit, lvl_msk;
+	struct ummu_mapt_block *mapt_blk;
+	u16 base_idx, limit_idx;
+	int ret;
+
+	if (level > MAPT_MAX_LVL_INDEX) {
+		pr_err("level overflow\n");
+		return -EINVAL;
+	}
+
+	mapt_blk = xa_load(&data_info->mapt_info->block_base.table_ctx->xa,
+			   pre_node->next_lv_index);
+	if (mapt_blk == NULL) {
+		pr_err("invalid mapt_block\n");
+		return -EINVAL;
+	}
+	lvl_blk_base = (struct ummu_mapt_table_node *)mapt_blk->block_addr +
+			TABLE_LVL_OFFSET(pre_node->next_lv_offset_low,
+					 pre_node->next_lv_offset_high);
+
+	base_idx = (u16)GET_LEVEL_BLOCK_INDEX(lvl_base, level);
+	limit_idx = (u16)GET_LEVEL_BLOCK_INDEX(lvl_limit, level);
+	lvl_msk = GET_LEVEL_RANGE_MASK(level);
+
+	for (u16 i = base_idx; i <= limit_idx; i++) {
+		cur_node = lvl_blk_base + i;
+		if (cur_node->valid == 0) {
+			pr_err("unexpected failed, rte suppose to be valid\n");
+			return -EINVAL;
+		}
+
+		node_base = (i == base_idx) ? (lvl_base & lvl_msk) : 0UL;
+		node_limit = (i == limit_idx) ? (lvl_limit & lvl_msk) : lvl_msk;
+		/* middle rtes */
+		if (base_idx < i && i < limit_idx) {
+			ummu_table_clear_node(cur_node, level, data_info->mapt_info,
+					      pre_node);
+			continue;
+		}
+
+		/* head or tail rte */
+		ret = ummu_table_clear_head_node(data_info, level, pre_node,
+			cur_node, node_base, node_limit);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int ummu_table_update_token_by_level(struct ummu_data_info *data_info,
+					    u32 level, struct ummu_mapt_table_node *pre_node,
+					    u64 lvl_base, u64 lvl_limit)
+{
+	u64 node_base, node_limit, lvl_msk, cur_base, cur_limit;
+	struct ummu_mapt_table_node *lvl_blk_base, *cur_node;
+	struct ummu_mapt_block *mapt_blk;
+	u16 base_idx, limit_idx;
+	int ret;
+
+	if (level > MAPT_MAX_LVL_INDEX) {
+		pr_err("level overflow\n");
+		return -EINVAL;
+	}
+
+	mapt_blk = xa_load(&data_info->mapt_info->block_base.table_ctx->xa,
+			   pre_node->next_lv_index);
+	if (mapt_blk == NULL) {
+		pr_err("invalid mapt_block\n");
+		return -EINVAL;
+	}
+	lvl_blk_base = (struct ummu_mapt_table_node *)mapt_blk->block_addr +
+			TABLE_LVL_OFFSET(pre_node->next_lv_offset_low,
+					 pre_node->next_lv_offset_high);
+
+	base_idx = (u16)GET_LEVEL_BLOCK_INDEX(lvl_base, level);
+	limit_idx = (u16)GET_LEVEL_BLOCK_INDEX(lvl_limit, level);
+	lvl_msk = GET_LEVEL_RANGE_MASK(level);
+
+	for (u16 i = base_idx; i <= limit_idx; i++) {
+		cur_node = lvl_blk_base + i;
+		if (cur_node->valid == 0) {
+			pr_err("unexpected failed, rte suppose to be valid\n");
+			return -EINVAL;
+		}
+
+		node_base = (i == base_idx) ? (lvl_base & lvl_msk) : 0UL;
+		node_limit = (i == limit_idx) ? (lvl_limit & lvl_msk) : lvl_msk;
+		/* middle rtes */
+		if (base_idx < i && i < limit_idx) {
+			ret = ummu_update_token((void *)cur_node, data_info);
+			if (ret != 0)
+				return ret;
+			continue;
+		}
+
+		/* head or tail rte */
+		cur_base = ADDR_FULL(cur_node->base_low, cur_node->base_high);
+		cur_limit = ADDR_FULL(cur_node->limit_low, cur_node->limit_high);
+		if (cur_base == node_base && cur_limit <= node_limit) {
+			ret = ummu_update_token((void *)cur_node, data_info);
+			if (ret != 0)
+				return ret;
+			if (cur_node->type == 0 && cur_limit < node_limit) {
+				ret = ummu_table_update_token_by_level(data_info,
+					level + 1U, cur_node,
+					cur_limit + 1, node_limit);
+				if (ret != 0)
+					return ret;
+			}
+		} else if (cur_node->type == 0) {
+			ret = ummu_table_update_token_by_level(data_info,
+				level + 1U, cur_node, node_base, node_limit);
+			if (ret != 0)
+				return ret;
+		} else {
+			pr_err("unexpected failed\n");
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+static int ummu_entry_op(struct ummu_mapt_info *mapt_info,
+			 struct ummu_data_info *data_info)
+{
+	struct ummu_mapt_entry_node *node = mapt_info->block_base.entry_block;
+
+	switch (data_info->op) {
+	case UMMU_GRANT:
+		ummu_entry_fill_node(node, data_info);
+		return 0;
+	case UMMU_ADD_TOKEN:
+	case UMMU_REMOVE_TOKEN:
+		return ummu_update_token((void *)node, data_info);
+	case UMMU_UNGRANT:
+		memset(node, 0, sizeof(*node));
+		return 0;
+	default:
+		pr_err("invalid op code\n");
+		return -EINVAL;
+	}
+}
+
+static int ummu_table_op(struct ummu_mapt_info *mapt_info,
+			 struct ummu_data_info *data_info)
+{
+	struct ummu_mapt_table_node node = {0};
+
+	data_info->mapt_info = mapt_info;
+
+	switch (data_info->op) {
+	case UMMU_GRANT:
+		return ummu_table_fill_node_by_level(data_info, 0,
+			&node, data_info->data_base, data_info->data_limit);
+	case UMMU_ADD_TOKEN:
+	case UMMU_REMOVE_TOKEN:
+		return ummu_table_update_token_by_level(data_info, 0,
+			&node, data_info->data_base, data_info->data_limit);
+	case UMMU_UNGRANT:
+		return ummu_table_clear_node_by_level(data_info, 0, &node,
+			data_info->data_base, data_info->data_limit);
+	default:
+		pr_err("invalid op code\n");
+		return -EINVAL;
+	}
+}
+
+static int ummu_grant_imp(struct ummu_mapt_info *mapt_info,
+			  struct ummu_data_info *data)
+{
+	if (mapt_info->mode == MAPT_MODE_ENTRY)
+		return ummu_entry_op(mapt_info, data);
+	else
+		return ummu_table_op(mapt_info, data);
+}
+
+static int ummu_update_info(enum ummu_grant_op_type opt,
+			    struct ummu_mapt_info *mapt_info,
+			    struct ummu_data_info *grant_param)
+{
+	struct maple_tree *granted_addr_mng;
+
+	if (mapt_info->mode != MAPT_MODE_TABLE)
+		return 0;
+
+	granted_addr_mng = mapt_info->block_base.table_ctx->granted_addr_mng;
+
+	switch (opt) {
+	case UMMU_GRANT:
+		return ummu_insert_new_addr(granted_addr_mng, grant_param);
+	case UMMU_ADD_TOKEN:
+	case UMMU_REMOVE_TOKEN:
+		return ummu_token_update(granted_addr_mng, grant_param, opt);
+	case UMMU_UNGRANT:
+		return ummu_delete_addr(granted_addr_mng, grant_param);
+	default:
+		return -EINVAL;
+	}
+}
+
+int ummu_perm_grant(struct iommu_domain *domain, void *va, size_t size,
+		    int perm, void *cookie, struct iommu_plb_gather *plb_gather)
+{
+	struct ummu_domain *ummu_dom = to_ummu_domain(domain);
+	u64 ias = core_to_ummu_device(ummu_dom->base_domain.core_dev)->cap.ias;
+	struct ummu_seg_attr *seg_attr = NULL;
+	struct ummu_mapt_info *mapt_info;
+	struct ummu_data_info data_info;
+	int ret;
+
+	if (cookie == NULL) {
+		pr_err("cookie is invalid\n");
+		return -EINVAL;
+	}
+
+	seg_attr = (struct ummu_seg_attr *)cookie;
+	data_info.data = (void *)((u64)va & GENMASK_ULL((int64_t)ias - 1, 0));
+	data_info.data_size = size;
+	data_info.perm = (enum ummu_mapt_perm)perm;
+	data_info.token = seg_attr->token;
+	data_info.e_bit = seg_attr->e_bit;
+
+	mapt_info = &ummu_dom->cfgs.s1_cfg.io_pt_cfg;
+	if (mapt_info == NULL || mapt_info->valid == 0) {
+		pr_err("invalid mapt_info\n");
+		return -EINVAL;
+	}
+
+	if (!ummu_perm_table_mode_is_valid(mapt_info->mode)) {
+		pr_err("tid %d get invalid perm table mode[%u].\n",
+		       ummu_dom->base_domain.tid, mapt_info->mode);
+		return -EINVAL;
+	}
+
+	if (ummu_check_data(mapt_info->mode, &data_info) != 0)
+		return -EINVAL;
+
+	ummu_perm_data_preproc(&data_info);
+
+	data_info.op = ummu_grant_check(mapt_info, &data_info);
+	if (data_info.op == UMMU_OP_END)
+		return -EINVAL;
+
+	ret = ummu_grant_imp(mapt_info, &data_info);
+	if (ret == 0)
+		ret = ummu_update_info(data_info.op, mapt_info, &data_info);
+
+	plb_gather->va = (void *)data_info.data_base;
+	plb_gather->size = data_info.data_size;
+	data_info.tokenval = 0;
+	return ret;
+}
+
+static int ummu_ungrant_imp(struct ummu_mapt_info *mapt_info,
+			    struct ummu_data_info *data)
+{
+	if (mapt_info->mode == MAPT_MODE_ENTRY)
+		return ummu_entry_op(mapt_info, data);
+	else
+		return ummu_table_op(mapt_info, data);
+}
+
+int ummu_perm_ungrant(struct iommu_domain *domain, void *va, size_t size,
+		      void *cookie, struct iommu_plb_gather *plb_gather)
+{
+	struct ummu_domain *ummu_dom = to_ummu_domain(domain);
+	u64 ias = core_to_ummu_device(ummu_dom->base_domain.core_dev)->cap.ias;
+	struct ummu_mapt_info *mapt_info;
+	struct ummu_data_info data_info;
+	u64 aligin_mask;
+	int ret = 0;
+
+	data_info.data = (void *)((u64)va & GENMASK_ULL((int64_t)ias - 1, 0));
+
+	mapt_info = &ummu_dom->cfgs.s1_cfg.io_pt_cfg;
+	if (mapt_info == NULL || mapt_info->valid == 0) {
+		pr_err("tid %u get invalid mapt_info\n", ummu_dom->base_domain.tid);
+		return -EINVAL;
+	}
+
+	if (!ummu_perm_table_mode_is_valid(mapt_info->mode)) {
+		pr_err("tid %u get invalid perm table mode[%u]\n",
+			ummu_dom->base_domain.tid, mapt_info->mode);
+		return -EINVAL;
+	}
+
+	data_info.lvl = MAPT_MAX_LVL_INDEX;
+	data_info.data_size = size;
+	data_info.bytoken = cookie == NULL ? 0 : 1;
+	if (data_info.bytoken)
+		data_info.tokenval =
+			((struct ummu_token_info *)cookie)->tokenVal;
+
+	data_info.data_base = (u64)data_info.data;
+	data_info.data_limit = (u64)data_info.data + (u64)size - 1;
+
+	if (mapt_info->mode == MAPT_MODE_TABLE &&
+	    !IS_ALIGNED((u64)data_info.data, BIT_ULL(MAPT_VPAGE_SHIFT))) {
+		pr_err("table mode, data_base must be 4K aligned\n");
+		ret = -EINVAL;
+		goto clear_info;
+	}
+
+	data_info.op = ummu_ungrant_check(mapt_info, &data_info);
+	if (data_info.op == UMMU_OP_END) {
+		ret = -EINVAL;
+		goto clear_info;
+	}
+
+	ret = ummu_ungrant_imp(mapt_info, &data_info);
+	if (ret)
+		goto clear_info;
+
+	ret = ummu_update_info(data_info.op, mapt_info, &data_info);
+
+	if (data_info.op == UMMU_UNGRANT) {
+		data_info.lvl = data_info.lvl ? data_info.lvl - 1 : 0;
+		aligin_mask = GET_LEVEL_RANGE_MASK(data_info.lvl);
+		data_info.data_size += data_info.data_base & aligin_mask;
+		data_info.data_base = data_info.data_base & ~aligin_mask;
+		data_info.data_size = (data_info.data_size + aligin_mask) & ~aligin_mask;
+	}
+
+	plb_gather->va = (void *)data_info.data_base;
+	plb_gather->size = data_info.data_size;
+
+clear_info:
+	data_info.tokenval = 0;
+	return ret;
 }
 
 static int ummu_init_ksva_mapt_for_table(struct ummu_mapt_info *pt_cfg)

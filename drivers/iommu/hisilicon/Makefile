@@ -14,4 +14,6 @@ ummu-y := ummu_main.o \
 	  seg_mng.o \
 	  ummu_impl.o \
 	  ummu_cfg_v1.o \
-	  perm_table.o
+	  perm_table.o \
+	  perm_table.o \
+	  perm_queue.o

@@ -13,6 +13,7 @@
 
 #include "ummu_impl.h"
 #include "interrupt.h"
+#include "perm_queue.h"
 #include "queue.h"
 #include "regs.h"
 #include "flush.h"
@@ -102,6 +103,15 @@ static int ummu_init_structures(struct ummu_device *ummu)
 	if (ret)
 		return ret;
 
+	if (ummu->cap.support_mapt) {
+		/* ctrl page is private for every ummu hardware */
+		ummu_device_init_permq_ctrl_page(ummu);
+		/* ctx table is common for every ummu hardware */
+		ret = ummu_device_init_permqs(ummu);
+		if (ret)
+			return ret;
+	}
+
 	return 0;
 }
 
@@ -117,6 +127,7 @@ static void ummu_device_hw_probe_ver(struct ummu_device *ummu)
 	 */
 	if (!ummu->cap.prod_ver) {
 		ummu->cap.options |= UMMU_OPT_DOUBLE_PLBI;
+		ummu->cap.options |= UMMU_OPT_KCMD_PLBI;
 		ummu->cap.features &= ~UMMU_FEAT_STALLS;
 	}
 }
@@ -521,6 +532,20 @@ static void ummu_device_set_mem_attr(struct ummu_device *ummu)
 	writel_relaxed(reg, ummu->base + UMMU_CR1);
 }
 
+static int ummu_device_mapt_enable(struct ummu_device *ummu)
+{
+	u32 reg = readl_relaxed(ummu->base + UMMU_CR0);
+	int ret;
+
+	reg |= CR0_MAPT_EN;
+
+	ret = ummu_write_reg_sync(ummu, reg, UMMU_CR0, UMMU_CR0ACK);
+	if (ret)
+		dev_err(ummu->dev, "enable ummu mapt func failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
 static int ummu_device_reset(struct ummu_device *ummu)
 {
 	int ret;
@@ -545,11 +570,25 @@ static int ummu_device_reset(struct ummu_device *ummu)
 	if (ret)
 		return ret;
 
+	if (ummu->cap.support_mapt) {
+		ummu_device_set_permq_ctxtbl(ummu);
+		ret = ummu_device_mapt_enable(ummu);
+		if (ret)
+			return ret;
+	}
+
 	ummu_setup_irqs(ummu);
 	ummu_sync_tect_all(ummu);
 	ummu_init_flush_iotlb(ummu);
 
 	return ummu_device_enable(ummu);
+}
+
+static void release_ummu_dev_res(void *data)
+{
+	struct ummu_device *ummu = (struct ummu_device *)data;
+
+	ummu_device_uninit_permqs(ummu);
 }
 
 static int ummu_device_ubrt_probe(struct ummu_device *ummu)
@@ -627,6 +666,10 @@ static int ummu_device_probe(struct platform_device *pdev)
 
 	/* Initialise in-memory data structures */
 	ret = ummu_init_structures(ummu);
+	if (ret)
+		return ret;
+
+	ret = devm_add_action_or_reset(dev, release_ummu_dev_res, ummu);
 	if (ret)
 		return ret;
 

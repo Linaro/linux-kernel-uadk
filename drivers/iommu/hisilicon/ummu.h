@@ -17,6 +17,7 @@
 
 extern struct platform_driver ummu_driver;
 #define EID_HIGH_SZ_SHIFT 64
+#define UMMU_CTRL_PAGE_SIZE ((PAGE_SIZE == SZ_4K) ? SZ_4K : SZ_64K)
 
 /* target context table structures */
 struct ummu_l1_tct_desc {
@@ -163,6 +164,7 @@ struct ummu_capability {
 	u64 ptsize_bitmap;
 #define UMMU_OPT_MSIPOLL		(1UL << 0)
 #define UMMU_OPT_DOUBLE_PLBI		(1UL << 1)
+#define UMMU_OPT_KCMD_PLBI		(1UL << 2)
 	u32 options;
 
 #define UMMU_MAX_ASIDS			(1UL << 16)
@@ -185,6 +187,24 @@ struct ummu_capability {
 	u16 prod_ver;
 };
 
+struct ummu_permq_addr {
+	void *va;
+	phys_addr_t pa;
+};
+
+struct ummu_permq_desc {
+	struct ummu_permq_addr pcmdq;
+	struct ummu_permq_addr pcplq;
+};
+
+struct ummu_permq_context_cfg {
+	void *tbl_va;
+	phys_addr_t tbl_pa;
+	u64 tbl_reg_addr;
+	struct xarray permq_xa; /* container of struct ummu_permq_desc */
+	struct mutex permq_rel_mutex;
+};
+
 struct ummu_hash_table_cfg {
 	u16 bank_depth;
 	u8 bank_num;
@@ -203,6 +223,7 @@ struct ummu_hash_table_cfg {
 struct ummu_device {
 	struct device *dev;
 	void __iomem *base;
+	void __iomem *ucmdq_ctrl_page;
 
 	struct ummu_capability cap;
 
@@ -213,6 +234,7 @@ struct ummu_device {
 	struct ummu_tect_cfg *tect_cfg;
 	struct ummu_hash_table_cfg hash_tbl_cfg;
 	struct ummu_tct_desc_cfg *local_tct_cfg;
+	struct ummu_permq_context_cfg permq_ctx_cfg;
 
 	struct ummu_core_device core_dev;
 	struct ummu_dev_impl_ops *impl_ops;
@@ -239,6 +261,7 @@ struct ummu_domain_cfgs {
 struct ummu_domain {
 	struct mutex init_mutex; /* protect domain resources */
 	struct ummu_base_domain base_domain;
+	u32 qid;
 	struct ummu_domain_cfgs cfgs;
 };
 

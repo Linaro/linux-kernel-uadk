@@ -417,6 +417,161 @@ static int ubctl_query_mar_table_data(struct ubctl_dev *ucdev,
 				query_dp, ARRAY_SIZE(query_dp));
 }
 
+static int ubctl_query_qos_data(struct ubctl_dev *ucdev,
+				struct ubctl_query_cmd_param *query_cmd_param,
+				struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_QOS_DFX, UBCTL_QOS_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_scc_debug(struct ubctl_dev *ucdev,
+				 struct ubctl_query_cmd_param *query_cmd_param,
+				 struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_SCC_DEBUG_DFX, UBCTL_SCC_DEBUG_EN_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_config_scc_debug(struct ubctl_dev *ucdev,
+				  struct ubctl_query_cmd_param *query_cmd_param,
+				  struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_SCC_DEBUG_DFX, UBCTL_SCC_DEBUG_EN_LEN, UBCTL_WRITE, NULL, 0 },
+	};
+
+	if (query_cmd_param->in->data_size != sizeof(struct fwctl_pkt_in_enable)) {
+		ubctl_err(ucdev, "user data of scc debug is invalid.\n");
+		return -EINVAL;
+	}
+	u8 *scc_debug_en = (u8 *)(query_cmd_param->in->data);
+
+	if (*scc_debug_en > 1)
+		return -EINVAL;
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_ubommu_data(struct ubctl_dev *ucdev,
+				   struct ubctl_query_cmd_param *query_cmd_param,
+				   struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_UBOMMU_DFX, UBCTL_UBOMMU_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_port_info_data(struct ubctl_dev *ucdev,
+				      struct ubctl_query_cmd_param *query_cmd_param,
+				      struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_PORT_INFO_DFX, UBCTL_PORT_INFO_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func, query_dp,
+				ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_ecc_2b_data(struct ubctl_dev *ucdev,
+				   struct ubctl_query_cmd_param *query_cmd_param,
+				   struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_ECC_2B_DFX, UBCTL_ECC_2B_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func, query_dp,
+				ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_queue_data(struct ubctl_dev *ucdev,
+				  struct ubctl_query_cmd_param *query_cmd_param,
+				  struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_QUEUE_DFX, UBCTL_QUEUE_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func, query_dp,
+				ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_loopback(struct ubctl_dev *ucdev,
+				struct ubctl_query_cmd_param *query_cmd_param,
+				struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_LOOPBACK, UBCTL_QUERY_DEBUG_EN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_config_loopback(struct ubctl_dev *ucdev,
+				 struct ubctl_query_cmd_param *query_cmd_param,
+				 struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_LOOPBACK, UBCTL_QUERY_DEBUG_EN, UBCTL_WRITE, NULL, 0 },
+	};
+	int ret;
+
+	ret = ubctl_query_data(ucdev, query_cmd_param, query_func,
+			       query_dp, ARRAY_SIZE(query_dp));
+
+	if (query_cmd_param->out->retval == -EBUSY)
+		ubctl_err(ucdev, "Current port has been enabled for another loopback mode.\n");
+	if (query_cmd_param->out->retval == -EMLINK)
+		ubctl_err(ucdev, "Another port has already been enabled.\n");
+
+	return ret;
+}
+
+static int ubctl_query_prbs(struct ubctl_dev *ucdev,
+			    struct ubctl_query_cmd_param *query_cmd_param,
+			    struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_PRBS_RESULT, UBCTL_QUERY_DEBUG_EN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_config_prbs(struct ubctl_dev *ucdev,
+			     struct ubctl_query_cmd_param *query_cmd_param,
+			     struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_PRBS_RESULT, UBCTL_QUERY_DEBUG_EN, UBCTL_WRITE, NULL, 0 },
+	};
+	int ret;
+
+	ret = ubctl_query_data(ucdev, query_cmd_param, query_func,
+			       query_dp, ARRAY_SIZE(query_dp));
+
+	if (query_cmd_param->out->retval == -EMLINK)
+		ubctl_err(ucdev, "Another port has already been enabled.\n");
+
+	return ret;
+}
+
 static struct ubctl_func_dispatch g_ubctl_query_reg[] = {
 	{ UTOOL_CMD_QUERY_NL, ubctl_query_nl_data, ubctl_query_data_deal },
 	{ UTOOL_CMD_QUERY_NL_PKT_STATS, ubctl_query_nl_pkt_stats_data,
@@ -471,6 +626,28 @@ static struct ubctl_func_dispatch g_ubctl_query_reg[] = {
 	  ubctl_query_data_deal },
 	{ UTOOL_CMD_QUERY_BA_MAR_PEFR_STATS, ubctl_query_ba_mar_perf,
 	  ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_QOS, ubctl_query_qos_data, ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_SCC_DEBUG_EN, ubctl_query_scc_debug,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_CONF_SCC_DEBUG_EN, ubctl_config_scc_debug,
+	  ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_UBOMMU, ubctl_query_ubommu_data, ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_PORT_INFO, ubctl_query_port_info_data,
+	  ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_ECC_2B, ubctl_query_ecc_2b_data, ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_QUEUE, ubctl_query_queue_data, ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_LOOPBACK, ubctl_query_loopback, ubctl_query_data_deal },
+	{ UTOOL_CMD_CONF_LOOPBACK, ubctl_config_loopback, ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_PRBS_EN, ubctl_query_prbs, ubctl_query_data_deal },
+	{ UTOOL_CMD_CONF_PRBS_EN, ubctl_config_prbs, ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_PRBS_RESULT, ubctl_query_prbs, ubctl_query_data_deal },
 
 	{ UTOOL_CMD_QUERY_MAX, NULL, NULL }
 };

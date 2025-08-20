@@ -572,6 +572,50 @@ static int ubctl_config_prbs(struct ubctl_dev *ucdev,
 	return ret;
 }
 
+static int ubctl_query_dump_data(struct ubctl_dev *ucdev,
+				 struct ubctl_query_cmd_param *query_cmd_param,
+				 struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_NL_PKT_STATS_DFX, UBCTL_NL_PKT_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_NL_SSU_STATS_DFX, UBCTL_NL_SSU_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_NL_ABN_DFX, UBCTL_NL_ABN_LEN, UBCTL_READ, NULL, 0 },
+
+		{ UBCTL_QUERY_TP_TX_DFX, UBCTL_TP_TX_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_DFX, UBCTL_TP_RX_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RQM_DFX, UBCTL_TP_RQM_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_STATE_DFX, UBCTL_TP_STATE_DFX_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_TX_ROUTE_DFX, UBCTL_TP_TX_ROUTE_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_TX_DFX, UBCTL_TP_TX_ABN_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_DFX, UBCTL_TP_RX_ABN_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_ABN_STATS_DFX, UBCTL_TP_REG_LEN, UBCTL_READ, NULL, 0 },
+
+		{ UBCTL_QUERY_TA_PKT_STATS_DFX, UBCTL_TA_PKT_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TA_ABN_STATS_DFX, UBCTL_TA_ABN_STATS_LEN, UBCTL_READ, NULL, 0 },
+
+		{ UBCTL_QUERY_DL_PKT_STATS_DFX, UBCTL_DL_PKT_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_DL_REPL_DFX, UBCTL_DL_REPL_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_DL_LINK_STATUS_DFX, UBCTL_DL_LINK_STATUS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_DL_LANE_DFX, UBCTL_DL_LANE_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_DL_BIT_ERR_DFX, UBCTL_DL_BIT_ERR_LEN, UBCTL_READ, NULL, 0 },
+
+		{ UBCTL_QUERY_BA_PKT_STATS_DFX, UBCTL_BA_PKT_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_BA_MAR_DFX, UBCTL_BA_MAR_LEN, UBCTL_READ, NULL, 0 },
+
+		{ UBCTL_QUERY_QOS_DFX, UBCTL_QOS_LEN, UBCTL_READ, NULL, 0 },
+
+		{ UBCTL_QUERY_UBOMMU_DFX, UBCTL_UBOMMU_LEN, UBCTL_READ, NULL, 0 },
+
+		{ UBCTL_QUERY_ECC_2B_DFX, UBCTL_ECC_2B_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_dp_deal(ucdev, query_cmd_param, query_func,
+				   query_dp, ARRAY_SIZE(query_dp));
+}
+
 static struct ubctl_func_dispatch g_ubctl_query_reg[] = {
 	{ UTOOL_CMD_QUERY_NL, ubctl_query_nl_data, ubctl_query_data_deal },
 	{ UTOOL_CMD_QUERY_NL_PKT_STATS, ubctl_query_nl_pkt_stats_data,
@@ -648,6 +692,8 @@ static struct ubctl_func_dispatch g_ubctl_query_reg[] = {
 	{ UTOOL_CMD_QUERY_PRBS_EN, ubctl_query_prbs, ubctl_query_data_deal },
 	{ UTOOL_CMD_CONF_PRBS_EN, ubctl_config_prbs, ubctl_query_data_deal },
 	{ UTOOL_CMD_QUERY_PRBS_RESULT, ubctl_query_prbs, ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_DUMP, ubctl_query_dump_data, ubctl_query_data_deal },
 
 	{ UTOOL_CMD_QUERY_MAX, NULL, NULL }
 };

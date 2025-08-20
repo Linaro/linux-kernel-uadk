@@ -96,3 +96,75 @@ int udma_del_one_eid(struct udma_dev *udma_dev, struct udma_ctrlq_eid_info *eid_
 
 	return 0;
 }
+
+static int udma_send_query_eid_cmd(struct udma_dev *udma_dev,
+				   struct udma_ctrlq_eid_out_query *eid_out_query)
+{
+#define UDMA_CMD_CTRLQ_QUERY_SEID 0xb5
+	struct udma_ctrlq_eid_in_query eid_in_query = {};
+	struct ubase_ctrlq_msg msg = {};
+	int ret;
+
+	msg.opcode = UDMA_CTRLQ_GET_SEID_INFO;
+	msg.service_ver = UBASE_CTRLQ_SER_VER_01;
+	msg.service_type = UBASE_CTRLQ_SER_TYPE_DEV_REGISTER;
+	msg.need_resp = 1;
+	msg.is_resp = 0;
+	msg.in_size = sizeof(eid_in_query);
+	msg.in = &eid_in_query;
+	msg.out_size = sizeof(*eid_out_query);
+	msg.out = eid_out_query;
+	eid_in_query.cmd = UDMA_CMD_CTRLQ_QUERY_SEID;
+
+	ret = ubase_ctrlq_send_msg(udma_dev->comdev.adev, &msg);
+	if (ret)
+		dev_err(udma_dev->dev,
+			"query seid from ctrl cpu failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
+int udma_query_eid_from_ctrl_cpu(struct udma_dev *udma_dev)
+{
+	struct udma_ctrlq_eid_out_query eid_out_query = {};
+	int ret, ret_tmp, i;
+
+	ret = udma_send_query_eid_cmd(udma_dev, &eid_out_query);
+	if (ret) {
+		dev_err(udma_dev->dev, "query eid failed, ret = %d.\n", ret);
+		return ret;
+	}
+
+	if (eid_out_query.seid_num > UDMA_CTRLQ_SEID_NUM) {
+		dev_err(udma_dev->dev, "Invalid param: seid num is %u.\n", eid_out_query.seid_num);
+		return -EINVAL;
+	}
+
+	mutex_lock(&udma_dev->eid_mutex);
+	for (i = 0; i < (int)eid_out_query.seid_num; i++) {
+		if (eid_out_query.eids[i].eid_idx >= SEID_TABLE_SIZE) {
+			dev_err(udma_dev->dev, "invalid eid_idx = %u.\n",
+				eid_out_query.eids[i].eid_idx);
+			goto err_add_ummu_eid;
+		}
+		ret = udma_add_one_eid(udma_dev, &(eid_out_query.eids[i]));
+		if (ret) {
+			dev_err(udma_dev->dev, "Add eid failed, ret = %d, eid_idx = %u.\n",
+				ret, eid_out_query.eids[i].eid_idx);
+			goto err_add_ummu_eid;
+		}
+	}
+	mutex_unlock(&udma_dev->eid_mutex);
+
+	return 0;
+err_add_ummu_eid:
+	for (i--; i >= 0; i--) {
+		ret_tmp = udma_del_one_eid(udma_dev, &eid_out_query.eids[i]);
+		if (ret_tmp)
+			dev_err(udma_dev->dev, "Del eid failed, ret = %d, idx = %u.\n",
+				ret_tmp, eid_out_query.eids[i].eid_idx);
+	}
+	mutex_unlock(&udma_dev->eid_mutex);
+
+	return ret;
+}

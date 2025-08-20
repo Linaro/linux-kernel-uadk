@@ -22,6 +22,7 @@
 #include "udma_ctx.h"
 #include "udma_rct.h"
 #include "udma_tid.h"
+#include "udma_eid.h"
 #include "udma_debugfs.h"
 #include "udma_common.h"
 #include "udma_ctrlq_tp.h"
@@ -850,6 +851,17 @@ static void udma_reset_handler(struct auxiliary_device *adev,
 	}
 }
 
+static int udma_init_eid_table(struct udma_dev *udma_dev)
+{
+	int ret;
+
+	ret = udma_query_eid_from_ctrl_cpu(udma_dev);
+	if (ret)
+		dev_err(udma_dev->dev, "query eid info failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
 static int udma_init_dev(struct auxiliary_device *adev)
 {
 	struct udma_dev *udma_dev;
@@ -883,6 +895,11 @@ static int udma_init_dev(struct auxiliary_device *adev)
 		goto err_set_ubcore_dev;
 	}
 
+	ret = udma_init_eid_table(udma_dev);
+	if (ret) {
+		dev_err(udma_dev->dev, "init eid table failed.\n");
+		goto err_init_eid;
+	}
 	udma_register_debugfs(udma_dev);
 	udma_dev->status = UDMA_NORMAL;
 	mutex_unlock(&udma_reset_mutex);
@@ -890,6 +907,8 @@ static int udma_init_dev(struct auxiliary_device *adev)
 
 	return 0;
 
+err_init_eid:
+	udma_unset_ubcore_dev(udma_dev);
 err_set_ubcore_dev:
 	udma_unregister_activate_workqueue(udma_dev);
 err_register_act_init:

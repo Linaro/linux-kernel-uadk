@@ -9,5 +9,6 @@
 
 int udma_add_one_eid(struct udma_dev *udma_dev, struct udma_ctrlq_eid_info *eid_info);
 int udma_del_one_eid(struct udma_dev *udma_dev, struct udma_ctrlq_eid_info *eid_info);
+int udma_query_eid_from_ctrl_cpu(struct udma_dev *udma_dev);
 
 #endif /* __UDMA_EID_H__ */

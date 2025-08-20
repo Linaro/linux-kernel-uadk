@@ -145,6 +145,63 @@ static int udma_set_seg_eid(struct udma_dev *udma_dev, uint32_t eid_index,
 	return ret;
 }
 
+static void udma_dfx_store_seg(struct udma_dev *udma_dev,
+			       struct ubcore_seg_cfg *cfg)
+{
+	struct udma_dfx_seg *seg;
+	int ret;
+
+	seg = (struct udma_dfx_seg *)xa_load(&udma_dev->dfx_info->seg.table,
+					     cfg->token_id->token_id);
+	if (seg) {
+		dev_warn(udma_dev->dev, "segment already exists in DFX.\n");
+		return;
+	}
+
+	seg = kzalloc(sizeof(*seg), GFP_KERNEL);
+	if (!seg)
+		return;
+
+	seg->id = cfg->token_id->token_id;
+	seg->ubva.va = cfg->va;
+	seg->len = cfg->len;
+	seg->token_value = cfg->token_value;
+	if (udma_set_seg_eid(udma_dev, cfg->eid_index, &seg->ubva.eid)) {
+		kfree(seg);
+		return;
+	}
+
+	write_lock(&udma_dev->dfx_info->seg.rwlock);
+	ret = xa_err(xa_store(&udma_dev->dfx_info->seg.table, cfg->token_id->token_id,
+			      seg, GFP_KERNEL));
+	if (ret) {
+		write_unlock(&udma_dev->dfx_info->seg.rwlock);
+		dev_err(udma_dev->dev, "store segment to table failed in DFX.\n");
+		kfree(seg);
+		return;
+	}
+
+	++udma_dev->dfx_info->seg.cnt;
+	write_unlock(&udma_dev->dfx_info->seg.rwlock);
+}
+
+static void udma_dfx_delete_seg(struct udma_dev *udma_dev, uint32_t token_id,
+				uint64_t va)
+{
+	struct udma_dfx_seg *seg;
+
+	write_lock(&udma_dev->dfx_info->seg.rwlock);
+	seg = (struct udma_dfx_seg *)xa_load(&udma_dev->dfx_info->seg.table,
+					     token_id);
+	if (seg && seg->id == token_id && seg->ubva.va == va) {
+		xa_erase(&udma_dev->dfx_info->seg.table, token_id);
+		seg->token_value.token = 0;
+		kfree(seg);
+		--udma_dev->dfx_info->seg.cnt;
+	}
+	write_unlock(&udma_dev->dfx_info->seg.rwlock);
+}
+
 struct ubcore_target_seg *udma_register_seg(struct ubcore_device *ub_dev,
 					    struct ubcore_seg_cfg *cfg,
 					    struct ubcore_udata *udata)
@@ -194,6 +251,9 @@ struct ubcore_target_seg *udma_register_seg(struct ubcore_device *ub_dev,
 	}
 	mutex_unlock(&udma_dev->ksva_mutex);
 
+	if (dfx_switch)
+		udma_dfx_store_seg(udma_dev, cfg);
+
 	return &seg->core_tseg;
 
 err_load_ksva:
@@ -241,6 +301,10 @@ int udma_unregister_seg(struct ubcore_target_seg *ubcore_seg)
 		}
 	}
 	mutex_unlock(&udma_dev->ksva_mutex);
+
+	if (dfx_switch)
+		udma_dfx_delete_seg(udma_dev, ubcore_seg->token_id->token_id,
+				    ubcore_seg->seg.ubva.va);
 
 common_process:
 	udma_unpin_seg(seg);

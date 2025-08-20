@@ -91,6 +91,9 @@ static int udma_alloc_rc_queue(struct udma_dev *dev,
 		goto err_store_rcq_id;
 	}
 
+	if (dfx_switch)
+		udma_dfx_store_id(dev, &dev->dfx_info->rc, rcq->id, "rc");
+
 	return ret;
 
 err_store_rcq_id:
@@ -124,6 +127,9 @@ void udma_free_rc_queue(struct udma_dev *dev, int rc_queue_id)
 	if (ret)
 		dev_err(dev->dev,
 			"udma destroy rc queue ctx failed, ret = %d.\n", ret);
+
+	if (dfx_switch)
+		udma_dfx_delete_id(dev, &dev->dfx_info->rc, rc_queue_id);
 
 	udma_free_iova(dev, rcq->buf.entry_size * rcq->buf.entry_cnt,
 		       rcq->buf.kva_or_slot, rcq->buf.addr);

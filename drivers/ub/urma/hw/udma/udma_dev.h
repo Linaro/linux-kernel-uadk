@@ -11,6 +11,7 @@
 #include <uapi/ub/urma/udma/udma_abi.h>
 #include <ub/urma/udma/udma_ctl.h>
 
+extern bool dfx_switch;
 extern uint32_t jfc_arm_mode;
 extern bool dump_aux_info;
 
@@ -110,6 +111,7 @@ struct udma_dev {
 	struct iommu_sva *ksva;
 	struct list_head db_list[UDMA_DB_TYPE_NUM];
 	struct mutex db_mutex;
+	struct udma_dfx_info *dfx_info;
 	uint32_t status;
 	struct udma_dev_debugfs *dbgfs;
 	uint32_t ue_num;

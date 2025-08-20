@@ -23,6 +23,7 @@
 #include "udma_ctx.h"
 #include "udma_rct.h"
 #include "udma_tid.h"
+#include "udma_dfx.h"
 #include "udma_eid.h"
 #include "udma_debugfs.h"
 #include "udma_common.h"
@@ -161,6 +162,7 @@ static struct ubcore_ops g_dev_ops = {
 	.abi_version = 0,
 	.query_device_attr = udma_query_device_attr,
 	.query_device_status = udma_query_device_status,
+	.query_res = udma_query_res,
 	.config_device = udma_config_device,
 	.alloc_ucontext = udma_alloc_ucontext,
 	.free_ucontext = udma_free_ucontext,
@@ -686,6 +688,7 @@ static const struct udma_func_map udma_dev_func_map[] = {
 	{"dev param", udma_init_dev_param, udma_uninit_dev_param},
 	{"cmd", udma_cmd_init, udma_cmd_cleanup},
 	{"dev tid", udma_alloc_dev_tid, udma_free_dev_tid},
+	{"dfx", udma_dfx_init, udma_dfx_uninit},
 	{"db page", udma_create_db_page, udma_destroy_db_page},
 };
 

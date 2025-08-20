@@ -69,6 +69,39 @@ struct udma_caps {
 	struct udma_tbl seid;
 };
 
+struct udma_dfx_jetty {
+	uint32_t		id;
+	uint32_t		jfs_depth;
+};
+
+struct udma_dfx_jfs {
+	uint32_t		id;
+	uint32_t		depth;
+};
+
+struct udma_dfx_seg {
+	uint32_t		id;
+	struct ubcore_ubva	ubva;
+	uint64_t		len;
+	struct ubcore_token	token_value;
+};
+
+struct udma_dfx_entity {
+	uint32_t		cnt;
+	struct xarray		table;
+	rwlock_t		rwlock;
+};
+
+struct udma_dfx_info {
+	struct udma_dfx_entity	rc;
+	struct udma_dfx_entity	jetty;
+	struct udma_dfx_entity	jetty_grp;
+	struct udma_dfx_entity	jfs;
+	struct udma_dfx_entity	jfr;
+	struct udma_dfx_entity	jfc;
+	struct udma_dfx_entity	seg;
+};
+
 struct udma_sw_db_page {
 	struct list_head list;
 	struct ubcore_umem *umem;

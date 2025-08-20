@@ -470,6 +470,55 @@ void udma_destroy_eid_table(struct udma_dev *udma_dev)
 	mutex_destroy(&udma_dev->eid_mutex);
 }
 
+void udma_dfx_store_id(struct udma_dev *udma_dev, struct udma_dfx_entity *entity,
+		       uint32_t id, const char *name)
+{
+	uint32_t *entry;
+	int ret;
+
+	entry = (uint32_t *)xa_load(&entity->table, id);
+	if (entry) {
+		dev_warn(udma_dev->dev, "%s(%u) already exists in DFX.\n", name, id);
+		return;
+	}
+
+	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	if (!entry)
+		return;
+
+	*entry = id;
+
+	write_lock(&entity->rwlock);
+	ret = xa_err(xa_store(&entity->table, id, entry, GFP_KERNEL));
+	if (ret) {
+		write_unlock(&entity->rwlock);
+		dev_err(udma_dev->dev, "store %s to table failed in DFX.\n", name);
+		kfree(entry);
+		return;
+	}
+
+	++entity->cnt;
+	write_unlock(&entity->rwlock);
+}
+
+void udma_dfx_delete_id(struct udma_dev *udma_dev, struct udma_dfx_entity *entity,
+			uint32_t id)
+{
+	void *entry;
+
+	write_lock(&entity->rwlock);
+	entry = xa_load(&entity->table, id);
+	if (!entry) {
+		write_unlock(&entity->rwlock);
+		return;
+	}
+
+	xa_erase(&entity->table, id);
+	kfree(entry);
+	--entity->cnt;
+	write_unlock(&entity->rwlock);
+}
+
 static struct ubcore_umem *udma_pin_k_addr(struct ubcore_device *ub_dev, uint64_t va,
 				    uint64_t len)
 {
@@ -577,6 +626,21 @@ void udma_free_iova(struct udma_dev *udma_dev, size_t memory_size, void *kva_or_
 			npage, ret);
 
 	dma_free_iova(slot);
+}
+
+void udma_dfx_ctx_print(struct udma_dev *udev, const char *name, uint32_t id, uint32_t len,
+			uint32_t *ctx)
+{
+	uint32_t i;
+
+	pr_info("*************udma%u %s(%u) CONTEXT INFO *************\n",
+		udev->adev_id, name, id);
+
+	for (i = 0; i < len; ++i)
+		pr_info("udma%u %s(%u) CONTEXT(byte%4lu): %08x\n",
+			udev->adev_id, name, id, (i + 1) * sizeof(uint32_t), ctx[i]);
+
+	pr_info("**************************************************\n");
 }
 
 void udma_swap_endian(uint8_t arr[], uint8_t res[], uint32_t res_size)

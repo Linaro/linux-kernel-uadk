@@ -72,6 +72,10 @@ void udma_init_udma_table_mutex(struct xarray *table, struct mutex *udma_mutex);
 void udma_destroy_udma_table(struct udma_dev *dev, struct udma_table *table,
 			     const char *table_name);
 void udma_destroy_eid_table(struct udma_dev *udma_dev);
+void udma_dfx_store_id(struct udma_dev *udma_dev, struct udma_dfx_entity *entity,
+		       uint32_t id, const char *name);
+void udma_dfx_delete_id(struct udma_dev *udma_dev, struct udma_dfx_entity *entity,
+			uint32_t id);
 int udma_k_alloc_buf(struct udma_dev *udma_dev, size_t memory_size, struct udma_buf *buf);
 void udma_k_free_buf(struct udma_dev *udma_dev, size_t memory_size, struct udma_buf *buf);
 void *udma_alloc_iova(struct udma_dev *udma_dev, size_t memory_size, dma_addr_t *addr);
@@ -82,6 +86,8 @@ static inline uint64_t udma_cal_npages(uint64_t va, uint64_t len)
 	return (ALIGN(va + len, PAGE_SIZE) - ALIGN_DOWN(va, PAGE_SIZE)) / PAGE_SIZE;
 }
 
+void udma_dfx_ctx_print(struct udma_dev *udev, const char *name, uint32_t id, uint32_t len,
+			uint32_t *ctx);
 void udma_swap_endian(uint8_t arr[], uint8_t res[], uint32_t res_size);
 
 #endif /* __UDMA_COMM_H__ */

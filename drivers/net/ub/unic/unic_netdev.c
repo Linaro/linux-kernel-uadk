@@ -505,6 +505,33 @@ static int unic_change_mtu(struct net_device *netdev, int new_mtu)
 	return 0;
 }
 
+static u8 unic_get_netdev_flags(struct net_device *netdev)
+{
+	struct unic_dev *unic_dev = netdev_priv(netdev);
+	u8 flags = 0;
+
+	if (netdev->flags & IFF_PROMISC) {
+		if (unic_dev_ubl_supported(unic_dev))
+			flags = UNIC_USER_UPE | UNIC_USER_MPE;
+	} else if (netdev->flags & IFF_ALLMULTI) {
+		flags = UNIC_USER_MPE;
+	}
+
+	return flags;
+}
+
+static void unic_set_rx_mode(struct net_device *netdev)
+{
+	struct unic_dev *unic_dev = netdev_priv(netdev);
+	struct unic_vport *vport = &unic_dev->vport;
+	u8 new_flags;
+
+	new_flags = unic_get_netdev_flags(netdev);
+	unic_dev->netdev_flags = new_flags;
+
+	set_bit(UNIC_VPORT_STATE_PROMISC_CHANGE, &vport->state);
+}
+
 static void unic_tx_timeout(struct net_device *netdev, u32 queue_idx)
 {
 	struct unic_dev *unic_dev = netdev_priv(netdev);
@@ -563,6 +590,7 @@ static const struct net_device_ops unic_netdev_ops = {
 	.ndo_change_mtu = unic_change_mtu,
 	.ndo_open = unic_net_open,
 	.ndo_stop = unic_net_stop,
+	.ndo_set_rx_mode = unic_set_rx_mode,
 	.ndo_select_queue = unic_select_queue,
 };
 

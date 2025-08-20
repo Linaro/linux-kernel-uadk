@@ -69,6 +69,8 @@ int unic_mac_mode_cfg(struct net_device *netdev, bool enable);
 int unic_sync_promisc_mode(struct unic_dev *unic_dev);
 int unic_activate_promisc_mode(struct unic_dev *unic_dev, bool activate);
 void unic_fill_promisc_en(struct unic_promisc_en *promisc_en, u8 flags);
+int unic_get_promisc_mode(struct unic_dev *unic_dev,
+			  struct unic_promisc_cfg_cmd *resp);
 int unic_set_promisc_mode(struct unic_dev *unic_dev,
 			  struct unic_promisc_en *promisc_en);
 

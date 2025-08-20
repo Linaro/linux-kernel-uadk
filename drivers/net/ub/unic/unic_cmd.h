@@ -90,7 +90,10 @@ struct unic_promisc_cfg_cmd {
 	u8 promisc_rx_uc_ip_en : 1; /* promisc rx ip uc enable or not */
 	u8 promisc_rx_uc_guid_en : 1; /* promisc rx guid uc enable or not */
 	u8 promisc_rx_mc_en : 1; /* promisc rx mc enable or not */
-	u8 rsv2 : 5;
+	u8 promisc_rx_uc_mac_en : 1; /* promisc rx mac uc enable or not */
+	u8 promisc_rx_mc_mac_en : 1; /* promisc rx mac mc enable or not */
+	u8 promisc_rx_bc_en : 1; /* promisc rx bc enable or not */
+	u8 rsv2 : 2;
 	u8 rsv3[21];
 };
 

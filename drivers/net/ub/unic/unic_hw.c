@@ -299,6 +299,25 @@ static void unic_setup_promisc_req(struct unic_promisc_cfg_cmd *req,
 	req->promisc_rx_mc_en = promisc_en->en_mc;
 }
 
+int unic_get_promisc_mode(struct unic_dev *unic_dev,
+			  struct unic_promisc_cfg_cmd *resp)
+{
+	struct auxiliary_device *adev = unic_dev->comdev.adev;
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_CFG_PROMISC_MODE, true, 0, NULL);
+	ubase_fill_inout_buf(&out, UBASE_OPC_CFG_PROMISC_MODE, true,
+			     sizeof(*resp), resp);
+
+	ret = ubase_cmd_send_inout(adev, &in, &out);
+	if (ret)
+		dev_err(adev->dev.parent,
+			"failed to query promisc mode, ret = %d.\n", ret);
+
+	return ret;
+}
+
 int unic_set_promisc_mode(struct unic_dev *unic_dev,
 			  struct unic_promisc_en *promisc_en)
 {

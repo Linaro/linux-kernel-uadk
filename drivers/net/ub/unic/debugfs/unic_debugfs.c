@@ -136,6 +136,29 @@ out:
 	return ret;
 }
 
+static int unic_dbg_dump_promisc_cfg_hw(struct seq_file *s, void *data)
+{
+	struct unic_dev *unic_dev = dev_get_drvdata(s->private);
+	struct unic_promisc_cfg_cmd resp = {0};
+	int ret;
+
+	if (__unic_resetting(unic_dev))
+		return -EBUSY;
+
+	ret = unic_get_promisc_mode(unic_dev, &resp);
+	if (ret)
+		return ret;
+
+	seq_printf(s, "rx_uc_ip_en   : %-2u\n", resp.promisc_rx_uc_ip_en);
+	seq_printf(s, "rx_uc_guid_en : %-2u\n", resp.promisc_rx_uc_guid_en);
+	seq_printf(s, "rx_mc_en      : %-2u\n", resp.promisc_rx_mc_en);
+	seq_printf(s, "rx_uc_mac_en  : %-2u\n", resp.promisc_rx_uc_mac_en);
+	seq_printf(s, "rx_mc_mac_en  : %-2u\n", resp.promisc_rx_mc_mac_en);
+	seq_printf(s, "rx_bc_en      : %-2u\n", resp.promisc_rx_bc_en);
+
+	return 0;
+}
+
 static bool unic_dbg_dentry_support(struct device *dev, u32 property)
 {
 	struct unic_dev *unic_dev = dev_get_drvdata(dev);
@@ -174,6 +197,13 @@ static struct ubase_dbg_cmd_info unic_dbg_cmd[] = {
 		.support = unic_dbg_dentry_support,
 		.init = ubase_dbg_seq_file_init,
 		.read_func = unic_dbg_dump_page_pool_info,
+	}, {
+		.name = "promisc_cfg_hw",
+		.dentry_index = UNIC_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_promisc_cfg_hw,
 	}
 };
 

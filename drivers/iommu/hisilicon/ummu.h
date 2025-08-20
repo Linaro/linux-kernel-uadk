@@ -56,6 +56,8 @@ struct ummu_s1_cfg {
 /* translation stage2 table config */
 struct ummu_s2_cfg {
 	u16	vmid;
+	u64	vttbr;
+	u64	vtcr;
 };
 
 enum ummu_domain_stage {
@@ -217,6 +219,12 @@ struct ummu_domain_cfgs {
 struct ummu_domain {
 	struct ummu_base_domain base_domain;
 	struct ummu_domain_cfgs cfgs;
+};
+
+/* UMMU private data for each master */
+struct ummu_master {
+	struct ummu_device	*ummu;
+	struct device		*dev;
 };
 
 static inline

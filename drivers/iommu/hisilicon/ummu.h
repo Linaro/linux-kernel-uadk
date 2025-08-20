@@ -220,6 +220,26 @@ struct ummu_hash_table_cfg {
 	u32 cam_tbl_reg_cfg;
 };
 
+/* ummu device inner helper functions */
+enum ummu_dom_cfg_sync_type {
+	SYNC_DOM_ALL_CFG,
+	SYNC_DOM_MUTI_CFG,
+	SYNC_NESTED_DOM_MUTI_CFG,
+	SYNC_CLEAR_DOM_ALL_CFG,
+};
+
+struct ummu_device_helper {
+	void (*sync_tlb)(struct iommu_domain *domain,
+			 struct iommu_iotlb_gather *iotlb_gather);
+	int (*sync_dom_cfg)(struct ummu_base_domain *src, struct ummu_base_domain *dst,
+			    enum ummu_dom_cfg_sync_type type);
+	struct iommu_domain *(*alloc_domain_nested)(
+		struct iommu_domain *parent, u32 flags,
+		const struct iommu_user_data *user_data);
+	int (*cache_invalidate_user)(struct iommu_domain *domain,
+				     struct iommu_user_data_array *array);
+};
+
 struct ummu_device {
 	struct device *dev;
 	void __iomem *base;

@@ -238,6 +238,7 @@ struct unic_dev {
 
 int unic_dev_init(struct auxiliary_device *adev);
 void unic_dev_uninit(struct auxiliary_device *adev);
+int unic_set_mtu(struct unic_dev *unic_dev, int new_mtu);
 u32 unic_channels_max_num(struct auxiliary_device *adev);
 int unic_init_channels(struct unic_dev *unic_dev, u32 channels_num);
 void unic_uninit_channels(struct unic_dev *unic_dev);

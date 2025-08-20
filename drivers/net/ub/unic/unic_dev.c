@@ -556,6 +556,30 @@ static int unic_init_mac(struct unic_dev *unic_dev)
 	return 0;
 }
 
+int unic_set_mtu(struct unic_dev *unic_dev, int new_mtu)
+{
+	u16 max_frame_size;
+	int ret;
+
+	new_mtu = max(new_mtu, UB_DATA_LEN);
+
+	ret = unic_check_validate_dump_mtu(unic_dev, new_mtu, &max_frame_size);
+	if (ret == -EPERM) {
+		return 0;
+	} else if (ret < 0) {
+		unic_err(unic_dev, "invalid MTU(%d), please check, ret = %d.\n",
+			 new_mtu, ret);
+		return -EINVAL;
+	}
+
+	ret = unic_config_mtu(unic_dev, new_mtu);
+	if (ret)
+		unic_err(unic_dev,
+			 "failed to change MTU to %d, ret = %d.\n", new_mtu, ret);
+
+	return ret;
+}
+
 static void unic_update_stats_for_all(struct unic_dev *unic_dev)
 {
 	if (!unic_dev_ubl_supported(unic_dev) &&

@@ -18,9 +18,20 @@ static int unic_dbg_dump_dev_info(struct seq_file *s, void *data)
 {
 	struct unic_dev *unic_dev = dev_get_drvdata(s->private);
 	struct net_device *netdev = unic_dev->comdev.netdev;
+	u16 max_frame_size;
+	int ret;
 
 	seq_printf(s, "%-25s", "DEV_NAME:");
 	seq_printf(s, "%-12s\n", netdev->name);
+
+	if (!unic_dev_ubl_supported(unic_dev)) {
+		ret = unic_check_validate_dump_mtu(unic_dev, netdev->mtu,
+						   &max_frame_size);
+		if (!ret) {
+			seq_printf(s, "%-25s", "MAX_FRAME_SIZE:");
+			seq_printf(s, "%-12u\n", max_frame_size);
+		}
+	}
 
 	return 0;
 }

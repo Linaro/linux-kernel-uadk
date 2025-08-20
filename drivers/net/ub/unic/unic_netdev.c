@@ -476,6 +476,35 @@ static void unic_get_stats64(struct net_device *netdev,
 	stats->rx_compressed = netdev->stats.rx_compressed;
 }
 
+static int unic_change_mtu(struct net_device *netdev, int new_mtu)
+{
+	struct unic_dev *unic_dev = (struct unic_dev *)netdev_priv(netdev);
+	int ret;
+
+	if (netif_running(netdev)) {
+		unic_err(unic_dev, "failed to change MTU, due to network interface is up, please down it first and try again.\n");
+		return -EBUSY;
+	}
+
+	if (unic_resetting(netdev))
+		return -EBUSY;
+
+	if (netif_msg_ifdown(unic_dev))
+		unic_info(unic_dev, "change mtu from %u to %d.\n",
+			  netdev->mtu, new_mtu);
+
+	ret = unic_set_mtu(unic_dev, new_mtu);
+	if (ret) {
+		unic_err(unic_dev, "failed to change MTU in hardware, ret = %d.\n",
+			 ret);
+		return ret;
+	}
+
+	netdev->mtu = (u32)new_mtu;
+
+	return 0;
+}
+
 static void unic_tx_timeout(struct net_device *netdev, u32 queue_idx)
 {
 	struct unic_dev *unic_dev = netdev_priv(netdev);
@@ -531,6 +560,7 @@ static const struct net_device_ops unic_netdev_ops = {
 	.ndo_get_stats64 = unic_get_stats64,
 	.ndo_start_xmit = unic_start_xmit,
 	.ndo_tx_timeout = unic_tx_timeout,
+	.ndo_change_mtu = unic_change_mtu,
 	.ndo_open = unic_net_open,
 	.ndo_stop = unic_net_stop,
 	.ndo_select_queue = unic_select_queue,

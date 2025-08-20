@@ -59,6 +59,8 @@ int unic_set_mac_autoneg(struct unic_dev *unic_dev, u8 autoneg);
 
 int unic_query_dev_res(struct unic_dev *unic_dev);
 
+int unic_check_validate_dump_mtu(struct unic_dev *unic_dev, int new_mtu,
+				 u16 *max_frame_size);
 int unic_config_mtu(struct unic_dev *unic_dev, int new_mtu);
 
 int unic_mac_cfg(struct unic_dev *unic_dev, bool enable);

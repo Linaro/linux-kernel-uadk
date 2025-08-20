@@ -500,6 +500,28 @@ int unic_query_dev_res(struct unic_dev *unic_dev)
 	return 0;
 }
 
+int unic_check_validate_dump_mtu(struct unic_dev *unic_dev, int new_mtu,
+				 u16 *max_frame_size)
+{
+	struct auxiliary_device *adev = unic_dev->comdev.adev;
+	struct unic_config_max_trans_unit_cmd resp = {0};
+	struct unic_config_max_trans_unit_cmd req = {0};
+	struct ubase_cmd_buf out;
+	struct ubase_cmd_buf in;
+	int ret;
+
+	req.max_trans_unit = cpu_to_le16(new_mtu);
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_CFG_MTU, true, sizeof(req), &req);
+	ubase_fill_inout_buf(&out, UBASE_OPC_CFG_MTU, true, sizeof(resp), &resp);
+
+	ret = ubase_cmd_send_inout(adev, &in, &out);
+	if (!ret)
+		*max_frame_size = le16_to_cpu(resp.max_trans_unit);
+
+	return ret;
+}
+
 int unic_config_mtu(struct unic_dev *unic_dev, int new_mtu)
 {
 	struct auxiliary_device *adev = unic_dev->comdev.adev;

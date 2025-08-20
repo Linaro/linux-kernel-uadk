@@ -754,6 +754,7 @@ module_driver(ummu_driver, ummu_driver_register, ummu_driver_unregister);
 
 MODULE_IMPORT_NS(UMMU_CORE_DRIVER);
 MODULE_IMPORT_NS(UMMU_INTERNAL);
+MODULE_IMPORT_NS(IOMMUFD);
 MODULE_DESCRIPTION("Hisilicon ummu driver");
 MODULE_AUTHOR("HiSilicon Tech. Co., Ltd.");
 MODULE_LICENSE("GPL");

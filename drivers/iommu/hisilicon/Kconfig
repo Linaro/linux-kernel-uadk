@@ -21,3 +21,17 @@ config UB_UMMU
 	  local host.
 	  Say Y here if your Soc includes an UMMU device implementing
 	  the Hisilicon UMMU architecture.
+
+config UB_UMMU_SVA
+	bool "Support for Shared Virtual Addressing with UMMU"
+	depends on UB_UMMU
+	select IOMMU_SVA
+	select IOMMU_KSVA
+	select IOMMU_IOPF
+	select MMU_NOTIFIER
+	default n
+	help
+	  Support for sharing process address spaces with devices using
+	  the UMMU. And ummu provides access permission verification for
+	  process address spaces.
+	  Say Y here if your system supports SVA.

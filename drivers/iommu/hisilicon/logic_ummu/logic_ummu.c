@@ -3,7 +3,9 @@
  * Copyright (c) 2025 HiSilicon Technologies Co., Ltd. All rights reserved.
  * Description: UMMU Framework's implementations.
  */
+#define pr_fmt(fmt) "[logic ummu]: " fmt
 
+#include <uapi/linux/iommufd.h>
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
@@ -12,6 +14,7 @@
 #include <ub/ubfi/ubfi.h>
 #include <linux/xarray.h>
 #include <linux/cleanup.h>
+#include <linux/iommufd.h>
 #include <linux/ummu_core.h>
 
 #include "logic_ummu.h"
@@ -29,6 +32,13 @@ struct logic_ummu_device {
 	u32 ummu_cnt;
 };
 
+struct logic_ummu_viommu {
+	struct iommufd_viommu viommu;
+	struct ummu_core_device *core_dev;
+	struct iommu_domain *parent;
+	struct iommu_domain *nested;
+};
+
 struct eid_info {
 	enum eid_type type;
 	eid_t eid;
@@ -44,6 +54,8 @@ static struct logic_ummu_device logic_ummu;
 static struct platform_device *logic_ummu_dev;
 const struct fwnode_operations logic_ummu_static_fwnode_ops;
 static struct fwnode_handle *logic_ummu_fwnode;
+
+static void gen_iommu_ops(const struct iommu_ops *src, struct iommu_ops *dst);
 
 static inline struct logic_ummu_domain *
 base_to_logic_domain(struct ummu_base_domain *dom)
@@ -93,6 +105,775 @@ static inline const struct ummu_device_helper *get_agent_helper(void)
 	return logic_ummu.agent_device->helper_ops;
 }
 
+static void logic_domain_update_attr(struct logic_ummu_domain *logic_domain)
+{
+	struct iommu_domain *agent = &logic_domain->agent_domain->domain;
+	struct iommu_domain *logic = &logic_domain->base_domain.domain;
+
+	logic->pgsize_bitmap = agent->pgsize_bitmap;
+	memcpy(&logic->geometry, &agent->geometry, sizeof(logic->geometry));
+	logic_domain->base_domain.tid = logic_domain->agent_domain->tid;
+}
+
+static bool logic_ummu_capable(struct device *dev, enum iommu_cap cap)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->capable) {
+		pr_err("unsupport ops.\n");
+		return false;
+	}
+
+	return ops->capable(dev, cap);
+}
+
+static void *logic_ummu_hw_info(struct device *dev, u32 *length, u32 *type)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->hw_info) {
+		pr_err("unsupport ops.\n");
+		return NULL;
+	}
+
+	return ops->hw_info(dev, length, type);
+}
+
+static int logic_ummu_grant(struct iommu_domain *d, void *va, size_t size,
+			    int perm, void *cookie,
+			    struct iommu_plb_gather *plb_gather)
+{
+	struct ummu_base_domain *agent_domain =
+		iommu_to_logic_domain(d)->agent_domain;
+	const struct iommu_perm_ops *perm_ops;
+
+	if (!agent_domain) {
+		pr_err("find agent domain failed.\n");
+		return -EINVAL;
+	}
+	perm_ops = agent_domain->domain.perm_ops;
+	if (!perm_ops || !perm_ops->grant) {
+		pr_err("unsupport ops.\n");
+		return -EOPNOTSUPP;
+	}
+	return perm_ops->grant(&agent_domain->domain, va, size, perm, cookie,
+			       plb_gather);
+}
+
+static int logic_ummu_ungrant(struct iommu_domain *d, void *va, size_t size,
+			      void *cookie, struct iommu_plb_gather *plb_gather)
+{
+	struct ummu_base_domain *agent_domain =
+		iommu_to_logic_domain(d)->agent_domain;
+	const struct iommu_perm_ops *perm_ops;
+
+	if (!agent_domain) {
+		pr_err("find agent domain failed.\n");
+		return -EINVAL;
+	}
+	perm_ops = agent_domain->domain.perm_ops;
+	if (!perm_ops || !perm_ops->ungrant) {
+		pr_err("unsupport ops.\n");
+		return -EOPNOTSUPP;
+	}
+	return perm_ops->ungrant(&agent_domain->domain, va, size, cookie,
+				 plb_gather);
+}
+
+static void logic_ummu_plb_sync_all(struct iommu_domain *d)
+{
+	struct logic_ummu_domain *logic_domain = iommu_to_logic_domain(d);
+	struct ummu_base_domain *ummu_base_domain;
+	const struct iommu_perm_ops *perm_ops;
+
+	if (!logic_domain->agent_domain) {
+		pr_err("find agent domain failed.\n");
+		return;
+	}
+	perm_ops = logic_domain->agent_domain->domain.perm_ops;
+	if (!perm_ops || !perm_ops->plb_sync_all) {
+		pr_err("unsupport ops.\n");
+		return;
+	}
+
+	list_for_each_entry(ummu_base_domain, &logic_domain->base_domain.list,
+			    list)
+		perm_ops->plb_sync_all(&ummu_base_domain->domain);
+}
+
+static void logic_ummu_plb_sync(struct iommu_domain *d,
+				struct iommu_plb_gather *plb_gather)
+{
+	struct logic_ummu_domain *logic_domain = iommu_to_logic_domain(d);
+	struct ummu_base_domain *base_domain;
+	const struct iommu_perm_ops *perm_ops;
+
+	if (!logic_domain->agent_domain) {
+		pr_err("find agent domain failed.\n");
+		return;
+	}
+	perm_ops = logic_domain->agent_domain->domain.perm_ops;
+	if (!perm_ops || !perm_ops->plb_sync) {
+		pr_err("unsupport ops.\n");
+		return;
+	}
+
+	list_for_each_entry(base_domain, &logic_domain->base_domain.list, list)
+		perm_ops->plb_sync(&base_domain->domain, plb_gather);
+}
+
+static int logic_ummu_set_dirty_tracking(struct iommu_domain *domain,
+					 bool enable)
+{
+	struct ummu_base_domain *agent_domain =
+		iommu_to_logic_domain(domain)->agent_domain;
+	const struct iommu_dirty_ops *ops;
+
+	if (!agent_domain) {
+		pr_err("find agent domain failed.\n");
+		return -EINVAL;
+	}
+	ops = agent_domain->domain.dirty_ops;
+	if (!ops || !ops->set_dirty_tracking) {
+		pr_err("invalid ops.\n");
+		return -EOPNOTSUPP;
+	}
+
+	return ops->set_dirty_tracking(&agent_domain->domain, enable);
+}
+
+static int logic_ummu_read_and_clear_dirty(struct iommu_domain *domain,
+					   unsigned long iova, size_t size,
+					   unsigned long flags,
+					   struct iommu_dirty_bitmap *dirty)
+{
+	struct ummu_base_domain *agent_domain =
+		iommu_to_logic_domain(domain)->agent_domain;
+	const struct iommu_dirty_ops *ops;
+
+	if (!agent_domain) {
+		pr_err("find agent domain failed.\n");
+		return -EINVAL;
+	}
+	ops = agent_domain->domain.dirty_ops;
+	if (!ops || !ops->read_and_clear_dirty) {
+		pr_err("invalid ops.\n");
+		return -EOPNOTSUPP;
+	}
+
+	return ops->read_and_clear_dirty(&agent_domain->domain, iova, size,
+					 flags, dirty);
+}
+
+static int logic_domain_set_domain_ops(struct logic_ummu_domain *logic_domain)
+{
+	struct iommu_domain *agent_domain = &logic_domain->agent_domain->domain;
+	struct iommu_domain_ops *domain_ops;
+	int ret;
+
+	domain_ops = (struct iommu_domain_ops *)xa_load(
+		&logic_ummu_ops_info, (uintptr_t)agent_domain->ops);
+	if (!domain_ops) {
+		domain_ops = kzalloc(sizeof(*domain_ops), GFP_KERNEL);
+		if (!domain_ops)
+			return -ENOMEM;
+
+		ret = xa_err(xa_store(&logic_ummu_ops_info,
+				      (uintptr_t)agent_domain->ops, domain_ops,
+				      GFP_KERNEL));
+		if (ret) {
+			kfree(domain_ops);
+			return ret;
+		}
+	}
+	logic_domain->base_domain.domain.ops = domain_ops;
+	return 0;
+}
+
+static int logic_domain_set_dirty_ops(struct logic_ummu_domain *logic_domain)
+{
+	struct iommu_domain *agent_domain = &logic_domain->agent_domain->domain;
+	struct iommu_dirty_ops *dirty_ops;
+	int ret;
+
+	dirty_ops = (struct iommu_dirty_ops *)xa_load(
+		&logic_ummu_ops_info, (uintptr_t)agent_domain->dirty_ops);
+	if (!dirty_ops) {
+		dirty_ops = kzalloc(sizeof(*dirty_ops), GFP_KERNEL);
+		if (!dirty_ops)
+			return -ENOMEM;
+
+		GEN_IOMMU_DIRTY_OPS(agent_domain->dirty_ops, dirty_ops);
+		ret = xa_err(xa_store(&logic_ummu_ops_info,
+				      (uintptr_t)agent_domain->dirty_ops,
+				      dirty_ops, GFP_KERNEL));
+		if (ret) {
+			kfree(dirty_ops);
+			return ret;
+		}
+	}
+	logic_domain->base_domain.domain.dirty_ops = dirty_ops;
+	return 0;
+}
+
+static int logic_domain_set_perm_ops(struct logic_ummu_domain *logic_domain)
+{
+	struct iommu_domain *agent_domain = &logic_domain->agent_domain->domain;
+	struct iommu_perm_ops *perm_ops;
+	int ret;
+
+	perm_ops = (struct iommu_perm_ops *)xa_load(
+		&logic_ummu_ops_info, (uintptr_t)agent_domain->perm_ops);
+	if (!perm_ops) {
+		perm_ops = kzalloc(sizeof(*perm_ops), GFP_KERNEL);
+		if (!perm_ops)
+			return -ENOMEM;
+
+		GEN_IOMMU_PERM_OPS(agent_domain->perm_ops, perm_ops);
+		ret = xa_err(xa_store(&logic_ummu_ops_info,
+				      (uintptr_t)agent_domain->perm_ops,
+				      perm_ops, GFP_KERNEL));
+		if (ret) {
+			kfree(perm_ops);
+			return ret;
+		}
+	}
+	logic_domain->base_domain.domain.perm_ops = perm_ops;
+	return 0;
+}
+
+/* logic domain ops follow the singleton, don't free ops */
+static int logic_domain_set_ops(struct logic_ummu_domain *logic_domain)
+{
+	struct iommu_domain *agent_domain = &logic_domain->agent_domain->domain;
+	int ret;
+
+	/* the agent domain must have domain_ops */
+	if (!agent_domain->ops) {
+		pr_err("invalid domain, no ops.\n");
+		return -EINVAL;
+	}
+	ret = logic_domain_set_domain_ops(logic_domain);
+	if (ret) {
+		pr_err("set domain ops failed, ret=%d.\n", ret);
+		return ret;
+	}
+	if (agent_domain->dirty_ops) {
+		ret = logic_domain_set_dirty_ops(logic_domain);
+		if (ret) {
+			pr_err("set dirty ops failed, ret=%d.\n", ret);
+			return ret;
+		}
+	}
+	if (agent_domain->perm_ops) {
+		ret = logic_domain_set_perm_ops(logic_domain);
+		if (ret) {
+			pr_err("set perm ops failed, ret=%d.\n", ret);
+			return ret;
+		}
+	}
+	return ret;
+}
+
+static struct iommu_domain *logic_ummu_domain_alloc_sva(struct device *dev,
+							struct mm_struct *mm)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct ummu_base_domain *base_domain, *next;
+	struct logic_ummu_domain *logic_domain;
+	struct iommu_domain *domain;
+	struct ummu_device *ummu;
+	int ret;
+
+	if (!ops || !ops->domain_alloc_sva)
+		return ERR_PTR(-EINVAL);
+
+	logic_domain = kzalloc(sizeof(*logic_domain), GFP_KERNEL);
+	if (!logic_domain)
+		return ERR_PTR(-ENOMEM);
+
+	INIT_LIST_HEAD(&logic_domain->base_domain.list);
+
+	list_for_each_entry(ummu, &logic_ummu.dev_list, list) {
+		domain = ops->domain_alloc_sva(dev, mm);
+		if (IS_ERR(domain)) {
+			ret = PTR_ERR(domain);
+			goto error_handle;
+		}
+		base_domain = to_ummu_base_domain(domain);
+		base_domain->core_dev = &ummu->core_dev;
+		list_add_tail(&base_domain->list,
+			      &logic_domain->base_domain.list);
+		if (ummu == logic_ummu.agent_device) {
+			logic_domain->agent_domain = base_domain;
+			logic_domain->base_domain.domain.type = domain->type;
+			logic_domain_update_attr(logic_domain);
+			ret = logic_domain_set_ops(logic_domain);
+			if (ret)
+				goto error_handle;
+		}
+	}
+	return &logic_domain->base_domain.domain;
+
+error_handle:
+	list_for_each_entry_safe(base_domain, next,
+				 &logic_domain->base_domain.list, list) {
+		list_del(&base_domain->list);
+		base_domain->domain.ops->free(&base_domain->domain);
+	}
+	kfree(logic_domain);
+	return ERR_PTR(ret);
+}
+
+static struct iommu_domain *logic_ummu_domain_alloc(unsigned int iommu_domain_type)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct ummu_base_domain *base_domain, *next;
+	struct logic_ummu_domain *logic_domain;
+	struct iommu_domain *domain;
+	struct ummu_device *ummu;
+	int ret;
+
+	if (!ops || !ops->domain_alloc)
+		return ERR_PTR(-EOPNOTSUPP);
+
+	logic_domain = kzalloc(sizeof(*logic_domain), GFP_KERNEL);
+	if (!logic_domain)
+		return ERR_PTR(-ENOMEM);
+
+	INIT_LIST_HEAD(&logic_domain->base_domain.list);
+	list_for_each_entry(ummu, &logic_ummu.dev_list, list) {
+		domain = ops->domain_alloc(iommu_domain_type);
+		if (IS_ERR(domain)) {
+			ret = PTR_ERR(domain);
+			goto error_handle;
+		}
+		domain->type = iommu_domain_type;
+		domain->pgsize_bitmap = ops->pgsize_bitmap;
+		if (!domain->ops)
+			domain->ops = ops->default_domain_ops;
+
+		/* add ummu hw info to ummu_base_domain */
+		base_domain = to_ummu_base_domain(domain);
+		base_domain->core_dev = &ummu->core_dev;
+		list_add_tail(&base_domain->list, &logic_domain->base_domain.list);
+		if (ummu == logic_ummu.agent_device) {
+			logic_domain->agent_domain = base_domain;
+			logic_domain->base_domain.domain.type = domain->type;
+			logic_domain_update_attr(logic_domain);
+			ret = logic_domain_set_ops(logic_domain);
+			if (ret)
+				goto error_handle;
+		}
+	}
+	return &logic_domain->base_domain.domain;
+error_handle:
+	list_for_each_entry_safe(base_domain, next,
+				 &logic_domain->base_domain.list, list) {
+		list_del(&base_domain->list);
+		base_domain->domain.ops->free(&base_domain->domain);
+	}
+	kfree(logic_domain);
+	return ERR_PTR(ret);
+}
+
+static struct iommu_domain *
+logic_ummu_domain_alloc_user_v2(struct device *dev, u32 flags,
+			     struct iommu_domain *parent, struct kvm *kvm,
+			     const struct iommu_user_data *data)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct ummu_base_domain *base_domain, *next;
+	struct logic_ummu_domain *logic_domain;
+	struct iommu_domain *domain;
+	struct ummu_device *ummu;
+	int ret;
+
+	if (!ops || !ops->domain_alloc_user_v2)
+		return ERR_PTR(-EOPNOTSUPP);
+	logic_domain = kzalloc(sizeof(*logic_domain), GFP_KERNEL);
+	if (!logic_domain)
+		return ERR_PTR(-ENOMEM);
+	INIT_LIST_HEAD(&logic_domain->base_domain.list);
+	list_for_each_entry(ummu, &logic_ummu.dev_list, list) {
+		domain = ops->domain_alloc_user_v2(dev, flags, parent, kvm, data);
+		if (IS_ERR(domain)) {
+			ret = PTR_ERR(domain);
+			goto error_handle;
+		}
+		if (!domain->pgsize_bitmap)
+			domain->pgsize_bitmap = ops->pgsize_bitmap;
+		if (!domain->ops)
+			domain->ops = ops->default_domain_ops;
+		base_domain = to_ummu_base_domain(domain);
+		base_domain->core_dev = &ummu->core_dev;
+		list_add_tail(&base_domain->list,
+			      &logic_domain->base_domain.list);
+		if (ummu == logic_ummu.agent_device) {
+			logic_domain->agent_domain = to_ummu_base_domain(domain);
+			logic_domain->base_domain.domain.type = domain->type;
+			logic_domain_update_attr(logic_domain);
+			ret = logic_domain_set_ops(logic_domain);
+			if (ret)
+				goto error_handle;
+		}
+	}
+	return &logic_domain->base_domain.domain;
+error_handle:
+	list_for_each_entry_safe(base_domain, next,
+				 &logic_domain->base_domain.list, list) {
+		list_del(&base_domain->list);
+		base_domain->domain.ops->free(&base_domain->domain);
+	}
+	kfree(logic_domain);
+	return ERR_PTR(ret);
+}
+
+static struct iommu_domain *
+logic_ummu_viommu_alloc_domain_nested(struct iommufd_viommu *viommu,
+				      u32 flags,
+				      const struct iommu_user_data *user_data)
+{
+	struct logic_ummu_viommu *logic_vummu = container_of(viommu, struct logic_ummu_viommu,
+							     viommu);
+	struct logic_ummu_domain *parent_logic_domain, *logic_domain;
+	const struct iommu_ops *drv_ops = get_agent_iommu_ops();
+	const struct ummu_device_helper *helper = get_agent_helper();
+	struct ummu_base_domain *nested_base_domain, *iter;
+	struct iommu_domain *domain;
+	struct ummu_device *ummu;
+	int ret;
+
+	if (!helper || !helper->alloc_domain_nested)
+		return ERR_PTR(-EOPNOTSUPP);
+	logic_domain = kzalloc(sizeof(*logic_domain), GFP_KERNEL);
+	if (!logic_domain)
+		return ERR_PTR(-ENOMEM);
+	INIT_LIST_HEAD(&logic_domain->base_domain.list);
+	parent_logic_domain = iommu_to_logic_domain(logic_vummu->parent);
+	list_for_each_entry(ummu, &logic_ummu.dev_list, list) {
+		domain = helper->alloc_domain_nested(&parent_logic_domain->agent_domain->domain,
+						     flags, user_data);
+		if (IS_ERR(domain)) {
+			ret = PTR_ERR(domain);
+			goto error_handle;
+		}
+		if (!domain->pgsize_bitmap)
+			domain->pgsize_bitmap = drv_ops->pgsize_bitmap;
+		nested_base_domain = to_ummu_base_domain(domain);
+		nested_base_domain->parent = logic_vummu->parent;
+		if (!domain->ops) {
+			ret = -EOPNOTSUPP;
+			goto error_handle;
+		}
+		list_add_tail(&nested_base_domain->list, &logic_domain->base_domain.list);
+		if (ummu == logic_ummu.agent_device) {
+			logic_domain->agent_domain = to_ummu_base_domain(domain);
+			logic_domain->base_domain.domain.type = domain->type;
+			logic_domain_update_attr(logic_domain);
+			ret = logic_domain_set_ops(logic_domain);
+			if (ret)
+				goto error_handle;
+		}
+	}
+	logic_vummu->nested = &logic_domain->base_domain.domain;
+	return &logic_domain->base_domain.domain;
+error_handle:
+	list_for_each_entry_safe(nested_base_domain, iter, &logic_domain->base_domain.list, list) {
+		list_del(&nested_base_domain->list);
+		nested_base_domain->domain.ops->free(&nested_base_domain->domain);
+	}
+	kfree(logic_domain);
+	return ERR_PTR(ret);
+}
+
+static int
+logic_ummu_viommu_cache_invalidate(struct iommufd_viommu *viommu,
+				   struct iommu_user_data_array *array)
+{
+	struct logic_ummu_viommu *logic_vummu =
+		container_of(viommu, struct logic_ummu_viommu, viommu);
+	const struct ummu_device_helper *helper = get_agent_helper();
+	struct ummu_base_domain *nested_base_domain;
+	struct logic_ummu_domain *logic_domain;
+	u32 cmd_num, succ_cnt;
+	int err, ret = 0;
+
+	if (!logic_vummu->nested || !array)
+		return -EINVAL;
+
+	if (!helper || !helper->cache_invalidate_user)
+		return -EOPNOTSUPP;
+
+	logic_domain = iommu_to_logic_domain(logic_vummu->nested);
+	cmd_num = array->entry_num;
+	succ_cnt = array->entry_num;
+	list_for_each_entry(nested_base_domain, &logic_domain->base_domain.list,
+			    list) {
+		err = helper->cache_invalidate_user(&nested_base_domain->domain,
+						 array);
+		if (err) {
+			succ_cnt = (succ_cnt < array->entry_num) ?
+						 succ_cnt :
+						 array->entry_num;
+			array->entry_num = cmd_num;
+			ret = err;
+		}
+	}
+
+	array->entry_num = succ_cnt;
+	return ret;
+}
+
+static const struct iommufd_viommu_ops logic_ummu_viommu_ops = {
+	.alloc_domain_nested = logic_ummu_viommu_alloc_domain_nested,
+	.cache_invalidate = logic_ummu_viommu_cache_invalidate,
+};
+
+static struct iommufd_viommu *
+logic_ummu_viommu_alloc(struct device *dev, struct iommu_domain *parent,
+			struct iommufd_ctx *ictx, unsigned int viommu_type)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct logic_ummu_viommu *logic_vummu;
+
+	if (viommu_type != IOMMU_VIOMMU_TYPE_UMMU)
+		return ERR_PTR(-EINVAL);
+
+	if (!ops || !ops->viommu_alloc)
+		return ERR_PTR(-EOPNOTSUPP);
+
+	/*
+	 * ops->viommu_alloc does not do anything, If an operation is added to
+	 * the driver in the future, this call needs to be added.
+	 */
+
+	logic_vummu = iommufd_viommu_alloc(ictx, struct logic_ummu_viommu,
+					   viommu, &logic_ummu_viommu_ops);
+	if (IS_ERR(logic_vummu))
+		return ERR_CAST(logic_vummu);
+
+	logic_vummu->core_dev = iommu_get_iommu_dev(dev, struct ummu_core_device, iommu);
+	logic_vummu->parent = parent;
+
+	return &logic_vummu->viommu;
+}
+
+static struct iommu_domain *logic_ummu_domain_alloc_paging(struct device *dev)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->domain_alloc_paging) {
+		pr_err("invalid ops.\n");
+		return NULL;
+	}
+
+	return ops->domain_alloc_paging(dev);
+}
+
+static struct iommu_device *logic_ummu_probe_device(struct device *dev)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct iommu_device *ummu;
+
+	if (!ops || !ops->probe_device) {
+		pr_err("invalid ops.\n");
+		return NULL;
+	}
+
+	dev_iommu_priv_set(dev, logic_ummu.agent_device);
+	ummu = ops->probe_device(dev);
+	if (IS_ERR(ummu)) {
+		pr_err("probed device failed.\n");
+		dev_iommu_priv_set(dev, NULL);
+		return ummu;
+	}
+	return &logic_ummu.core_dev.iommu;
+}
+
+static void logic_ummu_release_device(struct device *dev)
+{
+	const struct ummu_core_ops *core_ops = get_agent_core_ops();
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct ummu_base_domain *ummu_base_domain;
+	struct logic_ummu_domain *logic_domain;
+	struct iommu_domain *domain;
+
+	if (!ops || !ops->release_device) {
+		pr_err("invalid ops.\n");
+		return;
+	}
+	ops->release_device(dev);
+
+	domain = iommu_get_domain_for_dev(dev);
+	if (WARN_ON(!domain)) {
+		pr_err("find domain failed.\n");
+		return;
+	}
+
+	logic_domain = iommu_to_logic_domain(domain);
+	if (!logic_domain->agent_domain || !core_ops || !core_ops->cfg_sync) {
+		pr_err("invalid params.\n");
+		return;
+	}
+
+	list_for_each_entry(ummu_base_domain, &logic_domain->base_domain.list,
+			    list) {
+		if (ummu_base_domain == logic_domain->agent_domain)
+			continue;
+
+		core_ops->cfg_sync(ummu_base_domain);
+	}
+}
+
+static void logic_ummu_probe_finalize(struct device *dev)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->probe_finalize) {
+		pr_err("invalid ops.\n");
+		return;
+	}
+
+	ops->probe_finalize(dev);
+}
+
+static struct iommu_group *logic_ummu_device_group(struct device *dev)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->device_group) {
+		pr_err("invalid ops.\n");
+		return NULL;
+	}
+
+	return ops->device_group(dev);
+}
+
+static void logic_ummu_get_resv_regions(struct device *dev,
+					struct list_head *list)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->get_resv_regions) {
+		pr_err("invalid ops.\n");
+		return;
+	}
+
+	ops->get_resv_regions(dev, list);
+}
+
+static int logic_ummu_of_xlate(struct device *dev, struct of_phandle_args *args)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->of_xlate) {
+		pr_err("invalid ops.\n");
+		return -ENODEV;
+	}
+
+	return ops->of_xlate(dev, args);
+}
+
+static bool logic_ummu_is_attach_deferred(struct device *dev)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->is_attach_deferred) {
+		pr_err("invalid ops.\n");
+		return false;
+	}
+
+	return ops->is_attach_deferred(dev);
+}
+
+static int logic_ummu_dev_enable_feat(struct device *dev,
+				      enum iommu_dev_features f)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->dev_enable_feat) {
+		pr_err("invalid ops.\n");
+		return -ENODEV;
+	}
+
+	return ops->dev_enable_feat(dev, f);
+}
+
+static int logic_ummu_dev_disable_feat(struct device *dev,
+				       enum iommu_dev_features f)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->dev_disable_feat) {
+		pr_err("invalid ops.\n");
+		return -ENODEV;
+	}
+
+	return ops->dev_disable_feat(dev, f);
+}
+
+static void logic_ummu_page_response(struct device *dev, struct iopf_fault *evt,
+				     struct iommu_page_response *msg)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->page_response) {
+		pr_err("invalid ops.\n");
+		return;
+	}
+
+	ops->page_response(dev, evt, msg);
+}
+
+static int logic_ummu_def_domain_type(struct device *dev)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->def_domain_type) {
+		pr_err("invalid ops.\n");
+		return 0;
+	}
+
+	return ops->def_domain_type(dev);
+}
+
+static void logic_ummu_remove_dev_pasid(struct device *dev, ioasid_t pasid,
+					struct iommu_domain *domain)
+{
+	struct logic_ummu_domain *logic_domain = iommu_to_logic_domain(domain);
+	const struct ummu_core_ops *core_ops = get_agent_core_ops();
+	const struct ummu_device_helper *helper = get_agent_helper();
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct ummu_base_domain *base_domain;
+	u32 tid = pasid;
+
+	if (!ops || !ops->remove_dev_pasid || !helper || !helper->sync_dom_cfg) {
+		pr_err("invalid params.\n");
+		return;
+	}
+	if (!logic_domain->agent_domain) {
+		pr_err("invalid agent_domain.\n");
+		return;
+	}
+	ops->remove_dev_pasid(dev, tid, &logic_domain->agent_domain->domain);
+	list_for_each_entry(base_domain, &logic_domain->base_domain.list,
+			    list) {
+		base_domain->domain.mm = NULL;
+		if (base_domain == logic_domain->agent_domain)
+			continue;
+
+		helper->sync_dom_cfg(logic_domain->agent_domain, base_domain, SYNC_DOM_ALL_CFG);
+
+		if (core_ops && core_ops->cfg_sync)
+			core_ops->cfg_sync(base_domain);
+	}
+
+	iommu_plb_sync_all(domain);
+	/* release the tid */
+	ummu_core_free_tid(&logic_ummu.core_dev, tid);
+}
+
 static struct iommu_ops logic_iommu_ops = {
 	.pgsize_bitmap = SZ_4K,
 	.owner = THIS_MODULE,
@@ -125,6 +906,30 @@ static void remove_all_eid(void)
 }
 
 static struct ummu_core_ops logic_ummu_core_ops = {};
+
+/* workaround. should be in macro */
+static void gen_iommu_ops(const struct iommu_ops *src, struct iommu_ops *dst)
+{
+	__GEN_OPS(capable, src, dst);
+	__GEN_OPS(hw_info, src, dst);
+	__GEN_OPS(domain_alloc, src, dst);
+	__GEN_OPS(domain_alloc_user_v2, src, dst);
+	__GEN_OPS(domain_alloc_paging, src, dst);
+	__GEN_OPS(domain_alloc_sva, src, dst);
+	__GEN_OPS(probe_device, src, dst);
+	__GEN_OPS(release_device, src, dst);
+	__GEN_OPS(probe_finalize, src, dst);
+	__GEN_OPS(device_group, src, dst);
+	__GEN_OPS(get_resv_regions, src, dst);
+	__GEN_OPS(of_xlate, src, dst);
+	__GEN_OPS(is_attach_deferred, src, dst);
+	__GEN_OPS(dev_enable_feat, src, dst);
+	__GEN_OPS(dev_disable_feat, src, dst);
+	__GEN_OPS(page_response, src, dst);
+	__GEN_OPS(def_domain_type, src, dst);
+	__GEN_OPS(remove_dev_pasid, src, dst);
+	__GEN_OPS(viommu_alloc, src, dst);
+}
 
 static int init_ummu_device(struct ummu_device *ummu,
 			    const struct iommu_ops *iommu_ops,
@@ -188,6 +993,8 @@ static int logic_ummu_device_add_agent(struct ummu_device *ummu)
 	logic_ummu.core_dev.iommu.min_pasids = ummu->core_dev.iommu.min_pasids;
 	logic_ummu.core_dev.iommu.max_pasids = ummu->core_dev.iommu.max_pasids;
 	logic_iommu_ops.pgsize_bitmap = ummu->core_dev.iommu.ops->pgsize_bitmap;
+	gen_iommu_ops((struct iommu_ops *)drv_ops,
+		      (struct iommu_ops *)&logic_iommu_ops);
 	return 0;
 }
 

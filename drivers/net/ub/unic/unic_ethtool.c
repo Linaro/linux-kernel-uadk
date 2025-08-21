@@ -12,6 +12,7 @@
 #include "unic_hw.h"
 #include "unic_netdev.h"
 #include "unic_stats.h"
+#include "unic_channel.h"
 #include "unic_ethtool.h"
 
 static u32 unic_get_link_status(struct net_device *netdev)
@@ -121,6 +122,8 @@ static const struct ethtool_ops unic_ethtool_ops = {
 	.get_link = unic_get_link_status,
 	.get_link_ksettings = unic_get_link_ksettings,
 	.get_drvinfo = unic_get_driver_info,
+	.get_channels = unic_get_channels,
+	.set_channels = unic_set_channels,
 	.get_fecparam = unic_get_fecparam,
 	.set_fecparam = unic_set_fecparam,
 	.get_fec_stats = unic_get_fec_stats,

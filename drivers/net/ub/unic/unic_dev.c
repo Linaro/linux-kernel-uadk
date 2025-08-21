@@ -869,6 +869,33 @@ void unic_remove_period_task(struct unic_dev *unic_dev)
 		cancel_delayed_work_sync(&unic_dev->service_task);
 }
 
+int unic_change_rss_size(struct unic_dev *unic_dev, u32 new_rss_size,
+			 u32 org_rss_size)
+{
+	struct unic_channels *channels = &unic_dev->channels;
+	int ret;
+
+	dev_info(unic_dev->comdev.adev->dev.parent,
+		 "change rss_size from %u to %u.\n", org_rss_size, new_rss_size);
+
+	mutex_lock(&channels->mutex);
+	__unic_uninit_channels(unic_dev);
+
+	channels->rss_size = new_rss_size;
+	channels->num = channels->rss_size * channels->rss_vl_num;
+
+	unic_update_queue_info(unic_dev);
+
+	ret = __unic_init_channels(unic_dev, channels->num);
+	if (ret)
+		dev_err(unic_dev->comdev.adev->dev.parent,
+			"failed to change rss_size, ret = %d.\n", ret);
+
+	mutex_unlock(&channels->mutex);
+
+	return ret;
+}
+
 static struct net_device *unic_alloc_netdev(struct auxiliary_device *adev)
 {
 	struct ubase_caps *caps = ubase_get_dev_caps(adev);

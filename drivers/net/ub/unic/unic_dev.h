@@ -240,6 +240,7 @@ int unic_dev_init(struct auxiliary_device *adev);
 void unic_dev_uninit(struct auxiliary_device *adev);
 int unic_set_mtu(struct unic_dev *unic_dev, int new_mtu);
 u32 unic_channels_max_num(struct auxiliary_device *adev);
+u32 unic_get_max_rss_size(struct unic_dev *unic_dev);
 int unic_init_channels(struct unic_dev *unic_dev, u32 channels_num);
 void unic_uninit_channels(struct unic_dev *unic_dev);
 void unic_start_period_task(struct net_device *netdev);
@@ -250,6 +251,8 @@ int unic_init_rx(struct unic_dev *unic_dev, u32 num);
 int unic_init_tx(struct unic_dev *unic_dev, u32 num);
 void unic_destroy_rx(struct unic_dev *unic_dev, u32 num);
 void unic_destroy_tx(struct unic_dev *unic_dev, u32 num);
+int unic_change_rss_size(struct unic_dev *unic_dev, u32 new_rss_size,
+			 u32 org_rss_size);
 int unic_set_vl_map(struct unic_dev *unic_dev, u8 *dscp_prio, u8 *prio_vl,
 		    u8 map_type);
 int unic_dbg_log(void);

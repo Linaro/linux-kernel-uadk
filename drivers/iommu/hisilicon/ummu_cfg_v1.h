@@ -9,6 +9,16 @@
 
 #include "ummu.h"
 
+struct hisi_ummu_tdev_info {
+	int version;
+	union {
+		struct {
+			u64 ummu_idx_mask;
+			bool on_chip;
+		} v1;
+	};
+};
+
 void ummu_cfg_impl_init(struct ummu_device *ummu);
 
 #endif /* __UMMU_CFG_V1_H__ */

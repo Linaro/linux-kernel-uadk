@@ -11,6 +11,7 @@
 #include <linux/iopoll.h>
 #include <ub/ubfi/ubfi.h>
 
+#include "logic_ummu/logic_ummu.h"
 #include "ummu_impl.h"
 #include "interrupt.h"
 #include "perm_queue.h"
@@ -738,8 +739,12 @@ struct platform_driver ummu_driver = {
 
 static int __init ummu_driver_register(struct platform_driver *drv)
 {
-	int ret;
+	int ret = logic_ummu_device_init();
 
+	if (ret) {
+		pr_err("init logic ummu failed, ret = %d.\n", ret);
+		return ret;
+	}
 	ret = ummu_init_global_meta();
 	if (ret) {
 		pr_err("global meta resource init failed, ret = %d\n", ret);
@@ -753,6 +758,7 @@ static void __exit ummu_driver_unregister(struct platform_driver *drv)
 {
 	platform_driver_unregister(drv);
 	ummu_free_global_meta();
+	logic_ummu_device_exit();
 }
 
 module_driver(ummu_driver, ummu_driver_register, ummu_driver_unregister);

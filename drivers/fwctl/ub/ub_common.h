@@ -13,6 +13,7 @@
 #include <uapi/fwctl/ub_fwctl.h>
 
 #define UBCTL_READ true
+#define UBCTL_WRITE false
 
 #define ubctl_err(ucdev, format, ...) \
 	dev_err(&ucdev->fwctl.dev, format, ##__VA_ARGS__)

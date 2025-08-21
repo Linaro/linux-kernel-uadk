@@ -87,6 +87,10 @@ enum ub_fwctl_cmdrpc_type {
 
 	UTOOL_CMD_QUERY_UBOMMU = 0x0091,
 
+	UTOOL_CMD_QUERY_UMMU_ALL = 0x00A1,
+	UTOOL_CMD_QUERY_UMMU_SYNC = 0x00A2,
+	UTOOL_CMD_CONFIG_UMMU_SYNC = 0x00A3,
+
 	UTOOL_CMD_QUERY_ECC_2B = 0x00B1,
 
 	UTOOL_CMD_QUERY_LOOPBACK = 0x00D1,
@@ -116,6 +120,11 @@ struct fwctl_pkt_in_port {
 
 struct fwctl_pkt_in_index {
 	__u32 index;
+};
+
+struct fwctl_pkt_in_ummuid_value {
+	__u32 ummu_id;
+	__u32 value;
 };
 
 #endif

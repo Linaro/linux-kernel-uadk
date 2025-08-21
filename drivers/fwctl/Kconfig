@@ -11,6 +11,8 @@ menuconfig FWCTL
 if FWCTL
 config FWCTL_UB
 	tristate "ub_fwctl depend on fwctl driver"
+	depends on UB_UBASE
+	default n
 	help
 	  ub_fwctl provides users with various information related to
 	  querying UB (UnifiedBus) registers or devices.

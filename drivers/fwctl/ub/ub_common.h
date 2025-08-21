@@ -12,6 +12,8 @@
 
 #include <uapi/fwctl/ub_fwctl.h>
 
+#define UBCTL_READ true
+
 #define ubctl_err(ucdev, format, ...) \
 	dev_err(&ucdev->fwctl.dev, format, ##__VA_ARGS__)
 
@@ -54,5 +56,31 @@ struct ubctl_func_dispatch {
 			 struct ubctl_query_cmd_param *query_cmd_param,
 			 struct ubctl_cmd *cmd, u32 out_len, u32 offset_index);
 };
+
+struct ubctl_query_dp {
+	u32 op_code;
+	u32 out_len;
+	bool is_read;
+	void *data;
+	u32 data_len;
+};
+
+struct ubctl_query_cmd_dp {
+	struct ubctl_func_dispatch *query_func;
+	void *cmd_in;
+	void *cmd_out;
+};
+
+int ubctl_ubase_cmd_send(struct auxiliary_device *adev,
+			 struct ubctl_cmd *cmd);
+int ubctl_fill_cmd(struct ubctl_cmd *cmd, void *cmd_in, void *cmd_out,
+		   u32 out_len, u32 is_read);
+int ubctl_query_data(struct ubctl_dev *ucdev,
+		     struct ubctl_query_cmd_param *query_cmd_param,
+		     struct ubctl_func_dispatch *query_func,
+		     struct ubctl_query_dp *query_dp, u32 query_dp_num);
+int ubctl_query_data_deal(struct ubctl_dev *ucdev,
+			  struct ubctl_query_cmd_param *query_cmd_param,
+			  struct ubctl_cmd *cmd, u32 out_len, u32 offset);
 
 #endif

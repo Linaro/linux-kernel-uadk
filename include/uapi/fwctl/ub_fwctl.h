@@ -37,6 +37,8 @@ struct fwctl_rpc_ub_out {
 };
 
 enum ub_fwctl_cmdrpc_type {
+	UTOOL_CMD_QUERY_NL_PKT_STATS = 0x0002,
+
 	UTOOL_CMD_QUERY_MAX,
 };
 

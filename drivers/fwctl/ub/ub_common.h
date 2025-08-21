@@ -26,6 +26,8 @@
 	dev_info(&ucdev->fwctl.dev, "PID %u: " format, current->pid, \
 		##__VA_ARGS__)
 
+#define UBCTL_GET_PHY_ADDR(high, low) ((((u64)(high)) << 32) | (low))
+
 struct ubctl_dev {
 	struct fwctl_device fwctl;
 	DECLARE_KFIFO_PTR(ioctl_fifo, unsigned long);

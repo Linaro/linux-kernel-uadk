@@ -73,12 +73,15 @@ enum ub_fwctl_cmdrpc_type {
 
 	UTOOL_CMD_QUERY_QOS = 0x0051,
 
+	UTOOL_CMD_QUERY_SCC_VERSION = 0x0061,
+	UTOOL_CMD_QUERY_SCC_LOG = 0x0062,
 	UTOOL_CMD_QUERY_SCC_DEBUG_EN = 0x0063,
 	UTOOL_CMD_CONF_SCC_DEBUG_EN = 0x0064,
 
 	UTOOL_CMD_QUERY_QUEUE = 0x0073,
 
 	UTOOL_CMD_QUERY_PORT_INFO = 0x0081,
+	UTOOL_CMD_QUERY_IO_DIE_PORT_INFO = 0x0082,
 
 	UTOOL_CMD_QUERY_UBOMMU = 0x0091,
 
@@ -107,6 +110,10 @@ struct fwctl_pkt_in_table {
 
 struct fwctl_pkt_in_port {
 	__u32 port_id;
+};
+
+struct fwctl_pkt_in_index {
+	__u32 index;
 };
 
 #endif

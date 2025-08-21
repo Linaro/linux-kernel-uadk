@@ -10,6 +10,8 @@
 #include <linux/ethtool.h>
 #include <linux/netdevice.h>
 
+#define UNIC_TXRX_MIN_DEPTH	64
+
 struct unic_reset_type_map {
 	enum ethtool_reset_flags reset_flags;
 	enum ubase_reset_type reset_type;

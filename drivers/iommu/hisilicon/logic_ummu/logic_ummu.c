@@ -874,6 +874,55 @@ static void logic_ummu_remove_dev_pasid(struct device *dev, ioasid_t pasid,
 	ummu_core_free_tid(&logic_ummu.core_dev, tid);
 }
 
+static int logic_ummu_set_group_qos_params(struct iommu_group *group,
+					   u16 partid,
+					   u8 pmg)
+{
+	const struct ummu_core_ops *core_ops = get_agent_core_ops();
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+	struct ummu_base_domain *ummu_base_domain;
+	struct logic_ummu_domain *logic_domain;
+	struct iommu_domain *domain;
+	int ret;
+
+	domain = iommu_get_domain_for_group(group);
+	if (!domain)
+		return -ENODEV;
+
+	logic_domain = iommu_to_logic_domain(domain);
+	if (!logic_domain->agent_domain)
+		return -EINVAL;
+
+	ret = ops->set_group_qos_params(group, partid, pmg);
+	if (ret)
+		return ret;
+
+	if (unlikely(!core_ops || !core_ops->cfg_sync))
+		return -EFAULT;
+
+	list_for_each_entry(ummu_base_domain, &logic_domain->base_domain.list,
+			    list) {
+		if (ummu_base_domain == logic_domain->agent_domain)
+			continue;
+
+		core_ops->cfg_sync(ummu_base_domain);
+	}
+	return ret;
+}
+
+static int logic_ummu_get_group_qos_params(struct iommu_group *group,
+					   u16 *partid,
+					   u8 *pmg)
+{
+	const struct iommu_ops *ops = get_agent_iommu_ops();
+
+	if (!ops || !ops->get_group_qos_params) {
+		pr_err("invalid iommu ops.\n");
+		return -ENODEV;
+	}
+	return ops->get_group_qos_params(group, partid, pmg);
+}
+
 static struct iommu_ops logic_iommu_ops = {
 	.pgsize_bitmap = SZ_4K,
 	.owner = THIS_MODULE,
@@ -928,6 +977,8 @@ static void gen_iommu_ops(const struct iommu_ops *src, struct iommu_ops *dst)
 	__GEN_OPS(page_response, src, dst);
 	__GEN_OPS(def_domain_type, src, dst);
 	__GEN_OPS(remove_dev_pasid, src, dst);
+	__GEN_OPS(set_group_qos_params, src, dst);
+	__GEN_OPS(get_group_qos_params, src, dst);
 	__GEN_OPS(viommu_alloc, src, dst);
 }
 

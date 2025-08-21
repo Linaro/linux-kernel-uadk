@@ -144,6 +144,11 @@
 #define GBPA_UPDATE_BIT (1UL << 31)
 #define GBPA_ABORT_BIT (1UL << 15)
 
+#define UMMU_GBPA_MTM_CFG 0x54
+#define GBPA_UPDATE_FLAG (1UL << 31)
+#define GBPA_TRANS_MTM_GP GENMASK(23, 16)
+#define GBPA_TRANS_MTM_ID GENMASK(15, 0)
+
 /* TECT cfg register */
 #define UMMU_TECT_BASE 0x70
 #define TECT_BASE_RA (1ULL << 63)

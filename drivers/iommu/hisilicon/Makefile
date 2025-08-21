@@ -19,4 +19,5 @@ ummu-y := ummu_main.o \
 	  perm_table.o \
 	  perm_queue.o \
 	  attribute.o \
+	  qos.o \
 	  logic_ummu/logic_ummu.o

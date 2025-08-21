@@ -457,6 +457,8 @@ static void ummu_tecte_pre_init(struct ummu_tecte_data *tect, u32 num_ents)
 		ummu_build_tecte_abort(tect);
 
 		tect->data[0] |= cpu_to_le64(TECT_ENT0_MAPT_EN);
+		tect->data[1] |= cpu_to_le64(TECT_ENT1_TCT_MTM_EN);
+		tect->data[6] |= cpu_to_le64(TECT_ENT6_MTM_NS);
 		tect++;
 	}
 }

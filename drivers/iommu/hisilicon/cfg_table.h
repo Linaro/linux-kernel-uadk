@@ -58,6 +58,7 @@
 #define TECT_ENT1_DTB_BYPASS 0x1
 #define TECT_ENT1_DTB_TID0 0x2
 #define TECT_ENT1_TCT_STALL_DISABLE (1ULL << 56)
+#define TECT_ENT1_TCT_MTM_EN (1ULL << 57)
 #define TECT_ENT1_TCT_PTR_MD0 GENMASK_ULL(59, 58)
 #define TECT_ENT1_TCT_PTR_MD1 GENMASK_ULL(61, 60)
 #define TECT_ENT1_TCT_PTR_MSD GENMASK_ULL(63, 62)
@@ -96,6 +97,7 @@
 
 #define TECT_ENT6_MTM_ID GENMASK(15, 0)
 #define TECT_ENT6_MTM_GP GENMASK(23, 16)
+#define TECT_ENT6_MTM_NS (1UL << 24)
 
 struct ummu_tecte_data {
 	__le64 data[TECT_ENTRY_SIZE_DWORDS];
@@ -164,6 +166,9 @@ struct ummu_tecte_data {
 #define TCT_MSD_NS 0
 #define TCT_MSD_OS 2
 #define TCT_MSD_IS 3
+
+#define TCT_ENT1_MTM_ID GENMASK_ULL(47, 32)
+#define TCT_ENT1_MTM_GP GENMASK_ULL(55, 48)
 
 #define TCT_ENT2_HWU59 (1UL << 0)
 #define TCT_ENT2_HWU60 (1UL << 1)

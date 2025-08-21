@@ -11,7 +11,13 @@
 
 #include "ummu.h"
 #include "cfg_table.h"
+#include "qos.h"
 #include "attribute.h"
+
+#define NUMBER_BASE_DECIMAL 10
+
+static int g_partid[UMMU_MPAM_TYPE_NUM] = { 0 };
+static int g_pmg[UMMU_MPAM_TYPE_NUM] = { 0 };
 
 #define ATTR_SHOW(dev, capability, buf, ret)                                          \
 	do {                                                                          \
@@ -243,8 +249,222 @@ static struct attribute_group ummu_iommu_group = {
 	.attrs = ummu_iommu_attrs,
 };
 
+static int check_input_buf(const char *buf)
+{
+	int var, ret;
+
+	ret = kstrtoint(buf, NUMBER_BASE_DECIMAL, &var);
+	if (ret)
+		return ret;
+
+	if (var != 1)
+		return -EPERM;
+	return 0;
+}
+
+static struct ummu_device *attr_get_ummu_device(struct device *dev)
+{
+	struct iommu_device *iommu;
+
+	if (!dev)
+		return NULL;
+
+	iommu = (struct iommu_device *)dev_get_drvdata(dev);
+	if (!iommu)
+		return NULL;
+
+	return core_to_ummu_device(to_ummu_core(iommu));
+}
+
+static ssize_t bp_partid_store(struct device *kobj, struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int var, ret;
+
+	ret = kstrtoint(buf, NUMBER_BASE_DECIMAL, &var);
+	if (ret < 0)
+		return ret;
+
+	g_partid[UMMU_BYPASS_MPAM] = var;
+	dev_info(kobj, "ummu bypass_mpam input partid = %d.\n", var);
+	return count;
+}
+
+static ssize_t bp_pmg_store(struct device *kobj, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	int var, ret;
+
+	ret = kstrtoint(buf, NUMBER_BASE_DECIMAL, &var);
+	if (ret < 0)
+		return ret;
+
+	g_pmg[UMMU_BYPASS_MPAM] = var;
+	dev_info(kobj, "ummu bypass_mpam input pmg = %d.\n", var);
+	return count;
+}
+
+static ssize_t bp_run_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct ummu_device *ummu;
+	int ret;
+
+	ret = check_input_buf(buf);
+	if (ret)
+		return ret;
+
+	ummu = attr_get_ummu_device(dev);
+	if (!ummu)
+		return -ENODEV;
+
+	dev_info(dev, "ummu set bypass_mpam(partid = %d, pmg = %d)\n",
+		g_partid[UMMU_BYPASS_MPAM], g_pmg[UMMU_BYPASS_MPAM]);
+
+	ret = ummu_set_bypass_mpam(ummu,
+				   g_partid[UMMU_BYPASS_MPAM],
+				   g_pmg[UMMU_BYPASS_MPAM]);
+	if (ret) {
+		dev_err(dev, "ummu set bypass_mpam failed, ret = %d.\n", ret);
+		return ret;
+	}
+	return count;
+}
+
+static ssize_t bp_mpam_info_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ummu_device *ummu;
+	int partid = 0, pmg = 0, ret;
+
+	ummu = attr_get_ummu_device(dev);
+	if (!ummu)
+		return -ENODEV;
+
+	ret = ummu_get_bypass_mpam(ummu, &partid, &pmg);
+	if (ret)
+		return ret;
+	return sysfs_emit(buf, "partid:%d\npmg:%d\n", partid, pmg);
+}
+
+static DEVICE_ATTR_WO(bp_partid);
+static DEVICE_ATTR_WO(bp_pmg);
+static DEVICE_ATTR_WO(bp_run);
+static DEVICE_ATTR_RO(bp_mpam_info);
+
+static struct attribute *ummu_bypass_mpam_attrs[] = {
+	&dev_attr_bp_partid.attr,
+	&dev_attr_bp_pmg.attr,
+	&dev_attr_bp_run.attr,
+	&dev_attr_bp_mpam_info.attr,
+	NULL,
+};
+
+static struct attribute_group ummu_bypass_mpam_group = {
+	.name = "ummu_bypass_mpam",
+	.attrs = ummu_bypass_mpam_attrs,
+};
+
+static ssize_t uotr_partid_store(struct device *kobj, struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	int var, ret;
+
+	ret = kstrtoint(buf, NUMBER_BASE_DECIMAL, &var);
+	if (ret < 0)
+		return ret;
+
+	g_partid[UMMU_UOTR_MPAM] = var;
+	dev_info(kobj, "ummu uotr_mpam input partid = %d.\n", var);
+	return count;
+}
+
+static ssize_t uotr_pmg_store(struct device *kobj, struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	int var, ret;
+
+	ret = kstrtoint(buf, NUMBER_BASE_DECIMAL, &var);
+	if (ret < 0)
+		return ret;
+
+	g_pmg[UMMU_UOTR_MPAM] = var;
+	dev_info(kobj, "ummu uotr_mpam input pmg = %d.\n", var);
+	return count;
+}
+
+static ssize_t uotr_run_store(struct device *dev, struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	struct ummu_device *ummu;
+	int ret;
+
+	ret = check_input_buf(buf);
+	if (ret)
+		return ret;
+
+	ummu = attr_get_ummu_device(dev);
+	if (!ummu)
+		return -ENODEV;
+
+	dev_info(dev, "ummu set uotr_mpam(partid = %d, pmg = %d)\n",
+		g_partid[UMMU_UOTR_MPAM], g_pmg[UMMU_UOTR_MPAM]);
+
+	ret = ummu_set_uotr_mpam(ummu,
+				 g_partid[UMMU_UOTR_MPAM],
+				 g_pmg[UMMU_UOTR_MPAM]);
+	if (ret) {
+		dev_err(dev, "ummu set uotr_mpam failed, ret = %d.\n", ret);
+		return ret;
+	}
+	return count;
+}
+
+static ssize_t uotr_mpam_info_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ummu_device *ummu;
+	int partid = 0, pmg = 0, ret;
+
+	ummu = attr_get_ummu_device(dev);
+	if (!ummu)
+		return -ENODEV;
+
+	ret = ummu_get_uotr_mpam(ummu, &partid, &pmg);
+	if (ret)
+		return ret;
+	return sysfs_emit(buf, "partid:%d\npmg:%d\n", partid, pmg);
+}
+
+static DEVICE_ATTR_WO(uotr_partid);
+static DEVICE_ATTR_WO(uotr_pmg);
+static DEVICE_ATTR_WO(uotr_run);
+static DEVICE_ATTR_RO(uotr_mpam_info);
+
+static struct attribute *ummu_uotr_mpam_attrs[] = {
+	&dev_attr_uotr_partid.attr,
+	&dev_attr_uotr_pmg.attr,
+	&dev_attr_uotr_run.attr,
+	&dev_attr_uotr_mpam_info.attr,
+	NULL,
+};
+
+static struct attribute_group ummu_uotr_mpam_group = {
+	.name = "ummu_uotr_mpam",
+	.attrs = ummu_uotr_mpam_attrs,
+};
+
 static const struct attribute_group *ummu_iommu_groups[] = {
 	&ummu_iommu_group,
+	/*
+	 * bypass_mpam: Memory traffic monitoring
+	 * of the UB device when ummu is bypassed.
+	 */
+	&ummu_bypass_mpam_group,
+	/*
+	 * uotr_mpam: Memory traffic monitoring
+	 * of ummu-originated transactions
+	 * relating to the Non-secure programming interface.
+	 */
+	&ummu_uotr_mpam_group,
 	NULL,
 };
 

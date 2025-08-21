@@ -10,6 +10,7 @@
 
 #include "ub_common.h"
 #include "ub_cmd_reg.h"
+#include "ub_cmd.h"
 
 #define MAX_IOCTL_COUNT 1024
 #define TIME_WINDOW_MS 3000
@@ -98,9 +99,14 @@ static int ub_cmd_do(struct ubctl_dev *ucdev,
 	u32 rpc_cmd = query_cmd_param->in->rpc_cmd;
 	struct ubctl_func_dispatch *ubctl_query_reg = ubctl_get_query_reg_func(
 		ucdev, rpc_cmd);
+	struct ubctl_func_dispatch *ubctl_query_func = ubctl_get_query_func(
+		ucdev, rpc_cmd);
 	int ret;
 
-	if (ubctl_query_reg && ubctl_query_reg->execute) {
+	if (ubctl_query_func && ubctl_query_func->execute) {
+		ret = ubctl_query_func->execute(ucdev, query_cmd_param,
+						ubctl_query_func);
+	} else if (ubctl_query_reg && ubctl_query_reg->execute) {
 		ret = ubctl_query_reg->execute(ucdev, query_cmd_param,
 					       ubctl_query_reg);
 	} else {

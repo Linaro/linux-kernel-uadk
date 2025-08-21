@@ -53,6 +53,7 @@ enum ub_fwctl_cmdrpc_type {
 	UTOOL_CMD_QUERY_DL_LINK_STATUS = 0x0013,
 	UTOOL_CMD_QUERY_DL_LANE = 0x0014,
 	UTOOL_CMD_QUERY_DL_BIT_ERR = 0x0015,
+	UTOOL_CMD_QUERY_DL_LINK_TRACE = 0x0016,
 	UTOOL_CMD_QUERY_DL_BIST = 0x0017,
 	UTOOL_CMD_CONF_DL_BIST = 0x0018,
 	UTOOL_CMD_QUERY_DL_BIST_ERR = 0x0019,
@@ -104,5 +105,8 @@ struct fwctl_pkt_in_table {
 	__u32 index;
 };
 
+struct fwctl_pkt_in_port {
+	__u32 port_id;
+};
 
 #endif

@@ -3,9 +3,12 @@
  * Copyright (c) 2025 HiSilicon Technologies Co., Ltd. All rights reserved.
  */
 
+#include <linux/io.h>
+
 #include "ub_cmdq.h"
 #include "ub_cmd.h"
 
+#define UBCTL_CQE_SIZE 16
 #define UBCTL_SCC_SZ_1M 0x100000
 
 struct ubctl_query_trace {
@@ -21,6 +24,69 @@ struct ubctl_scc_data {
 	u32 phy_addr_high;
 	u32 data_size;
 	u32 rsv[3];
+};
+
+struct ubctl_msgq_to_user {
+	u32 sq_pi;
+	u32 sq_ci;
+	u32 sq_dep;
+	u32 sq_status;
+	u32 sq_int_mask;
+	u32 sq_int_status;
+	u32 sq_int_ro;
+
+	u32 rq_pi;
+	u32 rq_ci;
+	u32 rq_dep;
+	u32 rq_entry_block_size;
+	u32 rq_status;
+
+	u32 cq_pi;
+	u32 cq_ci;
+	u32 cq_dep;
+	u32 cq_status;
+	u32 cq_int_mask;
+	u32 cq_int_status;
+	u32 cq_int_ro;
+
+	u32 rsvd[5];
+};
+
+struct ubctl_msgq {
+	u32 sq_base_addr_low;
+	u32 sq_base_addr_high;
+	u32 sq_pi;
+	u32 sq_ci;
+	u32 sq_dep;
+	u32 sq_status;
+	u32 sq_int_mask;
+	u32 sq_int_status;
+	u32 sq_int_ro;
+
+	u32 rq_base_addr_low;
+	u32 rq_base_addr_high;
+	u32 rq_pi;
+	u32 rq_ci;
+	u32 rq_dep;
+	u32 rq_entry_block_size;
+	u32 rq_status;
+
+	u32 cq_base_addr_low;
+	u32 cq_base_addr_high;
+	u32 cq_pi;
+	u32 cq_ci;
+	u32 cq_dep;
+	u32 cq_status;
+	u32 cq_int_mask;
+	u32 cq_int_status;
+	u32 cq_int_ro;
+
+	u32 resv[5];
+};
+
+struct ubctl_msgq_phy_addr {
+	u64 sq_entry_phy_addr;
+	u64 cq_entry_phy_addr;
 };
 
 static int ubctl_trace_data_deal(struct ubctl_dev *ucdev,
@@ -347,12 +413,251 @@ static int ubctl_query_iodie_info_data(struct ubctl_dev *ucdev,
 	return ubctl_query_port_infos(ucdev, query_cmd_param, query_func, port_bitmap);
 }
 
+static int ubctl_msgq_que_data_deal(struct ubctl_dev *ucdev,
+				    struct ubctl_query_cmd_param *query_cmd_param,
+				    struct ubctl_cmd *cmd, u32 out_len, u32 offset)
+{
+	struct ubctl_msgq *msgq_que_info = (struct ubctl_msgq *)cmd->out_data;
+	struct ubctl_msgq_to_user *user_msgq_info = NULL;
+	u32 msgq_que_size = query_cmd_param->out_len;
+
+	if (cmd->out_len != out_len ||
+	    msgq_que_size != sizeof(struct ubctl_msgq_to_user))
+		return -EINVAL;
+
+	user_msgq_info = (struct ubctl_msgq_to_user *)(query_cmd_param->out->data);
+
+	user_msgq_info->sq_pi = msgq_que_info->sq_pi;
+	user_msgq_info->sq_ci = msgq_que_info->sq_ci;
+	user_msgq_info->sq_dep = msgq_que_info->sq_dep;
+	user_msgq_info->sq_status = msgq_que_info->sq_status;
+	user_msgq_info->sq_int_mask = msgq_que_info->sq_int_mask;
+	user_msgq_info->sq_int_status = msgq_que_info->sq_int_status;
+	user_msgq_info->sq_int_ro = msgq_que_info->sq_int_ro;
+
+	user_msgq_info->rq_pi = msgq_que_info->rq_pi;
+	user_msgq_info->rq_ci = msgq_que_info->rq_ci;
+	user_msgq_info->rq_dep = msgq_que_info->rq_dep;
+	user_msgq_info->rq_entry_block_size = msgq_que_info->rq_entry_block_size;
+	user_msgq_info->rq_status = msgq_que_info->rq_status;
+
+	user_msgq_info->cq_pi = msgq_que_info->cq_pi;
+	user_msgq_info->cq_ci = msgq_que_info->cq_ci;
+	user_msgq_info->cq_dep = msgq_que_info->cq_dep;
+	user_msgq_info->cq_status = msgq_que_info->cq_status;
+	user_msgq_info->cq_int_mask = msgq_que_info->cq_int_mask;
+	user_msgq_info->cq_int_status = msgq_que_info->cq_int_status;
+	user_msgq_info->cq_int_ro = msgq_que_info->cq_int_ro;
+
+	query_cmd_param->out->data_size = msgq_que_size;
+
+	return 0;
+}
+
+static int ubctl_msgq_is_dump(void __iomem *entry_addr)
+{
+#define UBCTL_MSGQ_PROTOCOL_OPCODE 5
+#define UBCTL_MSGQ_OPCODE_START 9
+#define UBCTL_MSGQ_OPCODE_END 11
+
+	u32 first_data = readl(entry_addr);
+	u32 protocol_op_code = 0;
+	u32 task_type = 0;
+
+	protocol_op_code = UBCTL_EXTRACT_BITS(first_data,
+					      UBCTL_MSGQ_OPCODE_START,
+					      UBCTL_MSGQ_OPCODE_END);
+	task_type = UBCTL_EXTRACT_BITS(first_data, 0, 1);
+	if (task_type == 0 && protocol_op_code == UBCTL_MSGQ_PROTOCOL_OPCODE)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int ubctl_msgq_entry_move_data(struct ubctl_query_cmd_param *query_cmd_param,
+				      u32 offset, u32 block_size,
+				      void __iomem *entry_addr)
+{
+	u32 msgq_entry_data_size = block_size + offset * sizeof(u32);
+	u32 *data_offset = query_cmd_param->out->data + offset;
+	u32 i;
+
+	if (msgq_entry_data_size > query_cmd_param->out_len)
+		return -EINVAL;
+
+	for (i = 0; i < block_size / sizeof(u32); i++)
+		data_offset[i] = readl(entry_addr + i);
+
+	return 0;
+}
+
+static int ubctl_msgq_check_index(struct ubctl_dev *ucdev, u32 entry_index,
+				  struct ubctl_msgq *entry_info)
+{
+	if (entry_index >= entry_info->sq_dep ||
+	    entry_index >= entry_info->cq_dep) {
+		ubctl_err(ucdev, "index is illegal, index = %u.\n", entry_index);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int ubctl_msgq_all_get_phy_addr(struct ubctl_dev *ucdev, u32 entry_index,
+				       struct ubctl_msgq_phy_addr *entry_phy_addr,
+				       struct ubctl_msgq *entry_info)
+{
+#define UBCTL_SQE_SIZE 16
+
+	u64 base_addr;
+	int ret;
+
+	ret = ubctl_msgq_check_index(ucdev, entry_index, entry_info);
+	if (ret)
+		return ret;
+
+	base_addr = UBCTL_GET_PHY_ADDR(entry_info->sq_base_addr_high,
+				       entry_info->sq_base_addr_low);
+	if (!base_addr) {
+		ubctl_err(ucdev, "sqe msgq not initialized.\n");
+		return -EINVAL;
+	}
+
+	entry_phy_addr->sq_entry_phy_addr = base_addr +
+					    entry_index * UBCTL_SQE_SIZE;
+
+	base_addr = UBCTL_GET_PHY_ADDR(entry_info->cq_base_addr_high,
+				       entry_info->cq_base_addr_low);
+	if (!base_addr) {
+		ubctl_err(ucdev, "cqe msgq not initialized.\n");
+		return -EINVAL;
+	}
+
+	entry_phy_addr->cq_entry_phy_addr = base_addr +
+					    entry_index * UBCTL_CQE_SIZE;
+
+	return 0;
+}
+
+static int ubctl_msgq_sq_entry_data_deal(struct ubctl_dev *ucdev,
+					 u64 sq_entry_phy_addr,
+					 struct ubctl_query_cmd_param *query_cmd_param)
+{
+#define UBCTL_SQE_TO_USER_SIZE 8
+
+	void __iomem *sq_entry_addr;
+	int ret = 0;
+
+	sq_entry_addr = memremap(sq_entry_phy_addr, UBCTL_SQE_TO_USER_SIZE, MEMREMAP_WB);
+	if (!sq_entry_addr)
+		return -EFAULT;
+
+	ret = ubctl_msgq_is_dump(sq_entry_addr);
+	if (ret) {
+		ubctl_err(ucdev, "this entry cannot be dumped, sqe is SPDM verified msg.\n");
+		goto err_exec;
+	}
+
+	ret = ubctl_msgq_entry_move_data(query_cmd_param, 0,
+					 UBCTL_SQE_TO_USER_SIZE, sq_entry_addr);
+	if (ret)
+		ubctl_err(ucdev, "move sqe data failed.\n");
+
+err_exec:
+	memunmap(sq_entry_addr);
+	return ret;
+}
+
+static int ubctl_msgq_cq_entry_data_deal(struct ubctl_dev *ucdev,
+					 u64 cq_entry_phy_addr,
+					 struct ubctl_query_cmd_param *query_cmd_param)
+{
+#define UBCTL_CQE_OFFSET 2
+
+	void __iomem *cq_entry_addr;
+	int ret = 0;
+
+	cq_entry_addr = memremap(cq_entry_phy_addr, UBCTL_CQE_SIZE, MEMREMAP_WB);
+	if (!cq_entry_addr)
+		return -EFAULT;
+
+	ret = ubctl_msgq_is_dump(cq_entry_addr);
+	if (ret) {
+		ubctl_err(ucdev, "this entry cannot be dumped, cqe is SPDM verified msg.\n");
+		goto err_exec;
+	}
+
+	ret = ubctl_msgq_entry_move_data(query_cmd_param, UBCTL_CQE_OFFSET,
+					 UBCTL_CQE_SIZE, cq_entry_addr);
+	if (ret)
+		ubctl_err(ucdev, "move cqe data failed.\n");
+
+err_exec:
+	memunmap(cq_entry_addr);
+	return ret;
+}
+
+static int ubctl_msgq_entry_data_deal(struct ubctl_dev *ucdev,
+				      struct ubctl_query_cmd_param *query_cmd_param,
+				      struct ubctl_cmd *cmd, u32 out_len, u32 offset)
+{
+	struct ubctl_msgq *entry_info = (struct ubctl_msgq *)cmd->out_data;
+	u32 msgq_entry_max_len = query_cmd_param->out_len;
+	struct ubctl_msgq_phy_addr entry_phy_addr = {};
+	u32 entry_index = 0;
+	int ret = 0;
+
+	if (query_cmd_param->in->data_size != sizeof(struct fwctl_pkt_in_index)) {
+		ubctl_err(ucdev, "user data of msgq is invalid.\n");
+		return -EINVAL;
+	}
+	entry_index = ((struct fwctl_pkt_in_index *)query_cmd_param->in->data)->index;
+
+	ret = ubctl_msgq_all_get_phy_addr(ucdev, entry_index, &entry_phy_addr,
+					  entry_info);
+	if (ret)
+		return ret;
+
+	ret = ubctl_msgq_sq_entry_data_deal(ucdev,
+					    entry_phy_addr.sq_entry_phy_addr,
+					    query_cmd_param);
+	if (ret)
+		return ret;
+
+	ret = ubctl_msgq_cq_entry_data_deal(ucdev,
+					    entry_phy_addr.cq_entry_phy_addr,
+					    query_cmd_param);
+	if (ret)
+		return ret;
+
+	query_cmd_param->out->data_size = msgq_entry_max_len;
+
+	return ret;
+}
+
+static int ubctl_query_msgq_que_stats_data(struct ubctl_dev *ucdev,
+					   struct ubctl_query_cmd_param *query_cmd_param,
+					   struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_MSGQ_DFX, UBCTL_MSGQ_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
 static struct ubctl_func_dispatch g_ubctl_query_func[] = {
 	{ UTOOL_CMD_QUERY_DL_LINK_TRACE, ubctl_query_dl_trace_data,
 	  ubctl_trace_data_deal },
 
 	{ UTOOL_CMD_QUERY_SCC_VERSION, ubctl_query_scc_data, ubctl_scc_version_deal},
 	{ UTOOL_CMD_QUERY_SCC_LOG, ubctl_query_scc_data, ubctl_scc_log_deal },
+
+	{ UTOOL_CMD_QUERY_MSGQ_QUE_STATS, ubctl_query_msgq_que_stats_data,
+	  ubctl_msgq_que_data_deal },
+	{ UTOOL_CMD_QUERY_MSGQ_ENTRY, ubctl_query_msgq_que_stats_data,
+	  ubctl_msgq_entry_data_deal },
 
 	{ UTOOL_CMD_QUERY_IO_DIE_PORT_INFO, ubctl_query_iodie_info_data,
 	  ubctl_query_data_deal },

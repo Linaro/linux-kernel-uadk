@@ -27,6 +27,8 @@
 		##__VA_ARGS__)
 
 #define UBCTL_GET_PHY_ADDR(high, low) ((((u64)(high)) << 32) | (low))
+#define UBCTL_EXTRACT_BITS(value, start, end) \
+	(((value) >> (start)) & ((1UL << ((end) - (start) + 1)) - 1))
 
 struct ubctl_dev {
 	struct fwctl_device fwctl;

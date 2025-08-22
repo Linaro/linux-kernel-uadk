@@ -6,6 +6,7 @@
 #include <ub/ubase/ubase_comm_cmd.h>
 
 #include "ub_common.h"
+#include "ub_cmdq.h"
 
 static inline void ubctl_struct_cpu_to_le32(u32 *data, u32 cnt)
 {
@@ -122,6 +123,20 @@ static int ubctl_cmd_send_deal(struct ubctl_dev *ucdev,
 	return ret;
 }
 
+static void ubctl_cmd_data_deal(struct ubctl_query_cmd_param *query_cmd_param,
+			       struct ubctl_query_dp *query_dp,
+			       struct ubctl_query_cmd_dp *cmd_dp)
+{
+	if (!query_dp->data) {
+		memcpy(cmd_dp->cmd_in, query_cmd_param->in->data, query_cmd_param->in->data_size);
+		return;
+	}
+
+	if (query_dp->op_code == UBCTL_QUERY_TP_RX_BANK_DFX &&
+	    query_dp->data_len == (u32)sizeof(u32))
+		memcpy(cmd_dp->cmd_in, query_dp->data, sizeof(u32));
+}
+
 int ubctl_query_data(struct ubctl_dev *ucdev,
 		     struct ubctl_query_cmd_param *query_cmd_param,
 		     struct ubctl_func_dispatch *query_func,
@@ -157,7 +172,7 @@ int ubctl_query_data(struct ubctl_dev *ucdev,
 			.query_func = query_func,
 		};
 
-		memcpy(cmd_dp.cmd_in, query_cmd_param->in->data, query_cmd_param->in->data_size);
+		ubctl_cmd_data_deal(query_cmd_param, &query_dp[i], &cmd_dp);
 		ret = ubctl_cmd_send_deal(ucdev, query_cmd_param, &query_dp[i],
 					  &cmd_dp, offset);
 		if (ret)

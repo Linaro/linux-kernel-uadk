@@ -157,6 +157,120 @@ static int ubctl_query_dl_bist_err_data(struct ubctl_dev *ucdev,
 				query_dp, ARRAY_SIZE(query_dp));
 }
 
+static int ubctl_query_dp_deal(struct ubctl_dev *ucdev,
+			       struct ubctl_query_cmd_param *query_cmd_param,
+			       struct ubctl_func_dispatch *query_func,
+			       struct ubctl_query_dp *query_dp, u32 query_dp_num)
+{
+#define UBCTL_TP_RX_BANK_NUM 3U
+
+	u32 *rx_bank_id __free(kvfree) = kvzalloc(sizeof(u32) * UBCTL_TP_RX_BANK_NUM, GFP_KERNEL);
+	u32 bank_idx = 0;
+	u32 bank_id = 0;
+	int ret = 0;
+	u32 i;
+
+	if (!rx_bank_id)
+		return -ENOMEM;
+
+	for (i = 0; i < query_dp_num; i++) {
+		if (query_dp[i].op_code != UBCTL_QUERY_TP_RX_BANK_DFX)
+			continue;
+		if (bank_idx >= UBCTL_TP_RX_BANK_NUM) {
+			ubctl_err(ucdev, "bank_idx is out of bounds: %u.\n", bank_idx);
+			return -EINVAL;
+		}
+
+		rx_bank_id[bank_idx] = bank_id++;
+		query_dp[i].data = (void *)&rx_bank_id[bank_idx++];
+		query_dp[i].data_len = (u32)sizeof(u32);
+	}
+
+	ret = ubctl_query_data(ucdev, query_cmd_param, query_func,
+			       query_dp, query_dp_num);
+	if (ret)
+		ubctl_err(ucdev, "ubctl query data failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
+static int ubctl_query_tp_data(struct ubctl_dev *ucdev,
+			       struct ubctl_query_cmd_param *query_cmd_param,
+			       struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_TP_TX_DFX, UBCTL_TP_TX_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_DFX, UBCTL_TP_RX_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RQM_DFX, UBCTL_TP_RQM_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_STATE_DFX, UBCTL_TP_STATE_DFX_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_TX_ROUTE_DFX, UBCTL_TP_TX_ROUTE_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_TX_DFX, UBCTL_TP_TX_ABN_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_DFX, UBCTL_TP_RX_ABN_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_ABN_STATS_DFX, UBCTL_TP_REG_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_dp_deal(ucdev, query_cmd_param, query_func,
+				   query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_tp_tx_route_data(struct ubctl_dev *ucdev,
+					struct ubctl_query_cmd_param *query_cmd_param,
+					struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_TP_TX_ROUTE_DFX, UBCTL_TP_TX_ROUTE_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func, query_dp,
+				ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_tp_abn_stats_data(struct ubctl_dev *ucdev,
+					 struct ubctl_query_cmd_param *query_cmd_param,
+					 struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_TP_TX_DFX, UBCTL_TP_TX_ABN_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_DFX, UBCTL_TP_RX_ABN_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_ABN_STATS_DFX, UBCTL_TP_REG_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func, query_dp,
+				ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_tp_pkt_stats_data(struct ubctl_dev *ucdev,
+					 struct ubctl_query_cmd_param *query_cmd_param,
+					 struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_TP_TX_DFX, UBCTL_TP_TX_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_DFX, UBCTL_TP_RX_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RQM_DFX, UBCTL_TP_RQM_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_STATE_DFX, UBCTL_TP_STATE_DFX_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_tp_rx_bank_data(struct ubctl_dev *ucdev,
+				       struct ubctl_query_cmd_param *query_cmd_param,
+				       struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_TP_RX_BANK_DFX, UBCTL_TP_RX_BANK_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_dp_deal(ucdev, query_cmd_param, query_func,
+				   query_dp, ARRAY_SIZE(query_dp));
+}
+
 static int ubctl_query_ta_data(struct ubctl_dev *ucdev,
 			       struct ubctl_query_cmd_param *query_cmd_param,
 			       struct ubctl_func_dispatch *query_func)
@@ -194,6 +308,115 @@ static int ubctl_query_ta_abn_stats(struct ubctl_dev *ucdev,
 				query_dp, ARRAY_SIZE(query_dp));
 }
 
+static int ubctl_query_ba_data(struct ubctl_dev *ucdev,
+			       struct ubctl_query_cmd_param *query_cmd_param,
+			       struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_BA_PKT_STATS_DFX, UBCTL_BA_PKT_STATS_LEN, UBCTL_READ, NULL, 0 },
+		{ UBCTL_QUERY_BA_MAR_DFX, UBCTL_BA_MAR_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_ba_pkt_stats_data(struct ubctl_dev *ucdev,
+					 struct ubctl_query_cmd_param *query_cmd_param,
+					 struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_BA_PKT_STATS_DFX, UBCTL_BA_PKT_STATS_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_conf_ba_mar_perf(struct ubctl_dev *ucdev,
+				  struct ubctl_query_cmd_param *query_cmd_param,
+				  struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_CONF_BA_PERF_DFX, UBCTL_CONF_BA_MAR_PERF_LEN, UBCTL_WRITE, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_ba_mar_perf(struct ubctl_dev *ucdev,
+				   struct ubctl_query_cmd_param *query_cmd_param,
+				   struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_BA_MAR_PERF_DFX, UBCTL_QUERY_BA_MAR_PERF_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_ba_mar_data(struct ubctl_dev *ucdev,
+				   struct ubctl_query_cmd_param *query_cmd_param,
+				   struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_BA_MAR_DFX, UBCTL_BA_MAR_LEN, UBCTL_READ, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_mar_cyc_en_data(struct ubctl_dev *ucdev,
+				       struct ubctl_query_cmd_param *query_cmd_param,
+				       struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_MAR_CYC_EN_DFX, UBCTL_MAR_CYC_EN_LEN, UBCTL_READ, NULL, 0 },
+	};
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_conf_mar_cyc_en_data(struct ubctl_dev *ucdev,
+				      struct ubctl_query_cmd_param *query_cmd_param,
+				      struct ubctl_func_dispatch *query_func)
+{
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_MAR_CYC_EN_DFX, UBCTL_MAR_CYC_EN_LEN, UBCTL_WRITE, NULL, 0 },
+	};
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
+static int ubctl_query_mar_table_data(struct ubctl_dev *ucdev,
+				      struct ubctl_query_cmd_param *query_cmd_param,
+				      struct ubctl_func_dispatch *query_func)
+{
+#define UBCTL_UB_MEM_TABLE_ENTRY_LEN 16U
+#define UBCTL_UB_MEM_TABLE_ENTRY_NUM 7U
+
+	struct ubctl_query_dp query_dp[] = {
+		{ UBCTL_QUERY_MAR_TABLE_DFX, UBCTL_MAR_TABLE_LEN, UBCTL_READ, NULL, 0 },
+	};
+	struct fwctl_pkt_in_table *mar_table =
+			(struct fwctl_pkt_in_table *)(query_cmd_param->in->data);
+
+	if (query_cmd_param->in->data_size != sizeof(*mar_table)) {
+		ubctl_err(ucdev, "user data of mar table is invalid.\n");
+		return -EINVAL;
+	}
+
+	if (mar_table->table_num == UBCTL_UB_MEM_TABLE_ENTRY_NUM)
+		mar_table->index *= UBCTL_UB_MEM_TABLE_ENTRY_LEN;
+
+	return ubctl_query_data(ucdev, query_cmd_param, query_func,
+				query_dp, ARRAY_SIZE(query_dp));
+}
+
 static struct ubctl_func_dispatch g_ubctl_query_reg[] = {
 	{ UTOOL_CMD_QUERY_NL, ubctl_query_nl_data, ubctl_query_data_deal },
 	{ UTOOL_CMD_QUERY_NL_PKT_STATS, ubctl_query_nl_pkt_stats_data,
@@ -218,10 +441,35 @@ static struct ubctl_func_dispatch g_ubctl_query_reg[] = {
 	{ UTOOL_CMD_QUERY_DL_BIST_ERR, ubctl_query_dl_bist_err_data,
 	  ubctl_query_data_deal },
 
+	{ UTOOL_CMD_QUERY_TP, ubctl_query_tp_data, ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_TP_PKT_STATS, ubctl_query_tp_pkt_stats_data,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_TP_ABN_STATS, ubctl_query_tp_abn_stats_data,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_TP_TX_ROUTE, ubctl_query_tp_tx_route_data,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_TP_RX_BANK, ubctl_query_tp_rx_bank_data,
+	  ubctl_query_data_deal },
+
 	{ UTOOL_CMD_QUERY_TA, ubctl_query_ta_data, ubctl_query_data_deal },
 	{ UTOOL_CMD_QUERY_TA_PKT_STATS, ubctl_query_ta_pkt_stats,
 	  ubctl_query_data_deal },
 	{ UTOOL_CMD_QUERY_TA_ABN_STATS, ubctl_query_ta_abn_stats,
+	  ubctl_query_data_deal },
+
+	{ UTOOL_CMD_QUERY_BA, ubctl_query_ba_data, ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_BA_PKT_STATS, ubctl_query_ba_pkt_stats_data,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_BA_MAR, ubctl_query_ba_mar_data, ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_BA_MAR_TABLE, ubctl_query_mar_table_data,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_BA_MAR_CYC_EN, ubctl_query_mar_cyc_en_data,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_CONF_BA_MAR_CYC_EN, ubctl_conf_mar_cyc_en_data,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_CONFIG_BA_MAR_PEFR_STATS, ubctl_conf_ba_mar_perf,
+	  ubctl_query_data_deal },
+	{ UTOOL_CMD_QUERY_BA_MAR_PEFR_STATS, ubctl_query_ba_mar_perf,
 	  ubctl_query_data_deal },
 
 	{ UTOOL_CMD_QUERY_MAX, NULL, NULL }

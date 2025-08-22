@@ -16,6 +16,12 @@
 #include "perm_table.h"
 
 extern struct platform_driver ummu_driver;
+extern const struct ummu_core_ops ummu_ops;
+extern const struct ummu_device_helper ummu_helper;
+
+#define MSI_IOVA_BASE 0x8000000
+#define MSI_IOVA_LENGTH 0x100000
+
 #define EID_HIGH_SZ_SHIFT 64
 #define UMMU_CTRL_PAGE_SIZE ((PAGE_SIZE == SZ_4K) ? SZ_4K : SZ_64K)
 
@@ -283,6 +289,8 @@ struct ummu_domain {
 	struct mutex init_mutex; /* protect domain resources */
 	struct ummu_base_domain base_domain;
 	u32 qid;
+	bool has_cfged;
+	bool dirty_tracking;
 	struct ummu_domain_cfgs cfgs;
 };
 

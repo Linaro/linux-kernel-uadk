@@ -21,6 +21,7 @@
 #include "ummu.h"
 #include "attribute.h"
 #include "cfg_table.h"
+#include "iommu.h"
 
 #define UMMU_DRV_NAME "ummu"
 
@@ -81,11 +82,19 @@ static int ummu_device_register(struct ummu_device *ummu)
 		return ret;
 	}
 
+	ummu->helper_ops = &ummu_helper;
+	ret = logic_add_ummu_device(ummu, &ummu_iommu_ops, &ummu_ops);
+	if (ret) {
+		iommu_device_sysfs_remove(&ummu->core_dev.iommu);
+		return ret;
+	}
+	dev_info(ummu->dev, "ummu register to ummu core successful!\n");
 	return 0;
 }
 
 static void ummu_device_unregister(struct ummu_device *ummu)
 {
+	logic_remove_ummu_device(ummu);
 	iommu_device_sysfs_remove(&ummu->core_dev.iommu);
 }
 
@@ -240,6 +249,11 @@ static void ummu_device_get_pgsize(struct ummu_device *ummu, u32 reg)
 		ummu->cap.pgsize_bitmap |= SZ_16K | SZ_32M;
 	if (reg & CAP2_GRAN4K_BIT)
 		ummu->cap.pgsize_bitmap |= SZ_4K | SZ_2M | SZ_1G;
+
+	if (ummu_iommu_ops.pgsize_bitmap == -1UL)
+		ummu_iommu_ops.pgsize_bitmap = ummu->cap.pgsize_bitmap;
+	else
+		ummu_iommu_ops.pgsize_bitmap |= ummu->cap.pgsize_bitmap;
 }
 
 static void ummu_device_get_oas(struct ummu_device *ummu, u32 reg)

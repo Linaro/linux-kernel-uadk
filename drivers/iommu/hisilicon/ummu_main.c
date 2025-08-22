@@ -18,6 +18,7 @@
 #include "regs.h"
 #include "flush.h"
 #include "ummu.h"
+#include "attribute.h"
 #include "cfg_table.h"
 
 #define UMMU_DRV_NAME "ummu"
@@ -68,14 +69,18 @@ static int ummu_ioremap(struct ummu_device *ummu, resource_size_t start,
 
 static int ummu_device_register(struct ummu_device *ummu)
 {
+	const struct attribute_group **groups;
 	int ret;
 
-	ret = iommu_device_sysfs_add(&ummu->core_dev.iommu, ummu->dev, NULL,
+	groups = get_attribute_group();
+	ret = iommu_device_sysfs_add(&ummu->core_dev.iommu, ummu->dev, groups,
 				     "%s", dev_name(ummu->dev));
-	if (ret)
+	if (ret) {
 		dev_err(ummu->dev, "add iommu sysfs failed, ret = %d.\n", ret);
+		return ret;
+	}
 
-	return ret;
+	return 0;
 }
 
 static void ummu_device_unregister(struct ummu_device *ummu)

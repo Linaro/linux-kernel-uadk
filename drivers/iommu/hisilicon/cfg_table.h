@@ -139,6 +139,7 @@ struct ummu_tecte_data {
 #define TCT_ENT0_AFFD (1UL << 9)
 #define TCT_ENT0_HDF (1UL << 10)
 #define TCT_ENT0_HAF (1UL << 11)
+#define TCT_ENT0_FBS (1UL << 12)
 #define TCT_ENT0_FBR (1UL << 13)
 #define TCT_ENT0_FBA (1UL << 14)
 #define TCT_ENT0_ASH (1UL << 15)
@@ -154,6 +155,9 @@ struct ummu_tecte_data {
 
 #define TCT_ENT1_SZ GENMASK(5, 0)
 #define TCT_ENT1_TGS GENMASK(7, 6)
+#define TCT_TCR_TGS_4K 0
+#define TCT_TCR_TGS_64K 1
+#define TCT_TCR_TGS_16K 2
 #define TCT_ENT1_TTWD (1UL << 8)
 #define TCT_ENT1_MD0 GENMASK(10, 9)
 #define TCT_ENT1_MD1 GENMASK(12, 11)

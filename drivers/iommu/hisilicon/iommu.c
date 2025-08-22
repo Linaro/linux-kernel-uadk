@@ -24,6 +24,7 @@
 #include "perm_table.h"
 #include "qos.h"
 #include "queue.h"
+#include "sva.h"
 
 static bool ummu_capable(struct device *dev, enum iommu_cap cap)
 {
@@ -299,6 +300,8 @@ static struct iommu_device *ummu_probe_device(struct device *dev)
 	ummu = (struct ummu_device *)dev_iommu_priv_get(dev);
 	master->dev = dev;
 	master->ummu = ummu;
+	refcount_set(&master->ksva_ref, 1);
+	refcount_set(&master->sva_ref, 1);
 	dev_iommu_priv_set(dev, master);
 	pr_debug("ummu probe device %s successful!\n", dev_name(dev));
 	return &ummu->core_dev.iommu;
@@ -317,6 +320,8 @@ static void ummu_release_device(struct device *dev)
 
 	ummu_detach_dev(master);
 	set_dev_tid(dev, UMMU_INVALID_TID);
+	WARN_ON(refcount_read(&master->sva_ref) > 1);
+	WARN_ON(refcount_read(&master->ksva_ref) > 1);
 	dev_iommu_priv_set(dev, NULL);
 	kfree(master);
 }
@@ -341,11 +346,67 @@ static struct iommu_group *ummu_device_group(struct device *dev)
 	return generic_device_group(dev);
 }
 
+static int ummu_dev_enable_feat(struct device *dev,
+				enum iommu_dev_features feat)
+{
+	struct ummu_master *master =
+		(struct ummu_master *)dev_iommu_priv_get(dev);
+
+	if (!master) {
+		pr_err("get invalid dev!\n");
+		return -ENODEV;
+	}
+
+	switch (feat) {
+	case IOMMU_DEV_FEAT_IOPF:
+		return -EOPNOTSUPP;
+	case IOMMU_DEV_FEAT_SVA:
+	case IOMMU_DEV_FEAT_KSVA:
+		return ummu_master_enable_sva(master, feat);
+	default:
+		return -EINVAL;
+	}
+}
+
+static int ummu_dev_disable_feat(struct device *dev,
+				 enum iommu_dev_features feat)
+{
+	struct ummu_master *master =
+		(struct ummu_master *)dev_iommu_priv_get(dev);
+
+	if (!master) {
+		pr_err("get invalid dev!\n");
+		return -ENODEV;
+	}
+
+	switch (feat) {
+	case IOMMU_DEV_FEAT_IOPF:
+		return -EOPNOTSUPP;
+	case IOMMU_DEV_FEAT_SVA:
+	case IOMMU_DEV_FEAT_KSVA:
+		return ummu_master_disable_sva(master, feat);
+	default:
+		return -EINVAL;
+	}
+}
+
 static int ummu_def_domain_type(struct device *dev)
 {
 	if (iommu_default_passthrough())
 		return IOMMU_DOMAIN_IDENTITY;
 	return 0;
+}
+
+static void ummu_remove_dev_pasid(struct device *dev,
+			ioasid_t id, struct iommu_domain *domain)
+{
+	struct ummu_domain *u_domain;
+	struct ummu_master *master;
+
+	master = (struct ummu_master *)dev_iommu_priv_get(dev);
+	u_domain = to_ummu_domain(domain);
+	if (domain->type == IOMMU_DOMAIN_SVA)
+		ummu_sva_domain_remove_tid(u_domain, master, id);
 }
 
 const struct iommu_domain_ops default_domain_ops = {
@@ -361,11 +422,15 @@ const struct iommu_domain_ops default_domain_ops = {
 struct iommu_ops ummu_iommu_ops = {
 	.capable = ummu_capable,
 	.domain_alloc = ummu_domain_alloc,
+	.domain_alloc_sva = ummu_domain_alloc_sva,
 	.probe_device = ummu_probe_device,
 	.release_device = ummu_release_device,
 	.device_group = ummu_device_group,
 	.get_resv_regions = ummu_get_resv_regions,
+	.dev_enable_feat = ummu_dev_enable_feat,
+	.dev_disable_feat = ummu_dev_disable_feat,
 	.def_domain_type = ummu_def_domain_type,
+	.remove_dev_pasid = ummu_remove_dev_pasid,
 	.get_group_qos_params = ummu_group_get_mpam,
 	.set_group_qos_params = ummu_group_set_mpam,
 	.default_domain_ops = &default_domain_ops,
@@ -485,6 +550,12 @@ static int ummu_sync_dom_cfg(struct ummu_base_domain *src,
 	return 0;
 }
 
+static int ummu_invalidate_cfg(struct ummu_base_domain *base_domain)
+{
+	ummu_sva_tcte_invalidate(to_ummu_domain(&base_domain->domain));
+	return 0;
+}
+
 const struct ummu_core_ops ummu_ops = {
 	.cfg_sync_all = ummu_cfg_sync_all,
 	.cfg_sync = ummu_cfg_sync,
@@ -492,6 +563,7 @@ const struct ummu_core_ops ummu_ops = {
 	.put_resource = ummu_put_resource,
 	.add_eid = ummu_add_eid,
 	.del_eid = ummu_del_eid,
+	.invalidate_cfg = ummu_invalidate_cfg,
 };
 
 const struct ummu_device_helper ummu_helper = {

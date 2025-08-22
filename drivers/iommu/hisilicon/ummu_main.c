@@ -22,6 +22,7 @@
 #include "attribute.h"
 #include "cfg_table.h"
 #include "iommu.h"
+#include "sva.h"
 
 #define UMMU_DRV_NAME "ummu"
 
@@ -458,6 +459,8 @@ static void ummu_device_hw_probe_cap5(struct ummu_device *ummu)
 	 */
 	ummu->cap.asid_bits = ilog2(UMMU_MAX_ASIDS);
 	ummu->cap.vmid_bits = ilog2(UMMU_MAX_VMIDS);
+	if (ummu_sva_supported(ummu))
+		ummu->cap.features |= UMMU_FEAT_SVA;
 
 	dev_info(ummu->dev, "ias = %u-bit, oas = %u-bit, features = 0x%08x.\n",
 		 ummu->cap.ias, ummu->cap.oas, ummu->cap.features);

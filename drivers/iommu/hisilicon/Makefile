@@ -21,6 +21,7 @@ ummu-y := ummu_main.o \
 	  attribute.o \
 	  qos.o \
 	  logic_ummu/logic_ummu.o \
-	  iommu.o
+	  iommu.o \
+	  nested.o
 
 ummu-$(CONFIG_UB_UMMU_SVA) += sva.o

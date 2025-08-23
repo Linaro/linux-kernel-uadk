@@ -5,6 +5,7 @@
  */
 #define pr_fmt(fmt) "[logic ummu]: " fmt
 
+#include <linux/kvm_host.h>
 #include <uapi/linux/iommufd.h>
 #include <linux/device.h>
 #include <linux/err.h>

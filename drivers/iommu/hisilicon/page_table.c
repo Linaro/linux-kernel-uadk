@@ -8,6 +8,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/io-pgtable.h>
 #include <linux/errno.h>
+#include <linux/kvm_host.h>
 
 #include "flush.h"
 #include "cfg_table.h"
@@ -96,6 +97,11 @@ static int ummu_domain_collect_pgtable_s2(struct ummu_domain *ummu_domain,
 		&pgtbl_cfg->arm_lpae_s2_cfg.vtcr;
 	struct ummu_s2_cfg *cfg = &ummu_domain->cfgs.s2_cfg;
 	int vmid = 0;
+
+	if (ummu_domain->kvm)
+		vmid = kvm_pinned_vmid_get(ummu_domain->kvm);
+	if (vmid < 0)
+		return vmid;
 
 	cfg->vmid = (u16)vmid;
 	cfg->vttbr = pgtbl_cfg->arm_lpae_s2_cfg.vttbr;

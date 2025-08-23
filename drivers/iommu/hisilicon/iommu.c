@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) "UMMU: " fmt
 
+#include <linux/kvm_host.h>
 #include <linux/iommu.h>
 #include <uapi/linux/iommufd.h>
 #include <linux/iova.h>
@@ -24,7 +25,9 @@
 #include "perm_table.h"
 #include "qos.h"
 #include "queue.h"
+#include "regs.h"
 #include "sva.h"
+#include "nested.h"
 
 static bool ummu_capable(struct device *dev, enum iommu_cap cap)
 {
@@ -45,6 +48,24 @@ static bool ummu_capable(struct device *dev, enum iommu_cap cap)
 	default:
 		return false;
 	}
+}
+
+static void *ummu_hw_info(struct device *dev, u32 *length, u32 *type)
+{
+	struct ummu_master *master = (struct ummu_master *)dev_iommu_priv_get(dev);
+	struct iommu_hw_info_ummu *info;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return ERR_PTR(-ENOMEM);
+
+	info->iidr = readl_relaxed(master->ummu->base + UMMU_IIDR);
+	info->aidr = readl_relaxed(master->ummu->base + UMMU_AIDR);
+
+	*length = sizeof(*info);
+	*type = IOMMU_HW_INFO_TYPE_UMMU;
+
+	return info;
 }
 
 struct ummu_domain *ummu_domain_alloc_helper(void)
@@ -82,6 +103,41 @@ static struct iommu_domain *ummu_domain_alloc(unsigned int type)
 	return &u_domain->base_domain.domain;
 }
 
+static int ummu_set_dirty_tracking(struct iommu_domain *domain, bool enable)
+{
+	struct ummu_domain *u_domain = to_ummu_domain(domain);
+	struct ummu_device *ummu = core_to_ummu_device(
+					u_domain->base_domain.core_dev);
+
+	if (!(ummu->cap.features & UMMU_FEAT_HD))
+		return -EOPNOTSUPP;
+
+	u_domain->dirty_tracking = enable;
+	return 0;
+}
+
+static int ummu_read_and_clear_dirty(struct iommu_domain *domain,
+					    unsigned long iova, size_t size,
+					    unsigned long flags,
+					    struct iommu_dirty_bitmap *dirty)
+{
+	struct ummu_domain *u_domain = to_ummu_domain(domain);
+	struct io_pgtable_ops *ops = u_domain->cfgs.pgtbl_ops;
+
+	if (!ops || !ops->read_and_clear_dirty)
+		return -EOPNOTSUPP;
+
+	if (!u_domain->dirty_tracking && dirty->bitmap)
+		return -EINVAL;
+
+	return ops->read_and_clear_dirty(ops, iova, size, flags, dirty);
+}
+
+static struct iommu_dirty_ops ummu_dirty_ops = {
+	.set_dirty_tracking = ummu_set_dirty_tracking,
+	.read_and_clear_dirty = ummu_read_and_clear_dirty,
+};
+
 static void ummu_domain_free(struct iommu_domain *domain)
 {
 	struct ummu_domain *u_domain = to_ummu_domain(domain);
@@ -94,6 +150,8 @@ static void ummu_domain_free(struct iommu_domain *domain)
 	    u_domain->base_domain.tid != UMMU_NO_TID)
 		ummu_core_free_tid(u_domain->base_domain.core_dev,
 					u_domain->base_domain.tid);
+	if (cfgs->stage == UMMU_DOMAIN_S2 && u_domain->kvm)
+		kvm_pinned_vmid_put(u_domain->kvm);
 
 	kfree(u_domain);
 }
@@ -220,6 +278,56 @@ static int ummu_domain_context_set(struct ummu_domain *ummu_domain,
 					ummu_domain->cfgs.tecte_tag, &target);
 	}
 	return 0;
+}
+
+static struct iommu_domain *ummu_domain_alloc_user(struct device *dev,
+				u32 flags, struct iommu_domain *parent,
+				struct kvm *kvm,
+				const struct iommu_user_data *user_data)
+{
+	struct ummu_master *master = (struct ummu_master *)dev_iommu_priv_get(dev);
+	bool nested_parent = flags & IOMMU_HWPT_ALLOC_NEST_PARENT;
+	bool dirty_enable = flags & IOMMU_HWPT_ALLOC_DIRTY_TRACKING;
+	struct ummu_domain *u_domain;
+	int ret;
+
+	if (flags & ~(IOMMU_HWPT_ALLOC_NEST_PARENT |
+		      IOMMU_HWPT_ALLOC_DIRTY_TRACKING))
+		return (struct iommu_domain *)ERR_PTR(-EOPNOTSUPP);
+	if (parent || user_data)
+		return (struct iommu_domain *)ERR_PTR(-EINVAL);
+
+	u_domain = ummu_domain_alloc_helper();
+	if (!u_domain)
+		return (struct iommu_domain *)ERR_PTR(-ENOMEM);
+
+	if (nested_parent) {
+		if (!(master->ummu->cap.features & UMMU_FEAT_NESTING)) {
+			ret = -EOPNOTSUPP;
+			goto exit_free;
+		}
+		u_domain->cfgs.stage = UMMU_DOMAIN_S2;
+		u_domain->cfgs.nested_parent = true;
+		u_domain->kvm = kvm;
+	}
+	u_domain->base_domain.core_dev = &master->ummu->core_dev;
+	ret = ummu_set_domain_cfgs_tag(&u_domain->cfgs, master);
+	if (ret)
+		goto exit_free;
+
+	ret = ummu_domain_context_prepare(u_domain);
+	if (ret) {
+		pr_err("prepare user domain ctx failed, ret = %d\n", ret);
+		goto exit_free;
+	}
+	u_domain->base_domain.domain.type = IOMMU_DOMAIN_UNMANAGED;
+	if (dirty_enable && u_domain->cfgs.stage == UMMU_DOMAIN_S1)
+		u_domain->base_domain.domain.dirty_ops = &ummu_dirty_ops;
+	return &u_domain->base_domain.domain;
+
+exit_free:
+	kfree(u_domain);
+	return (struct iommu_domain *)ERR_PTR(ret);
 }
 
 static int ummu_attach_dev(struct iommu_domain *domain, struct device *dev)
@@ -421,7 +529,9 @@ const struct iommu_domain_ops default_domain_ops = {
 
 struct iommu_ops ummu_iommu_ops = {
 	.capable = ummu_capable,
+	.hw_info = ummu_hw_info,
 	.domain_alloc = ummu_domain_alloc,
+	.domain_alloc_user_v2 = ummu_domain_alloc_user,
 	.domain_alloc_sva = ummu_domain_alloc_sva,
 	.probe_device = ummu_probe_device,
 	.release_device = ummu_release_device,
@@ -433,6 +543,7 @@ struct iommu_ops ummu_iommu_ops = {
 	.remove_dev_pasid = ummu_remove_dev_pasid,
 	.get_group_qos_params = ummu_group_get_mpam,
 	.set_group_qos_params = ummu_group_set_mpam,
+	.viommu_alloc = ummu_viommu_alloc,
 	.default_domain_ops = &default_domain_ops,
 	.pgsize_bitmap = -1UL,
 	.owner = THIS_MODULE,
@@ -500,7 +611,11 @@ static void ummu_cfg_sync(struct ummu_base_domain *base_domain)
 	struct ummu_device *ummu;
 	u32 tag, tid;
 
-	u_domain = to_ummu_domain(&base_domain->domain);
+	if (base_domain->domain.type == IOMMU_DOMAIN_NESTED)
+		u_domain = to_nested_domain(&base_domain->domain)->s2_parent;
+	else
+		u_domain = to_ummu_domain(&base_domain->domain);
+
 	ummu = core_to_ummu_device(u_domain->base_domain.core_dev);
 	tag = u_domain->cfgs.tecte_tag;
 	tid = u_domain->base_domain.tid;
@@ -538,6 +653,13 @@ static int ummu_sync_dom_cfg(struct ummu_base_domain *src,
 		dst_domain->cfgs.tecte_tag = src_domain->cfgs.tecte_tag;
 		dst_domain->cfgs.stage = src_domain->cfgs.stage;
 		break;
+	case SYNC_NESTED_DOM_MUTI_CFG:
+		src_domain = to_nested_domain(&src->domain)->s2_parent;
+		dst_domain = to_nested_domain(&dst->domain)->s2_parent;
+		dst_domain->base_domain.tid = src_domain->base_domain.tid;
+		dst_domain->cfgs.tecte_tag = src_domain->cfgs.tecte_tag;
+		dst_domain->cfgs.stage = src_domain->cfgs.stage;
+		break;
 	case SYNC_CLEAR_DOM_ALL_CFG:
 		dst_domain = to_ummu_domain(&dst->domain);
 		memset(&dst_domain->cfgs, 0, sizeof(dst_domain->cfgs));
@@ -569,4 +691,6 @@ const struct ummu_core_ops ummu_ops = {
 const struct ummu_device_helper ummu_helper = {
 	.sync_tlb = ummu_non_agent_iotlb_sync,
 	.sync_dom_cfg = ummu_sync_dom_cfg,
+	.alloc_domain_nested = ummu_viommu_alloc_domain_nested,
+	.cache_invalidate_user = ummu_viommu_cache_invalidate_user,
 };

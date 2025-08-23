@@ -293,6 +293,7 @@ struct ummu_domain_cfgs {
 		struct ummu_s2_cfg	s2_cfg;
 	};
 	bool btm_enabled : 1;
+	bool nested_parent : 1;
 };
 
 struct ummu_domain {
@@ -302,6 +303,7 @@ struct ummu_domain {
 	bool has_cfged;
 	bool dirty_tracking;
 	struct ummu_domain_cfgs cfgs;
+	struct kvm *kvm;
 };
 
 /* UMMU private data for each master */

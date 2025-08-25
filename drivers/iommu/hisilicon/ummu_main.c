@@ -112,12 +112,12 @@ static int ummu_init_structures(struct ummu_device *ummu)
 	ret = ummu_prepare_tect_tct(ummu);
 	if (ret) {
 		dev_err(ummu->dev, "prepare tect failed\n");
-		return ret;
+		goto resource_release;
 	}
 
 	ret = ummu_device_init_hash_table(ummu);
 	if (ret)
-		return ret;
+		goto resource_release;
 
 	if (ummu->cap.support_mapt) {
 		/* ctrl page is private for every ummu hardware */
@@ -125,10 +125,14 @@ static int ummu_init_structures(struct ummu_device *ummu)
 		/* ctx table is common for every ummu hardware */
 		ret = ummu_device_init_permqs(ummu);
 		if (ret)
-			return ret;
+			goto resource_release;
 	}
 
 	return 0;
+
+resource_release:
+	ummu_iopf_queue_free(ummu);
+	return ret;
 }
 
 static void ummu_device_hw_probe_ver(struct ummu_device *ummu)
@@ -611,6 +615,7 @@ static void release_ummu_dev_res(void *data)
 {
 	struct ummu_device *ummu = (struct ummu_device *)data;
 
+	ummu_iopf_queue_free(ummu);
 	ummu_device_uninit_permqs(ummu);
 }
 

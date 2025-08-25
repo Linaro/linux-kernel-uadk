@@ -62,6 +62,57 @@ static bool ummu_master_sva_supported(struct ummu_master *master)
 	return master->ummu->cap.features & UMMU_FEAT_SVA;
 }
 
+static bool ummu_master_iopf_supported(struct ummu_master *master)
+{
+	return master->ummu->cap.features & UMMU_FEAT_STALLS;
+}
+
+bool ummu_master_sva_enabled(struct ummu_master *master)
+{
+	bool enabled;
+
+	mutex_lock(&ummu_sva_mutex);
+	enabled = master->sva_enabled;
+	mutex_unlock(&ummu_sva_mutex);
+	return enabled;
+}
+
+static int ummu_master_sva_enable_iopf(struct ummu_master *master)
+{
+	struct device *dev = master->dev;
+	struct iopf_queue *iopfq;
+	int ret;
+
+	if (master->iopf_enabled)
+		return -EBUSY;
+
+	/* bus controller support stall as default. */
+	iopfq = master->ummu->evtq.iopf;
+	if (!iopfq) {
+		pr_debug("has no iopf queue, check evetq support\n");
+		return -ENODEV;
+	}
+
+	ret = iopf_queue_add_device(iopfq, dev);
+	if (ret)
+		return ret;
+
+	master->iopf_enabled = true;
+
+	return 0;
+}
+
+static void ummu_master_sva_disable_iopf(struct ummu_master *master)
+{
+	struct device *dev = master->dev;
+
+	if (!master->iopf_enabled)
+		return;
+
+	iopf_queue_remove_device(master->ummu->evtq.iopf, dev);
+	master->iopf_enabled = false;
+}
+
 int ummu_master_enable_sva(struct ummu_master *master,
 			   enum iommu_dev_features feat)
 {
@@ -78,6 +129,15 @@ int ummu_master_enable_sva(struct ummu_master *master,
 			ret = -EBUSY;
 			goto err_out;
 		}
+
+		if (ummu_master_iopf_supported(master)) {
+			ret = ummu_master_sva_enable_iopf(master);
+			if (ret) {
+				pr_err("enable iopf failed!\n");
+				goto err_out;
+			}
+		}
+
 		master->sva_enabled = true;
 	} else {
 		if (master->ksva_enabled) {
@@ -108,6 +168,10 @@ int ummu_master_disable_sva(struct ummu_master *master,
 				"cannot disable SVA, device is shared\n");
 			return -EBUSY;
 		}
+
+		if (ummu_master_iopf_supported(master))
+			ummu_master_sva_disable_iopf(master);
+
 		master->sva_enabled = false;
 	} else {
 		if (!master->ksva_enabled)
@@ -124,6 +188,32 @@ int ummu_master_disable_sva(struct ummu_master *master,
 err_out:
 	pr_debug("%s disable %s successful!\n", dev_name(master->dev),
 		 feat == IOMMU_DEV_FEAT_SVA ? "SVA" : "KSVA");
+	return 0;
+}
+
+int ummu_master_enable_iopf(struct ummu_master *master)
+{
+	int ret;
+
+	if (!ummu_master_iopf_supported(master))
+		return 0;
+
+	guard(mutex)(&ummu_sva_mutex);
+	ret = ummu_master_sva_enable_iopf(master);
+	return ret;
+}
+
+int ummu_master_disable_iopf(struct ummu_master *master)
+{
+	if (!ummu_master_iopf_supported(master))
+		return 0;
+
+	guard(mutex)(&ummu_sva_mutex);
+	if (master->sva_enabled)
+		return -EBUSY;
+
+	ummu_master_sva_disable_iopf(master);
+
 	return 0;
 }
 
@@ -383,6 +473,20 @@ void ummu_sva_domain_remove_tid(struct ummu_domain *domain,
 		else
 			ummu_release_domain_mapt_mem(domain);
 	}
+}
+
+int ummu_iopf_queue_alloc(struct ummu_device *ummu)
+{
+	ummu->evtq.iopf = iopf_queue_alloc(dev_name(ummu->dev));
+	if (!ummu->evtq.iopf)
+		return -ENOMEM;
+
+	return 0;
+}
+
+void ummu_iopf_queue_free(struct ummu_device *ummu)
+{
+	iopf_queue_free(ummu->evtq.iopf);
 }
 
 void ummu_sva_tcte_invalidate(struct ummu_domain *u_domain)

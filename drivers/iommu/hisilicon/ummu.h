@@ -135,6 +135,7 @@ struct ummu_mcmdq {
 
 struct ummu_evtq {
 	struct ummu_queue q;
+	struct iopf_queue *iopf;
 	u32 max_stalls;
 };
 
@@ -311,6 +312,7 @@ struct ummu_master {
 	struct ummu_device	*ummu;
 	struct device		*dev;
 	bool			sva_enabled;
+	bool			iopf_enabled;
 	bool			ksva_enabled;
 	refcount_t		sva_ref;
 	refcount_t		ksva_ref;

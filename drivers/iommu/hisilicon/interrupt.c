@@ -10,6 +10,7 @@
 #include "ummu.h"
 #include "queue.h"
 #include "regs.h"
+#include "logic_ummu/logic_ummu.h"
 #include "interrupt.h"
 
 #define EVT_LOG_LIMIT_TIMEOUT 5000
@@ -213,6 +214,144 @@ static irqreturn_t ummu_gerror_handler(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
+static void ummu_evt_to_iommu_fault(struct ummu_device *ummu, u64 *evt,
+			     struct iommu_fault *flt)
+{
+	flt->type = IOMMU_FAULT_PAGE_REQ;
+	flt->prm.flags = IOMMU_FAULT_PAGE_REQUEST_LAST_PAGE |
+			 IOMMU_FAULT_PAGE_REQUEST_PRIV_DATA |
+			 IOMMU_FAULT_PAGE_REQUEST_PASID_VALID;
+	flt->prm.grpid = FIELD_GET(EVTQ_ENT1_STAG, evt[1]);
+	flt->prm.perm = (evt[0] & EVTQ_ENT0_IND ? IOMMU_FAULT_PERM_EXEC : 0) |
+			(evt[0] & EVTQ_ENT0_PNU ? IOMMU_FAULT_PERM_PRIV : 0) |
+			(evt[0] & EVTQ_ENT0_RNW ? IOMMU_FAULT_PERM_READ :
+						  IOMMU_FAULT_PERM_WRITE);
+	flt->prm.addr = FIELD_GET(EVTQ_ENT3_IADDR, evt[3]);
+	flt->prm.private_data[0] = FIELD_GET(EVTQ_ENT4_TECTE_TAG, evt[4]);
+	flt->prm.private_data[1] = (u64)(uintptr_t)ummu;
+	flt->prm.pasid = FIELD_GET(EVTQ_ENT0_TID, evt[0]);
+}
+
+void ummu_page_response(struct device *dev, struct iopf_fault *evt,
+			struct iommu_page_response *resp)
+{
+	struct iommu_fault_page_request *prm = &evt->fault.prm;
+	struct ummu_device *ummu = (struct ummu_device *)(uintptr_t)prm->private_data[1];
+	struct device *ummu_dev = ummu->dev;
+	struct ummu_mcmdq_ent cmd = { 0 };
+
+	if (!(prm->flags & IOMMU_FAULT_PAGE_REQUEST_PRIV_DATA)) {
+		dev_err(dev, "tect_tag and ummu instance not set.\n");
+		return;
+	}
+
+	cmd.opcode = CMD_STALL_RESUME;
+	cmd.stall_resume.tag = resp->grpid;
+	cmd.stall_resume.tect_tag = prm->private_data[0];
+
+	switch (resp->code) {
+	case IOMMU_PAGE_RESP_INVALID:
+	case IOMMU_PAGE_RESP_FAILURE:
+		cmd.stall_resume.abort = true;
+		dev_err_ratelimited(ummu_dev,
+			"page fault failed. pasid=0x%x grpid=0x%x perm=0x%x tect_tag=0x%llx\n",
+			prm->pasid, prm->grpid, prm->perm, prm->private_data[0]);
+		break;
+	case IOMMU_PAGE_RESP_SUCCESS:
+		cmd.stall_resume.retry = true;
+		break;
+	default:
+		return;
+	}
+	ummu_mcmdq_issue_cmd(ummu, &cmd);
+}
+
+static inline void ummu_abort_page_fault(struct ummu_device *ummu,
+					 u32 gripid, u32 tect_tag)
+{
+	struct ummu_mcmdq_ent cmd = { 0 };
+
+	cmd.opcode = CMD_STALL_RESUME;
+	cmd.stall_resume.tag = gripid;
+	cmd.stall_resume.tect_tag = tect_tag;
+	cmd.stall_resume.abort = true;
+
+	ummu_mcmdq_issue_cmd(ummu, &cmd);
+}
+
+static bool is_evt_src_sva(struct device *evt_src, u32 tid)
+{
+	struct iommu_domain *domain = ummu_core_get_domain_by_tid(evt_src, tid);
+
+	if (!domain) {
+		pr_err("get domain failed.\n");
+		return false;
+	}
+
+	domain = iommu_to_agent_domain(domain);
+	if (!ummu_is_sva(domain)) {
+		pr_err("An iopf event reported by ksva/dma device is not allowed.\n");
+		return false;
+	}
+	return true;
+}
+
+/* IRQ and event handlers */
+static int ummu_handle_iopf(struct ummu_device *ummu, struct device *evt_src,
+			    u64 *evt)
+{
+	struct iopf_fault pf_fault = { 0 };
+	struct iommu_fault *iommu_flt = &pf_fault.fault;
+	int ret;
+
+	/* ummu directly abort page faults without stall, driver do nothing */
+	if ((evt[0] & EVTQ_ENT0_STALL) == 0)
+		return -EOPNOTSUPP;
+
+	ummu_evt_to_iommu_fault(ummu, evt, iommu_flt);
+	/* S2 never fault */
+	if (evt[0] & EVTQ_ENT0_S2) {
+		ret = -EFAULT;
+		goto abort_req;
+	}
+	/* tid or tid related device has been released */
+	if (!evt_src) {
+		ret = -EINVAL;
+		goto abort_req;
+	}
+	/* DMA Fault or KSVA Fault should be filtered */
+	if (!is_evt_src_sva(evt_src, iommu_flt->prm.pasid)) {
+		ret = -EOPNOTSUPP;
+		goto out;
+	}
+	ret = iommu_report_device_fault(evt_src, &pf_fault);
+	if (ret)
+		goto abort_req;
+
+	return ret;
+
+abort_req:
+	ummu_abort_page_fault(ummu, iommu_flt->prm.grpid,
+			      iommu_flt->prm.private_data[0]);
+	pr_err("handle iopf failed, ret = %d\n", ret);
+
+out:
+	return ret;
+}
+
+static inline bool evt_is_iopf(int evt_code)
+{
+	switch (evt_code) {
+	case EVT_A_TRANSLATION:
+	case EVT_A_ADDR_SIZE:
+	case EVT_ACCESS:
+	case EVT_A_PERMISSION:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static void ummu_print_event(struct ummu_device *ummu, u8 code, u64 *evt)
 {
 	static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL,
@@ -241,16 +380,24 @@ static irqreturn_t ummu_evtq_thread(int irq, void *dev)
 	struct ummu_queue *q = &ummu->evtq.q;
 	struct ummu_ll_queue *llq = &q->llq;
 	u64 evt[EVTQ_ENT_DWORDS];
+	struct device *evt_src;
 	u32 tid;
 	u8 code;
+	int ret;
 
 	do {
 		while (!ummu_queue_remove_raw(q, evt)) {
+			ret = -1;
 			code = FIELD_GET(EVTQ_ENT0_CODE, evt[0]);
 			tid = FIELD_GET(EVTQ_ENT0_TID, evt[0]);
+			evt_src = ummu_core_get_device(&ummu->core_dev, tid);
 
-			ummu_print_event(ummu, code, evt);
+			if (evt_is_iopf(code))
+				ret = ummu_handle_iopf(ummu, evt_src, evt);
 
+			if (ret)
+				ummu_print_event(ummu, code, evt);
+			ummu_core_put_device(evt_src);
 			cond_resched();
 		}
 

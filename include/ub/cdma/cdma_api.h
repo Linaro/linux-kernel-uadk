@@ -22,4 +22,6 @@ struct dma_device *dma_get_device_list(u32 *num_devices);
 
 void dma_free_device_list(struct dma_device *dev_list, u32 num_devices);
 
+struct dma_device *dma_get_device_by_eid(struct dev_eid *eid);
+
 #endif

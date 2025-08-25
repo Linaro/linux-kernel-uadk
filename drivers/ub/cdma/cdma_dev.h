@@ -11,6 +11,8 @@
 #define CDMA_UE_MAX_NUM 64
 
 struct cdma_dev;
+struct eu_info;
+struct dev_eid;
 
 struct cdma_ctrlq_eu_info {
 	struct eu_info eu;
@@ -26,6 +28,8 @@ enum cdma_ctrlq_eu_op {
 struct cdma_dev *cdma_create_dev(struct auxiliary_device *adev);
 void cdma_destroy_dev(struct cdma_dev *cdev);
 struct xarray *get_cdma_dev_tbl(u32 *devices_num);
+bool cdma_find_seid_in_eus(struct eu_info *eus, u8 eu_num, struct dev_eid *eid,
+			   struct eu_info *eu_out);
 int cdma_register_crq_event(struct auxiliary_device *adev);
 void cdma_unregister_crq_event(struct auxiliary_device *adev);
 int cdma_create_arm_db_page(struct cdma_dev *cdev);

@@ -330,3 +330,18 @@ void cdma_destroy_dev(struct cdma_dev *cdev)
 	cdma_uninit_dev_param(cdev);
 	kfree(cdev);
 }
+
+bool cdma_find_seid_in_eus(struct eu_info *eus, u8 eu_num, struct dev_eid *eid,
+			   struct eu_info *eu_out)
+{
+	u32 i;
+
+	for (i = 0; i < eu_num; i++)
+		if (eus[i].eid.dw0 == eid->dw0 && eus[i].eid.dw1 == eid->dw1 &&
+		    eus[i].eid.dw2 == eid->dw2 && eus[i].eid.dw3 == eid->dw3) {
+			*eu_out = eus[i];
+			return true;
+		}
+
+	return false;
+}

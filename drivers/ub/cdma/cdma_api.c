@@ -24,7 +24,7 @@ struct dma_device *dma_get_device_list(u32 *num_devices)
 		return NULL;
 
 	cdma_devs_tbl = get_cdma_dev_tbl(&devs_num);
-	if (devs_num == 0) {
+	if (!devs_num) {
 		pr_err("cdma device table is empty.\n");
 		return NULL;
 	}
@@ -86,3 +86,52 @@ void dma_free_device_list(struct dma_device *dev_list, u32 num_devices)
 	kfree(dev_list);
 }
 EXPORT_SYMBOL_GPL(dma_free_device_list);
+
+struct dma_device *dma_get_device_by_eid(struct dev_eid *eid)
+{
+	struct cdma_device_attr *attr;
+	struct xarray *cdma_devs_tbl;
+	struct cdma_dev *cdev = NULL;
+	struct dma_device *ret_dev;
+	unsigned long index;
+	u32 devs_num;
+
+	if (!eid)
+		return NULL;
+
+	cdma_devs_tbl = get_cdma_dev_tbl(&devs_num);
+	if (!devs_num) {
+		pr_err("cdma device table is empty.\n");
+		return NULL;
+	}
+
+	ret_dev = kzalloc(sizeof(struct dma_device), GFP_KERNEL);
+	if (!ret_dev)
+		return NULL;
+
+	xa_for_each(cdma_devs_tbl, index, cdev) {
+		attr = &cdev->base.attr;
+		if (cdev->status == CDMA_SUSPEND) {
+			pr_warn("cdma device is not prepared, eid = 0x%x.\n",
+				attr->eid.dw0);
+			continue;
+		}
+
+		if (!cdma_find_seid_in_eus(attr->eus, attr->eu_num, eid,
+					   &attr->eu))
+			continue;
+
+		memcpy(ret_dev, &cdev->base, sizeof(*ret_dev));
+		ret_dev->private_data = kzalloc(
+			sizeof(struct cdma_ctx_res), GFP_KERNEL);
+		if (!ret_dev->private_data) {
+			kfree(ret_dev);
+			return NULL;
+		}
+		return ret_dev;
+	}
+	kfree(ret_dev);
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(dma_get_device_by_eid);

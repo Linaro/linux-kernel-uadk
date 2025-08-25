@@ -92,6 +92,28 @@ static int cdma_set_caps_from_ubase_caps(struct cdma_dev *cdev)
 	return 0;
 }
 
+static int cdma_set_caps_from_adev_qos(struct cdma_dev *cdev)
+{
+	struct ubase_adev_qos *qos;
+
+	qos = ubase_get_adev_qos(cdev->adev);
+	if (!qos) {
+		dev_err(cdev->dev, "get cdma adev qos failed\n");
+		return -EINVAL;
+	}
+
+	if (!qos->ctp_sl_num || qos->ctp_sl_num > CDMA_MAX_SL_NUM) {
+		dev_err(cdev->dev, "sl num %u is invalid\n",
+			qos->ctp_sl_num);
+		return -EINVAL;
+	}
+
+	cdev->sl_num = qos->ctp_sl_num;
+	memcpy(cdev->sl, qos->ctp_sl, qos->ctp_sl_num);
+
+	return 0;
+}
+
 int cdma_init_dev_caps(struct cdma_dev *cdev)
 {
 	struct cdma_caps *caps = &cdev->caps;
@@ -107,6 +129,10 @@ int cdma_init_dev_caps(struct cdma_dev *cdev)
 		return ret;
 
 	ret = cdma_set_caps_from_ubase_caps(cdev);
+	if (ret)
+		return ret;
+
+	ret = cdma_set_caps_from_adev_qos(cdev);
 	if (ret)
 		return ret;
 

@@ -115,6 +115,108 @@ static void cdma_uninit_dev_param(struct cdma_dev *cdev)
 	dev_set_drvdata(&cdev->adev->dev, NULL);
 }
 
+static int cdma_ctrlq_eu_add(struct cdma_dev *cdev, struct eu_info *eu)
+{
+	struct cdma_device_attr *attr = &cdev->base.attr;
+	struct eu_info *eus = cdev->base.attr.eus;
+	u8 i;
+
+	for (i = 0; i < attr->eu_num; i++) {
+		if (eu->eid_idx != eus[i].eid_idx)
+			continue;
+
+		dev_dbg(cdev->dev,
+			"cdma.%u: eid_idx[0x%x] eid[0x%x->0x%x] upi[0x%x->0x%x] update success.\n",
+			cdev->adev->id, eu->eid_idx, eus[i].eid.dw0,
+			eu->eid.dw0, eus[i].upi, eu->upi & CDMA_UPI_MASK);
+
+		eus[i].eid = eu->eid;
+		eus[i].upi = eu->upi & CDMA_UPI_MASK;
+
+		if (attr->eu.eid_idx == eu->eid_idx) {
+			attr->eu.eid = eu->eid;
+			attr->eu.upi = eu->upi & CDMA_UPI_MASK;
+		}
+		return 0;
+	}
+
+	if (attr->eu_num >= CDMA_MAX_EU_NUM) {
+		dev_err(cdev->dev, "cdma.%u: eu table is full.\n",
+			cdev->adev->id);
+		return -EINVAL;
+	}
+
+	eus[attr->eu_num++] = *eu;
+	dev_dbg(cdev->dev,
+		 "cdma.%u: eid_idx[0x%x] eid[0x%x] upi[0x%x] add success.\n",
+		 cdev->adev->id, eu->eid_idx, eu->eid.dw0,
+		 eu->upi & CDMA_UPI_MASK);
+
+	return 0;
+}
+
+static int cdma_ctrlq_eu_del(struct cdma_dev *cdev, struct eu_info *eu)
+{
+	struct cdma_device_attr *attr = &cdev->base.attr;
+	struct eu_info *eus = cdev->base.attr.eus;
+	int ret = -EINVAL;
+	u8 i, j;
+
+	if (!attr->eu_num) {
+		dev_err(cdev->dev, "cdma.%u: eu table is empty.\n",
+			cdev->adev->id);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < attr->eu_num; i++) {
+		if (eu->eid_idx != eus[i].eid_idx)
+			continue;
+
+		for (j = i; j < attr->eu_num - 1; j++)
+			eus[j] = eus[j + 1];
+		memset(&eus[j], 0, sizeof(*eus));
+
+		if (attr->eu.eid_idx == eu->eid_idx)
+			attr->eu = eus[0];
+		attr->eu_num--;
+		ret = 0;
+		break;
+	}
+
+	dev_info(cdev->dev,
+		 "cdma.%u: eid_idx[0x%x] eid[0x%x] upi[0x%x] delete %s.\n",
+		 cdev->adev->id, eu->eid_idx, eu->eid.dw0,
+		 eu->upi & CDMA_UPI_MASK, ret ? "failed" : "success");
+
+	return ret;
+}
+
+static int cdma_ctrlq_eu_update(struct auxiliary_device *adev, u8 service_ver,
+			 void *data, u16 len, u16 seq)
+{
+	struct cdma_dev *cdev = dev_get_drvdata(&adev->dev);
+	struct cdma_ctrlq_eu_info *ctrlq_eu;
+	int ret = -EINVAL;
+
+	if (len < sizeof(*ctrlq_eu)) {
+		dev_err(cdev->dev, "ctrlq data len is invalid.\n");
+		return -EINVAL;
+	}
+
+	ctrlq_eu = (struct cdma_ctrlq_eu_info *)data;
+
+	mutex_lock(&cdev->eu_mutex);
+	if (ctrlq_eu->op == CDMA_CTRLQ_EU_ADD)
+		ret = cdma_ctrlq_eu_add(cdev, &ctrlq_eu->eu);
+	else if (ctrlq_eu->op == CDMA_CTRLQ_EU_DEL)
+		ret = cdma_ctrlq_eu_del(cdev, &ctrlq_eu->eu);
+	else
+		dev_err(cdev->dev, "ctrlq eu op is invalid.\n");
+	mutex_unlock(&cdev->eu_mutex);
+
+	return ret;
+}
+
 int cdma_create_arm_db_page(struct cdma_dev *cdev)
 {
 	cdev->arm_db_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
@@ -134,6 +236,36 @@ void cdma_destroy_arm_db_page(struct cdma_dev *cdev)
 	cdev->arm_db_page = NULL;
 }
 
+int cdma_register_crq_event(struct auxiliary_device *adev)
+{
+	struct ubase_ctrlq_event_nb nb = {
+		.service_type = UBASE_CTRLQ_SER_TYPE_DEV_REGISTER,
+		.opcode = CDMA_CTRLQ_EU_UPDATE,
+		.back = adev,
+		.crq_handler = cdma_ctrlq_eu_update,
+	};
+	int ret;
+
+	if (!adev)
+		return -EINVAL;
+
+	ret = ubase_ctrlq_register_crq_event(adev, &nb);
+	if (ret) {
+		dev_err(&adev->dev, "register crq event failed, id = %u, ret = %d.\n",
+			adev->id, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+void cdma_unregister_crq_event(struct auxiliary_device *adev)
+{
+	ubase_ctrlq_unregister_crq_event(adev,
+					 UBASE_CTRLQ_SER_TYPE_DEV_REGISTER,
+					 CDMA_CTRLQ_EU_UPDATE);
+}
+
 struct cdma_dev *cdma_create_dev(struct auxiliary_device *adev)
 {
 	struct cdma_dev *cdev;
@@ -151,13 +283,18 @@ struct cdma_dev *cdma_create_dev(struct auxiliary_device *adev)
 	if (cdma_alloc_dev_tid(cdev))
 		goto del_list;
 
-	if (cdma_create_arm_db_page(cdev))
+	if (cdma_register_crq_event(adev))
 		goto free_tid;
+
+	if (cdma_create_arm_db_page(cdev))
+		goto unregister_crq;
 
 	dev_dbg(&adev->dev, "cdma.%u init succeeded.\n", adev->id);
 
 	return cdev;
 
+unregister_crq:
+	cdma_unregister_crq_event(adev);
 free_tid:
 	cdma_free_dev_tid(cdev);
 del_list:
@@ -173,6 +310,8 @@ void cdma_destroy_dev(struct cdma_dev *cdev)
 {
 	if (!cdev)
 		return;
+
+	ubase_virt_unregister(cdev->adev);
 
 	cdma_destroy_arm_db_page(cdev);
 	ubase_ctrlq_unregister_crq_event(cdev->adev,

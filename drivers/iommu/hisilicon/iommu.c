@@ -93,6 +93,7 @@ static struct iommu_domain *ummu_domain_alloc(unsigned int type)
 	case IOMMU_DOMAIN_DMA_FQ:
 	case IOMMU_DOMAIN_BLOCKED:
 	case IOMMU_DOMAIN_UNMANAGED:
+	case IOMMU_DOMAIN_IDENTITY:
 		u_domain = ummu_domain_alloc_helper();
 		if (!u_domain)
 			return ERR_PTR(-ENOMEM);
@@ -338,7 +339,8 @@ static int ummu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		(struct ummu_master *)dev_iommu_priv_get(dev);
 	int ret;
 
-	if (domain->type == IOMMU_DOMAIN_BLOCKED)
+	if (domain->type == IOMMU_DOMAIN_IDENTITY ||
+	    domain->type == IOMMU_DOMAIN_BLOCKED)
 		return 0;
 
 	/* if the pgtable has been set, clean up the data structures */
@@ -504,6 +506,12 @@ static int ummu_dev_disable_feat(struct device *dev,
 
 static int ummu_def_domain_type(struct device *dev)
 {
+	int ret;
+
+	ret = ummu_bypass_dev_domain_type(dev);
+	if (ret)
+		return ret;
+
 	if (iommu_default_passthrough())
 		return IOMMU_DOMAIN_IDENTITY;
 	return 0;
@@ -531,6 +539,50 @@ const struct iommu_domain_ops default_domain_ops = {
 	.free = ummu_domain_free,
 };
 
+static int ummu_attach_dev_identity(struct iommu_domain *domain, struct device *dev)
+{
+	struct ummu_domain *identity_dom = ummu_get_global_identity_domain();
+	struct ummu_domain *u_domain = to_ummu_domain(domain);
+	struct ummu_master *master = dev_iommu_priv_get(dev);
+	int ret = 0;
+
+	guard(mutex)(&u_domain->init_mutex);
+	if (!u_domain->has_cfged) {
+		if (!identity_dom->cfgs.pgtbl_ops)
+			return -EFAULT;
+
+		memcpy(&u_domain->cfgs, &identity_dom->cfgs, sizeof(u_domain->cfgs));
+		ret = ummu_write_tct_desc(core_to_ummu_device(u_domain->base_domain.core_dev),
+					  &u_domain->cfgs, false);
+		if (ret) {
+			pr_err("set identity pages failed, ret = %d.\n", ret);
+			return ret;
+		}
+		u_domain->has_cfged = true;
+	}
+	set_dev_tid(master->dev, u_domain->base_domain.tid);
+
+	return 0;
+}
+
+static void ummu_identity_domain_free(struct iommu_domain *domain)
+{
+	struct ummu_domain *u_domain = to_ummu_domain(domain);
+
+	kfree(u_domain);
+}
+
+static const struct iommu_domain_ops ummu_identity_ops = {
+	.attach_dev = ummu_attach_dev_identity,
+	.flush_iotlb_all = ummu_flush_iotlb_all,
+	.free = ummu_identity_domain_free,
+};
+
+static struct iommu_domain ummu_identity_domain = {
+	.type = IOMMU_DOMAIN_IDENTITY,
+	.ops = &ummu_identity_ops,
+};
+
 struct iommu_ops ummu_iommu_ops = {
 	.capable = ummu_capable,
 	.hw_info = ummu_hw_info,
@@ -552,6 +604,7 @@ struct iommu_ops ummu_iommu_ops = {
 	.default_domain_ops = &default_domain_ops,
 	.pgsize_bitmap = -1UL,
 	.owner = THIS_MODULE,
+	.identity_domain = &ummu_identity_domain,
 };
 
 static int ummu_get_resource(struct ummu_base_domain *base_domain,

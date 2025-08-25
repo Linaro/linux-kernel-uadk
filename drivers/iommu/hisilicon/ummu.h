@@ -358,4 +358,5 @@ bool ummu_get_mapt_blk_exp(void);
  */
 size_t ummu_get_mapt_base_blk_size(void);
 
+int ummu_bypass_dev_domain_type(struct device *dev);
 #endif /* __UMMU_H__ */

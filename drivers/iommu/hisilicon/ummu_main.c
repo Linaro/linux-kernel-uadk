@@ -15,6 +15,7 @@
 #include "ummu_impl.h"
 #include "interrupt.h"
 #include "perm_queue.h"
+#include "page_table.h"
 #include "queue.h"
 #include "regs.h"
 #include "flush.h"
@@ -25,6 +26,9 @@
 #include "sva.h"
 
 #define UMMU_DRV_NAME "ummu"
+#define HISI_VENDOR_ID 0xCC08
+
+static bool ummu_special_identify;
 
 int ummu_write_reg_sync(struct ummu_device *ummu, u32 val,
 			u32 reg_off, u32 ack_off)
@@ -145,7 +149,7 @@ static void ummu_device_hw_probe_ver(struct ummu_device *ummu)
 	 * ummu enables special_identify to perform some
 	 * specialized operations.
 	 */
-	if (!ummu->cap.prod_ver) {
+	if (ummu_special_identify && !ummu->cap.prod_ver) {
 		ummu->cap.options |= UMMU_OPT_DOUBLE_PLBI;
 		ummu->cap.options |= UMMU_OPT_KCMD_PLBI;
 		ummu->cap.features &= ~UMMU_FEAT_STALLS;
@@ -640,6 +644,8 @@ static int ummu_device_ubrt_probe(struct ummu_device *ummu)
 	}
 
 	node = (struct ummu_node *)fw->ubrt_node;
+	if (node->vendor_id == HISI_VENDOR_ID)
+		ummu_special_identify = true;
 
 	ummu->core_dev.iommu.min_pasids = node->min_tid;
 	ummu->core_dev.iommu.max_pasids = node->max_tid;
@@ -726,6 +732,8 @@ static int ummu_device_probe(struct platform_device *pdev)
 		}
 	}
 
+	(void)ummu_global_identity_pgtbl_init(ummu);
+
 	return 0;
 
 probe_res_release:
@@ -742,6 +750,7 @@ static int ummu_device_remove(struct platform_device *pdev)
 		ummu->impl_ops->dev_remove(ummu);
 
 	ummu_device_disable(ummu);
+	ummu_global_identity_pgtbl_free();
 	ummu_device_unregister(ummu);
 
 	ummu_put_tct_table(ummu->local_tct_cfg);

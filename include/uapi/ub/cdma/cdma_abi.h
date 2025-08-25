@@ -11,6 +11,7 @@
 #define CDMA_SYNC _IOWR(CDMA_IOC_MAGIC, 0, struct cdma_ioctl_hdr)
 
 enum cdma_cmd {
+	CDMA_CMD_QUERY_DEV_INFO,
 	CDMA_CMD_MAX
 };
 
@@ -56,6 +57,12 @@ struct cdma_device_attr {
 	struct eu_info eu;
 	struct eu_info eus[CDMA_MAX_EU_NUM];
 	struct cdma_device_cap dev_cap;
+};
+
+struct cdma_cmd_query_device_attr_args {
+	struct {
+		struct cdma_device_attr attr;
+	} out;
 };
 
 #endif

@@ -19,6 +19,13 @@
 static DEFINE_XARRAY(cdma_devs_tbl);
 static atomic_t cdma_devs_num = ATOMIC_INIT(0);
 
+struct xarray *get_cdma_dev_tbl(u32 *devs_num)
+{
+	*devs_num = atomic_read(&cdma_devs_num);
+
+	return &cdma_devs_tbl;
+}
+
 /* Add the device to the device list for user query. */
 static int cdma_add_device_to_list(struct cdma_dev *cdev)
 {

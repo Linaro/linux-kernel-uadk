@@ -16,6 +16,11 @@
 
 #define CDMA_UPI_MASK		0x7FFF
 
+enum cdma_status {
+	CDMA_NORMAL,
+	CDMA_SUSPEND,
+};
+
 struct cdma_res {
 	u32 max_cnt;
 	u32 start_idx;

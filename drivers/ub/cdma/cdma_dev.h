@@ -5,6 +5,7 @@
 #define __CDMA_DEV_H__
 
 #include <linux/auxiliary_bus.h>
+#include <uapi/ub/cdma/cdma_abi.h>
 
 #define CDMA_CTRLQ_EU_UPDATE 0x2
 #define CDMA_UE_MAX_NUM 64
@@ -24,6 +25,7 @@ enum cdma_ctrlq_eu_op {
 
 struct cdma_dev *cdma_create_dev(struct auxiliary_device *adev);
 void cdma_destroy_dev(struct cdma_dev *cdev);
+struct xarray *get_cdma_dev_tbl(u32 *devices_num);
 int cdma_register_crq_event(struct auxiliary_device *adev);
 void cdma_unregister_crq_event(struct auxiliary_device *adev);
 int cdma_create_arm_db_page(struct cdma_dev *cdev);

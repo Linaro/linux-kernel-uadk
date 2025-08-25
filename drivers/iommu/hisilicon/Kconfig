@@ -35,3 +35,13 @@ config UB_UMMU_SVA
 	  the UMMU. And ummu provides access permission verification for
 	  process address spaces.
 	  Say Y here if your system supports SVA.
+
+config UB_UBMEM_UMMU
+	bool "Support UB memory's UMMU"
+	depends on UB_UMMU
+	default n
+	help
+	  Support the special UMMU for the address resolution of UB memory.
+	  This is a private implementation. User must check the hareware
+	  version.
+	  If you need them say Y here.

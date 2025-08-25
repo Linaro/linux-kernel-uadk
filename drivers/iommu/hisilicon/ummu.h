@@ -39,6 +39,9 @@ enum ummu_ver {
 enum ummu_device_msi_index {
 	EVTQ_MSI_INDEX,
 	GERROR_MSI_INDEX,
+#if IS_ENABLED(CONFIG_UB_UBMEM_UMMU)
+	RESERVED_MSI_INDEX,
+#endif
 	UMMU_MAX_MSIS,
 };
 
@@ -280,6 +283,11 @@ struct ummu_device {
 struct ummu_dev_impl_ops {
 	int (*hw_probe)(struct ummu_device *ummu);
 	int (*mcmdq_cfg)(struct ummu_device *ummu);
+	void (*write_msi_msg)(struct msi_desc *desc, struct msi_msg *msg);
+	void (*set_msis)(struct ummu_device *ummu);
+	void (*setup_irqs)(struct ummu_device *ummu);
+	int (*dev_probe)(struct ummu_device *ummu);
+	void (*dev_remove)(struct ummu_device *ummu);
 };
 
 struct ummu_domain_cfgs {

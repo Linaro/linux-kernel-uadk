@@ -432,9 +432,12 @@ static void ummu_write_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
 	phys_addr_t msi_addr;
 	phys_addr_t *cfg;
 
-	if (desc->msi_index > GERROR_MSI_INDEX)
-		return;
+	if (desc->msi_index > GERROR_MSI_INDEX) {
+		if (ummu->impl_ops && ummu->impl_ops->write_msi_msg)
+			ummu->impl_ops->write_msi_msg(desc, msg);
 
+		return;
+	}
 	cfg = ummu_msi_cfg[desc->msi_index];
 	/* 32 bit addresses are converted to 64 bit addresses. */
 	msi_addr = (((u64)msg->address_hi) << 32) | msg->address_lo;
@@ -459,6 +462,9 @@ static int ummu_device_setup_msis(struct ummu_device *ummu)
 	/* Clear the MSI address regs */
 	writeq_relaxed(0, ummu->base + UMMU_EVENT_QUE_MSI_ADDR0);
 	writeq_relaxed(0, ummu->base + UMMU_GLB_ERR_INT_MSI_ADDR0);
+
+	if (ummu->impl_ops && ummu->impl_ops->set_msis)
+		ummu->impl_ops->set_msis(ummu);
 
 	/* Allocate MSIs for evtq, gerror */
 	ret = platform_msi_domain_alloc_irqs(dev, UMMU_MAX_MSIS, ummu_write_msi_msg);
@@ -530,6 +536,9 @@ void ummu_setup_irqs(struct ummu_device *ummu)
 	else
 		dev_warn(ummu->dev,
 			 "no gerr irq - errors will not be reported!\n");
+
+	if (ummu->impl_ops && ummu->impl_ops->setup_irqs)
+		ummu->impl_ops->setup_irqs(ummu);
 
 	ummu_enable_irqs(ummu);
 }

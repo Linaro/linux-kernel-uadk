@@ -25,3 +25,4 @@ ummu-y := ummu_main.o \
 	  nested.o
 
 ummu-$(CONFIG_UB_UMMU_SVA) += sva.o
+ummu-$(CONFIG_UB_UBMEM_UMMU) += ubmem-mmu/ubmem_mmu.o

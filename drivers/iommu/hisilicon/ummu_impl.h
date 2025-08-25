@@ -9,6 +9,6 @@
 
 #include "ummu.h"
 
-void ummu_impl_init(struct ummu_device *ummu);
+struct ummu_device *ummu_impl_init(struct ummu_device *ummu);
 
 #endif  /* __UMMU_IMPL_H__ */

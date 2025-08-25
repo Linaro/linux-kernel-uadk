@@ -673,7 +673,9 @@ static int ummu_device_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	ummu_impl_init(ummu);
+	ummu = ummu_impl_init(ummu);
+	if (IS_ERR(ummu))
+		return PTR_ERR(ummu);
 
 	/*
 	 * Don't map the IMPLEMENTATION DEFINED regions, since they may contain
@@ -709,15 +711,35 @@ static int ummu_device_probe(struct platform_device *pdev)
 		return ret;
 
 	ret = ummu_device_register(ummu);
-	if (ret)
+	if (ret) {
 		dev_err(dev, "probe ummu device failed, ret = %d.\n", ret);
+		return ret;
+	}
 
+	if (ummu->impl_ops && ummu->impl_ops->dev_probe) {
+		ret = ummu->impl_ops->dev_probe(ummu);
+		if (ret) {
+			dev_err(dev,
+				"probe ummu impl device failed, ret = %d.\n",
+				ret);
+			goto probe_res_release;
+		}
+	}
+
+	return 0;
+
+probe_res_release:
+	logic_remove_ummu_device(ummu);
+	iommu_device_sysfs_remove(&ummu->core_dev.iommu);
 	return ret;
 }
 
 static int ummu_device_remove(struct platform_device *pdev)
 {
 	struct ummu_device *ummu = platform_get_drvdata(pdev);
+
+	if (ummu->impl_ops && ummu->impl_ops->dev_remove)
+		ummu->impl_ops->dev_remove(ummu);
 
 	ummu_device_disable(ummu);
 	ummu_device_unregister(ummu);

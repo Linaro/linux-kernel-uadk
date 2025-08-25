@@ -9,6 +9,7 @@
 #include <linux/cleanup.h>
 #include <linux/random.h>
 
+#include "trace/trace.h"
 #include "ummu.h"
 #include "flush.h"
 #include "seg_mng.h"
@@ -1240,6 +1241,9 @@ int ummu_perm_grant(struct iommu_domain *domain, void *va, size_t size,
 
 	ummu_perm_data_preproc(&data_info);
 
+	trace_ummu_perm_grant(ummu_dom->base_domain.tid, (u64)va, size, perm,
+			      data_info.token != NULL);
+
 	data_info.op = ummu_grant_check(mapt_info, &data_info);
 	if (data_info.op == UMMU_OP_END)
 		return -EINVAL;
@@ -1303,6 +1307,9 @@ int ummu_perm_ungrant(struct iommu_domain *domain, void *va, size_t size,
 		ret = -EINVAL;
 		goto clear_info;
 	}
+
+	trace_ummu_perm_ungrant(ummu_dom->base_domain.tid, (u64)va, size,
+				cookie != NULL, ret);
 
 	data_info.op = ummu_ungrant_check(mapt_info, &data_info);
 	if (data_info.op == UMMU_OP_END) {

@@ -8,6 +8,7 @@
 #include <linux/preempt.h>
 #include <linux/bitops.h>
 
+#include "trace/trace.h"
 #include "ummu.h"
 #include "queue.h"
 #include "flush.h"
@@ -134,6 +135,9 @@ static void __ummu_tlbi_range(struct ummu_mcmdq_ent *cmd,
 	if (range->iova == ULONG_MAX || range->size == 0)
 		return;
 
+	trace_ummu_iotlb_sync(domain->base_domain.tid, range->iova,
+			      range->size, dev_name(ummu->dev));
+
 	if (!(ummu->cap.features & UMMU_FEAT_RANGE_INV)) {
 		ummu_range_tlbi_nofeat(ummu, cmd, range);
 		return;
@@ -193,7 +197,7 @@ void ummu_tlbi_context(void *cookie)
 	err = ummu_domain_tlbi_cmd(domain, UMMU_TLBI_SCOPE_CTX, UMMU_TLBI_SCENE_DMA, &cmd);
 	if (err)
 		return;
-
+	trace_ummu_flush_iotlb_all(domain->base_domain.tid, dev_name(ummu->dev));
 	ummu_mcmdq_issue_cmd_with_sync(ummu, &cmd);
 }
 
@@ -290,6 +294,7 @@ void ummu_sync_tect_range(struct ummu_device *ummu, u32 tecte_tag,
 		},
 	};
 
+	trace_ummu_sync_tect_range(dev_name(ummu->dev), tecte_tag, range);
 	ummu_mcmdq_issue_cmd_with_sync(ummu, &cmd_cfgi_tect_range);
 }
 
@@ -308,6 +313,7 @@ void ummu_device_sync_tect(struct ummu_device *ummu, u32 tecte_tag)
 		},
 	};
 
+	trace_ummu_sync_tect(dev_name(ummu->dev), tecte_tag);
 	ummu_mcmdq_issue_cmd_with_sync(ummu, &cmd_cfgi_tect);
 }
 
@@ -330,6 +336,7 @@ void ummu_sync_tct(struct ummu_device *ummu, u32 tecte_tag, u32 tid,
 		},
 	};
 
+	trace_ummu_sync_tct(dev_name(ummu->dev), tecte_tag, tid, leaf);
 	if (!ummu->cap.prod_ver)
 		ummu_mcmdq_issue_cmd(ummu, &cmd_plbi_all);
 	ummu_mcmdq_issue_cmd_with_sync(ummu, &cmd_cfgi_tct);
@@ -344,6 +351,7 @@ void ummu_sync_tct_all(struct ummu_device *ummu, u32 tecte_tag)
 		},
 	};
 
+	trace_ummu_sync_tct_all(dev_name(ummu->dev), tecte_tag);
 	ummu_mcmdq_issue_cmd_with_sync(ummu, &cmd_cfgi_tct_all);
 }
 

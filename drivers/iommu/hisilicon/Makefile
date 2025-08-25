@@ -22,7 +22,8 @@ ummu-y := ummu_main.o \
 	  qos.o \
 	  logic_ummu/logic_ummu.o \
 	  iommu.o \
-	  nested.o
+	  nested.o \
+	  trace.o
 
 ummu-$(CONFIG_UB_UMMU_SVA) += sva.o
 ummu-$(CONFIG_UB_UBMEM_UMMU) += ubmem-mmu/ubmem_mmu.o

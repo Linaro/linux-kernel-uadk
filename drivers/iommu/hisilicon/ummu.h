@@ -268,6 +268,7 @@ struct ummu_dev_impl_ops {
 };
 
 struct ummu_domain_cfgs {
+	struct io_pgtable_ops *pgtbl_ops;
 	enum ummu_domain_stage stage;
 
 	u32 tecte_tag;

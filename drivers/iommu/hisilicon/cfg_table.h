@@ -128,13 +128,17 @@ struct ummu_tecte_data {
 #define TCT_LINEAR_ENTS_MAX ilog2(SZ_64K / TCT_ENTRY_SIZE_BYTES)
 
 #define TCT_ENT0_V (1UL << 0)
+#define TCT_ENT0_AA64 (1UL << 1)
 #define TCT_ENT0_ENDI (1UL << 2)
+#define TCT_ENT0_GPAS GENMASK(5, 3)
 #define TCT_ENT0_WXN (1UL << 6)
 #define TCT_ENT0_UWXN (1UL << 7)
 #define TCT_ENT0_PAN (1UL << 8)
 #define TCT_ENT0_AFFD (1UL << 9)
 #define TCT_ENT0_HDF (1UL << 10)
 #define TCT_ENT0_HAF (1UL << 11)
+#define TCT_ENT0_FBR (1UL << 13)
+#define TCT_ENT0_FBA (1UL << 14)
 #define TCT_ENT0_ASH (1UL << 15)
 /* 0:entry mode; 1:table mode */
 #define TCT_ENT0_MAPT_MOD (1UL << 16)
@@ -146,7 +150,11 @@ struct ummu_tecte_data {
 #define TCT_ENT0_EBIT_EN (1UL << 21)
 #define TCT_ENT0_ASID GENMASK_ULL(47, 32)
 
+#define TCT_ENT1_SZ GENMASK(5, 0)
+#define TCT_ENT1_TGS GENMASK(7, 6)
 #define TCT_ENT1_TTWD (1UL << 8)
+#define TCT_ENT1_MD0 GENMASK(10, 9)
+#define TCT_ENT1_MD1 GENMASK(12, 11)
 #define TCT_TCR_RGN_NC 0
 #define TCT_TCR_RGN_WBWA 1
 #define TCT_TCR_RGN_WT 2

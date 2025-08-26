@@ -116,6 +116,10 @@ struct range_table_entry {
 				     DECODER_RGTLB_ADDRESS_MASK) >> \
 				     DECODER_RGTLB_ADDRESS_OFFSET)
 
+#define get_rgtlb_page_idx(decoder, pa) ((((pa) - (decoder)->mmio_base_addr) & \
+					 DECODER_RGTLB_PAGE_MASK) >> \
+					 DECODER_PAGE_INDEX_LOC)
+
 #define get_page_idx(decoder, pa) ((((pa) - (decoder)->mmio_base_addr) & \
 				   DECODER_PGTLB_PAGE_MASK) >> \
 				   DECODER_PAGE_INDEX_LOC)
@@ -141,10 +145,226 @@ static void fill_page_entry(struct page_entry *page,
 	page->src_eid = info->src_eid;
 }
 
+static int rgtlb_alloc_page(struct ub_decoder *decoder,
+			    struct page_table_desc *desc,
+			    struct range_table_entry *entry)
+{
+	void *page_base;
+
+	page_base = dmam_alloc_coherent(decoder->dev, RANGE_TABLE_PAGE_SIZE,
+					&desc->page_dma, GFP_KERNEL);
+	if (!page_base)
+		return -ENOMEM;
+
+	desc->page_base = page_base;
+	desc->count = 0;
+	entry->next_lv_addr = (desc->page_dma & DECODER_PGTBL_PGPRT_MASK) >>
+			      DECODER_DMA_PAGE_ADDR_OFFSET;
+	entry->page_table_attr = PGTLB_ATTR_DEFAULT;
+	return 0;
+}
+
+static void rgtlb_free_page(struct ub_decoder *decoder,
+			    struct page_table_desc *desc,
+			    struct range_table_entry *rgtlb_entry)
+{
+	dmam_free_coherent(decoder->dev, RANGE_TABLE_PAGE_SIZE, desc->page_base,
+			   desc->page_dma);
+	rgtlb_entry->next_lv_addr = decoder->invalid_page_dma;
+	desc->page_base = NULL;
+	desc->page_dma = 0;
+}
+
+static int rgtlb_map(struct ub_decoder *decoder, u32 table_idx,
+		     struct decoder_map_info *info, u64 *offset)
+{
+	struct range_table_entry *rgtlb_entry;
+	struct ub_entity *uent = decoder->uent;
+	struct page_table_desc *desc;
+	struct page_entry *page;
+	u32 index;
+	u64 addr;
+
+	rgtlb_entry = (struct range_table_entry *)decoder->pgtlb.pgtlb_base +
+		      table_idx;
+	desc = decoder->pgtlb.desc_base + table_idx * RGTLB_TO_PGTLB;
+	addr = get_rgtlb_addr(decoder, info->pa + *offset);
+	index = get_rgtlb_page_idx(decoder, info->pa + *offset);
+	if (addr >= rgtlb_entry->mem_base && addr <= rgtlb_entry->mem_limit) {
+		ub_err(uent, "decoder mapping addr already in range.\n");
+		*offset += SZ_1M;
+		return -EINVAL;
+	}
+
+	if (!desc->page_base)
+		if (rgtlb_alloc_page(decoder, desc, rgtlb_entry)) {
+			*offset += SZ_1M;
+			return -ENOMEM;
+		}
+
+	/*
+	 * If the page table is applied for the first time,
+	 * the error branch is not used.
+	 */
+	page = (struct page_entry *)desc->page_base + index;
+	if (page->entry_type != INVALID_ENTRY) {
+		*offset += SZ_1M;
+		ub_err(uent, "page entry has been used\n");
+		return -EINVAL;
+	}
+
+	fill_page_entry(page, info, *offset);
+	desc->count++;
+	*offset += SZ_1M;
+	return 0;
+}
+
+static int copy_rg_to_pg(struct ub_decoder *decoder,
+			 struct page_table_desc *desc_base,
+			 struct range_table_entry *rgtlb_entry,
+			 struct page_entry *rg_base, int idx)
+{
+	struct page_table_entry *pgtlb_entry;
+	struct page_entry *rentry, *pentry;
+	struct page_table_desc *desc;
+	void *page_base;
+	int i;
+
+	desc = desc_base + idx;
+	pgtlb_entry = (struct page_table_entry *)rgtlb_entry + idx;
+	page_base = dmam_alloc_coherent(decoder->dev, PAGE_TABLE_PAGE_SIZE,
+					&desc->page_dma, GFP_KERNEL);
+	if (!page_base)
+		return -ENOMEM;
+
+	desc->page_base = page_base;
+	desc->count = 0;
+	pgtlb_entry->entry_type = PAGE_TABLE;
+	pgtlb_entry->next_lv_addr = (desc->page_dma &
+				     DECODER_PGTBL_PGPRT_MASK) >>
+				     DECODER_DMA_PAGE_ADDR_OFFSET;
+	pgtlb_entry->pgtlb_attr = PGTLB_ATTR_DEFAULT;
+
+	pentry = (struct page_entry *)page_base;
+	rentry = (struct page_entry *)rg_base + idx * DECODER_PAGE_SIZE;
+	for (i = 0; i < DECODER_PAGE_SIZE; i++) {
+		if ((rentry + i)->entry_type == PAGE) {
+			desc->count++;
+			memcpy(pentry + i, rentry + i, DECODER_PAGE_ENTRY_SIZE);
+		}
+	}
+	return 0;
+}
+
+static int rgtlb_unmap_to_range(struct ub_decoder *decoder,
+				struct page_table_desc *desc,
+				struct range_table_entry *rgtlb_entry)
+{
+	struct page_table_entry *pgtlb_entry;
+	struct page_entry *rg_base;
+	struct page_entry *entry;
+	dma_addr_t rg_dma;
+	int i, j, ret;
+	bool flag;
+
+	for (i = 0; i < RGTLB_TO_PGTLB; i++) {
+		pgtlb_entry = (struct page_table_entry *)rgtlb_entry + i;
+		pgtlb_entry->entry_type = PAGE_TABLE;
+		pgtlb_entry->next_lv_addr = decoder->invalid_page_dma;
+		pgtlb_entry->pgtlb_attr = PGTLB_ATTR_DEFAULT;
+	}
+
+	if (!desc->page_base)
+		return 0;
+	/*
+	 * If l2 table exists,
+	 * convert l2 table of range table to l2 table of the page table.
+	 */
+	rg_base = (struct page_entry *)desc->page_base;
+	rg_dma = desc->page_dma;
+	memset(desc, 0, sizeof(struct page_table_desc));
+	for (i = 0; i < RGTLB_TO_PGTLB; i++) {
+		flag = false;
+		for (j = 0; j < DECODER_PAGE_SIZE; j++) {
+			entry = rg_base + i * DECODER_PAGE_SIZE + j;
+			if (entry->entry_type != INVALID_ENTRY) {
+				flag = true;
+				break;
+			}
+		}
+		if (flag) {
+			ret = copy_rg_to_pg(decoder, desc, rgtlb_entry,
+					    rg_base, i);
+			if (ret)
+				return ret;
+		}
+	}
+
+	dmam_free_coherent(decoder->dev, RANGE_TABLE_PAGE_SIZE, rg_base,
+			   rg_dma);
+	return 0;
+}
+
+static int rgtlb_unmap_to_page(struct ub_decoder *decoder,
+			       struct page_table_desc *desc,
+			       struct range_table_entry *rgtlb_entry,
+			       u32 index)
+{
+	struct page_entry *page;
+
+	page = (struct page_entry *)desc->page_base + index;
+
+	if (page->entry_type != PAGE) {
+		ub_err(decoder->uent, "decoder unmap page from range table error.\n");
+		return -EINVAL;
+	}
+	page->entry_type = INVALID_ENTRY;
+	desc->count--;
+
+	if (desc->count == 0)
+		rgtlb_free_page(decoder, desc, rgtlb_entry);
+	return 0;
+}
+
+static int rgtlb_unmap(struct ub_decoder *decoder, u32 table_idx,
+		       struct decoder_map_info *info, u64 *offset)
+{
+	struct range_table_entry *rgtlb_entry;
+	struct page_table_desc *desc;
+	u32 sub_idx;
+	u64 begin;
+	u64 size;
+
+	rgtlb_entry = (struct range_table_entry *)decoder->pgtlb.pgtlb_base +
+		      table_idx;
+	desc = decoder->pgtlb.desc_base + table_idx * RGTLB_TO_PGTLB;
+
+	begin = get_rgtlb_addr(decoder, info->pa + *offset);
+	size = (rgtlb_entry->mem_limit - rgtlb_entry->mem_base + 1ULL) * SZ_1M;
+
+	if (begin == rgtlb_entry->mem_base) {
+		*offset += size;
+		if (info->size >= *offset)
+			return rgtlb_unmap_to_range(decoder, desc, rgtlb_entry);
+		ub_err(decoder->uent, "can't unmap part of range\n!");
+		return -EINVAL;
+	}
+	sub_idx = get_rgtlb_page_idx(decoder, info->pa + *offset);
+	*offset += SZ_1M;
+	return rgtlb_unmap_to_page(decoder, desc, rgtlb_entry, sub_idx);
+}
+
 static int handle_range_table(struct ub_decoder *decoder, u64 *offset,
 			      struct decoder_map_info *info, bool is_map)
 {
-	return 0;
+	u32 table_idx;
+
+	table_idx = get_pgtlb_idx(decoder, info->pa + *offset);
+
+	if (is_map)
+		return rgtlb_map(decoder, table_idx, info, offset);
+	else
+		return rgtlb_unmap(decoder, table_idx, info, offset);
 }
 
 static int pgtlb_alloc_page(struct ub_decoder *decoder,

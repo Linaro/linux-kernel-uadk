@@ -616,8 +616,9 @@ int ub_decoder_unmap(struct ub_decoder *decoder, phys_addr_t addr, u64 size)
 	if (size < SZ_1M)
 		size = SZ_1M;
 	ret = handle_table(decoder, &info, false);
-
-	return ret;
+	if (ret)
+		return ret;
+	return ub_decoder_cmd_request(decoder, addr, size, TLBI_PARTIAL);
 }
 
 int ub_decoder_map(struct ub_decoder *decoder, struct decoder_map_info *info)

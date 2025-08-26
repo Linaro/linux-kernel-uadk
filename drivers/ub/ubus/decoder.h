@@ -117,6 +117,8 @@ struct ub_decoder {
 
 void ub_decoder_init(struct ub_entity *uent);
 void ub_decoder_uninit(struct ub_entity *uent);
+void ub_init_decoder_usi(struct ub_entity *uent);
+void ub_uninit_decoder_usi(struct ub_entity *uent);
 int ub_decoder_cmd_request(struct ub_decoder *decoder, phys_addr_t addr,
 			   u64 size, enum ub_cmd_op_type op);
 #endif /* __DECODER_H__ */

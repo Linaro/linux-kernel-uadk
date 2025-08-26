@@ -6,6 +6,8 @@
 #define pr_fmt(fmt)	"ubus decoder: " fmt
 
 #include <linux/dma-mapping.h>
+#include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/ktime.h>
 #include <linux/resource_ext.h>
 
@@ -16,13 +18,20 @@
 
 #define MMIO_SIZE_MASK		GENMASK_ULL(18, 16)
 #define CMDQ_SIZE_MASK		GENMASK_ULL(15, 12)
+#define EVTQ_SIZE_MASK		GENMASK_ULL(7, 4)
 #define MMIO_SIZE_OFFSET	16
 #define CMDQ_SIZE_OFFSET	12
+#define EVTQ_SIZE_OFFSET	4
 
 #define CMDQ_SIZE_USE_MASK	GENMASK(11, 8)
 #define CMDQ_SIZE_USE_OFFSET	8
 #define CMDQ_ENABLE		0x1
 #define CMD_ENTRY_SIZE		16
+
+#define EVTQ_SIZE_USE_MASK	GENMASK(11, 8)
+#define EVTQ_SIZE_USE_OFFSET	8
+#define EVTQ_ENABLE		0x1
+#define EVT_ENTRY_SIZE		16
 
 #define DECODER_PAGE_TABLE_ENTRY_SIZE 8
 
@@ -31,6 +40,7 @@
 static void ub_decoder_uninit_queue(struct ub_decoder *decoder)
 {
 	iounmap(decoder->cmdq.qbase);
+	iounmap(decoder->evtq.qbase);
 }
 
 static int ub_decoder_init_queue(struct ub_bus_controller *ubc,
@@ -47,8 +57,8 @@ static int ub_decoder_init_queue(struct ub_bus_controller *ubc,
 		return -EINVAL;
 	}
 
-	if (decoder->cmdq.qs == 0) {
-		ub_err(uent, "decoder cmdq qs is 0\n");
+	if (decoder->cmdq.qs == 0 || decoder->evtq.qs == 0) {
+		ub_err(uent, "decoder cmdq or evtq qs is 0\n");
 		return -EINVAL;
 	}
 
@@ -57,6 +67,12 @@ static int ub_decoder_init_queue(struct ub_bus_controller *ubc,
 	if (!decoder->cmdq.qbase)
 		return -ENOMEM;
 
+	decoder->evtq.qbase = ioremap(decoder->evtq.base,
+				      (1 << decoder->evtq.qs) * EVT_ENTRY_SIZE);
+	if (!decoder->evtq.qbase) {
+		iounmap(decoder->cmdq.qbase);
+		return -ENOMEM;
+	}
 	return 0;
 }
 
@@ -108,6 +124,24 @@ static u32 set_queue_reg(struct ub_decoder *decoder)
 	val |= CMDQ_ENABLE;
 	ret |= (u32)ub_cfg_write_dword(decoder->uent, DECODER_CMDQ_CFG, val);
 
+	/* init decoder eventq base addr and pi ci */
+	ret |= (u32)ub_cfg_write_dword(decoder->uent, DECODER_EVENTQ_BASE_ADDR0,
+				       lower_32_bits(decoder->evtq.base));
+	ret |= (u32)ub_cfg_write_dword(decoder->uent, DECODER_EVENTQ_BASE_ADDR1,
+				       upper_32_bits(decoder->evtq.base));
+	ret |= (u32)ub_cfg_write_dword(decoder->uent, DECODER_EVENTQ_PROD, 0);
+	ret |= (u32)ub_cfg_write_dword(decoder->uent, DECODER_EVENTQ_CONS, 0);
+
+	/* set decoder eventq conf */
+	ret |= (u32)ub_cfg_read_dword(decoder->uent, DECODER_EVENTQ_CFG, &val);
+	decoder->vals.evtq_cfg_val = val;
+	val &= ~EVTQ_SIZE_USE_MASK;
+	val |= decoder->evtq.qs << EVTQ_SIZE_USE_OFFSET;
+	val |= EVTQ_ENABLE;
+	ret |= (u32)ub_cfg_write_dword(decoder->uent, DECODER_EVENTQ_CFG, val);
+
+	decoder->cmdq.prod.val = 0;
+	decoder->evtq.cons.val = 0;
 	if (ret)
 		ub_err(decoder->uent, "set decoder queue failed\n");
 
@@ -236,7 +270,11 @@ static int ub_get_decoder_cap(struct ub_decoder *decoder)
 
 	decoder->mmio_size_sup = (val & MMIO_SIZE_MASK) >> MMIO_SIZE_OFFSET;
 	decoder->cmdq.qs = (val & CMDQ_SIZE_MASK) >> CMDQ_SIZE_OFFSET;
+	decoder->evtq.qs = (val & EVTQ_SIZE_MASK) >> EVTQ_SIZE_OFFSET;
 
+	ub_dbg(uent, "cmdq_queue_size=%u, evtq_queue_size=%u, mmio_size=%s\n",
+	       decoder->cmdq.qs, decoder->evtq.qs,
+	       mmio_size_desc[decoder->mmio_size_sup]);
 	return 0;
 }
 
@@ -309,10 +347,14 @@ static void unset_queue_reg(struct ub_decoder *decoder)
 
 	ret = (u32)ub_cfg_write_dword(uent, DECODER_CMDQ_CFG,
 				      decoder->vals.cmdq_cfg_val);
+	ret |= (u32)ub_cfg_write_dword(uent, DECODER_EVENTQ_CFG,
+				       decoder->vals.evtq_cfg_val);
 
 	ret |= (u32)ub_cfg_write_dword(uent, DECODER_CMDQ_BASE_ADDR0, 0);
 	ret |= (u32)ub_cfg_write_dword(uent, DECODER_CMDQ_BASE_ADDR1, 0);
 
+	ret |= (u32)ub_cfg_write_dword(uent, DECODER_EVENTQ_BASE_ADDR0, 0);
+	ret |= (u32)ub_cfg_write_dword(uent, DECODER_EVENTQ_BASE_ADDR1, 0);
 	if (ret)
 		ub_err(uent, "unset queue reg failed\n");
 }
@@ -592,6 +634,185 @@ int ub_decoder_cmd_request(struct ub_decoder *decoder, phys_addr_t addr,
 
 	ret = wait_for_cmdq_notify(decoder);
 	return ret;
+}
+
+static bool queue_empty(struct ub_decoder_queue *q)
+{
+	return (Q_IDX(q->qs, q->prod.eventq_wr_idx) ==
+		Q_IDX(q->qs, q->cons.eventq_rd_idx)) &&
+	       (Q_WRP(q->qs, q->prod.eventq_wr_idx) ==
+		Q_WRP(q->qs, q->cons.eventq_rd_idx));
+}
+
+static void queue_inc_cons(struct ub_decoder_queue *q)
+{
+	u32 cons = (Q_WRP(q->qs, q->cons.eventq_rd_idx) |
+		    Q_IDX(q->qs, q->cons.eventq_rd_idx)) + 1;
+	q->cons.eventq_rd_idx = Q_WRP(q->qs, cons) | Q_IDX(q->qs, cons);
+}
+
+enum event_op_type {
+	RESERVED = 0x00,
+	EVENT_ADDR_OUT_OF_RANGE = 0x01,
+	EVENT_ILLEGAL_CMD = 0x02,
+};
+
+#define EVTQ_0_ID		GENMASK_ULL(7, 0)
+#define EVTQ_0_ADDR		GENMASK_ULL(59, 32)
+#define EVTQ_0_CMD_OPCODE	GENMASK_ULL(39, 32)
+#define EVTQ_ENT_DWORDS		2
+#define MAX_REASON_NUM		3
+
+static const char * const cmd_err_reason[MAX_REASON_NUM] = {
+	"no error",
+	"illegal command",
+	"abort error(read command with 2bit ecc)"
+};
+
+static void fix_err_cmd(struct ub_decoder *decoder)
+{
+	struct ub_decoder_queue *cmdq = &(decoder->cmdq);
+	struct ub_entity *uent = decoder->uent;
+	u64 cmd[CMDQ_ENT_DWORDS] = {};
+	struct queue_idx prod, cons;
+	void *pi;
+	int i;
+
+	if (ub_cfg_read_dword(uent, DECODER_CMDQ_CONS, &cons.val)) {
+		ub_err(uent, "decoder fix error cmd, read ci failed\n");
+		return;
+	}
+	if (ub_cfg_read_dword(uent, DECODER_CMDQ_PROD, &prod.val)) {
+		ub_err(uent, "decoder fix error cmd, read pi failed\n");
+		return;
+	}
+
+	cmd[0] |= FIELD_PREP(CMD_0_OP, TLBI_ALL);
+	pi = cmdq->qbase + Q_IDX(cmdq->qs, cons.cmdq_rd_idx) *
+	     sizeof(struct tlbi_partial_entry);
+
+	for (i = 0; i < CMDQ_ENT_DWORDS; i++)
+		writeq(cmd[i], pi + i * sizeof(u64));
+
+	if (cons.cmdq_err_reason >= MAX_REASON_NUM)
+		ub_err(uent, "cmdq err reason is invalid, reason=%u\n",
+			cons.cmdq_err_reason);
+	else
+		ub_err(uent, "cmdq err reason is %s\n", cmd_err_reason[cons.cmdq_err_reason]);
+
+	prod.cmdq_err_resp = cons.cmdq_err;
+
+	if (ub_cfg_write_dword(uent, DECODER_CMDQ_PROD, prod.val))
+		ub_err(uent, "decoder fix error cmd, write pi err resp failed\n");
+}
+
+static void handle_evt(struct ub_decoder *decoder, u64 *evt)
+{
+	struct ub_entity *uent = decoder->uent;
+
+	switch (FIELD_GET(EVTQ_0_ID, evt[0])) {
+	case EVENT_ADDR_OUT_OF_RANGE:
+		ub_err(uent, "decoder event, input addr out of range, addr=%#.7x00000\n",
+		       (u32)FIELD_GET(EVTQ_0_ADDR, evt[0]));
+		break;
+	case EVENT_ILLEGAL_CMD:
+		ub_err(uent, "decoder event, illegal cmd, cmd_opcode=%#x\n",
+		       (u32)FIELD_GET(EVTQ_0_CMD_OPCODE, evt[0]));
+		fix_err_cmd(decoder);
+		break;
+	default:
+		ub_err(uent, "invalid event opcode, opcode=%#x\n",
+		       (u32)FIELD_GET(EVTQ_0_ID, evt[0]));
+	}
+}
+
+static void decoder_event_deal(struct ub_decoder *decoder)
+{
+	struct ub_decoder_queue *evtq = &decoder->evtq;
+	struct ub_entity *uent = decoder->uent;
+	u64 evt[EVTQ_ENT_DWORDS];
+	void *ci;
+	int i;
+
+	if (ub_cfg_read_dword(uent, DECODER_EVENTQ_PROD, &(evtq->prod.val))) {
+		ub_err(uent, "decoder handle event, read eventq pi failed\n");
+		return;
+	}
+
+	while (!queue_empty(evtq)) {
+		ci = evtq->qbase + Q_IDX(evtq->qs, evtq->cons.eventq_rd_idx) *
+		     EVT_ENTRY_SIZE;
+
+		for (i = 0; i < EVTQ_ENT_DWORDS; i++)
+			evt[i] = readq(ci + i * sizeof(u64));
+
+		handle_evt(decoder, evt);
+		queue_inc_cons(evtq);
+
+		if (ub_cfg_write_dword(uent, DECODER_EVENTQ_CONS,
+				       evtq->cons.val))
+			ub_err(uent, "decoder handle event, write eventq ci failed\n");
+	}
+}
+
+static irqreturn_t decoder_event_deal_handle(int irq, void *data)
+{
+	struct ub_entity *uent = (struct ub_entity *)data;
+	struct ub_decoder *decoder = uent->ubc->decoder;
+
+	if (!decoder) {
+		ub_err(uent, "decoder does not exist\n");
+		return IRQ_HANDLED;
+	}
+
+	decoder_event_deal(decoder);
+	return IRQ_HANDLED;
+}
+
+void ub_init_decoder_usi(struct ub_entity *uent)
+{
+	int irq_num, ret;
+	u32 usi_idx;
+
+	if (!uent->ubc->decoder) {
+		ub_err(uent, "decoder not exist, can't init usi\n");
+		return;
+	}
+
+	ret = ub_cfg_read_dword(uent, DECODER_USI_IDX, &usi_idx);
+	if (ret) {
+		ub_err(uent, "get decoder usi idx failed\n");
+		return;
+	}
+
+	irq_num = ub_irq_vector(uent, usi_idx);
+	if (irq_num < 0) {
+		ub_err(uent, "ub get irq vector failed, ret=%d\n", irq_num);
+		return;
+	}
+
+	ret = request_irq((unsigned int)irq_num, decoder_event_deal_handle,
+			  IRQF_SHARED, "decoder_event_handle", (void *)uent);
+	if (ret)
+		ub_err(uent, "decoder request_irq failed, ret=%d\n", ret);
+	else
+		uent->ubc->decoder->irq_num = irq_num;
+}
+
+void ub_uninit_decoder_usi(struct ub_entity *uent)
+{
+	int irq_num;
+
+	if (!uent->ubc->decoder) {
+		ub_err(uent, "decoder not exist, can't uninit usi\n");
+		return;
+	}
+
+	irq_num = uent->ubc->decoder->irq_num;
+	if (irq_num < 0)
+		return;
+
+	free_irq((unsigned int)irq_num, (void *)uent);
 }
 
 void ub_decoder_init(struct ub_entity *uent)

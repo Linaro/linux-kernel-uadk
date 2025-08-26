@@ -6,6 +6,10 @@
 #ifndef __OMM_H__
 #define __OMM_H__
 
+#include <linux/types.h>
+
+extern u8 ubc_feature;
+
 struct decoder_map_info {
 	phys_addr_t pa;
 	phys_addr_t uba;

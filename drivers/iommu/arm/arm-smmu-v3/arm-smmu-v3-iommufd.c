@@ -417,7 +417,8 @@ size_t arm_smmu_get_viommu_size(struct device *dev,
 	 * effected.
 	 */
 	if (!arm_smmu_master_canwbs(master) &&
-	    !(smmu->features & ARM_SMMU_FEAT_S2FWB))
+	    !(smmu->features & ARM_SMMU_FEAT_S2FWB) &&
+	    !device_property_read_bool(dev, "canwbs"))
 		return 0;
 
 	if (viommu_type == IOMMU_VIOMMU_TYPE_ARM_SMMUV3)

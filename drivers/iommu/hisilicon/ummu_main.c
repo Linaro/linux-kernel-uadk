@@ -1,0 +1,637 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright (c) 2025 HiSilicon Technologies Co., Ltd. All rights reserved.
+ * Description: UMMU Device's implementations
+ */
+
+#define pr_fmt(fmt) "UMMU: " fmt
+
+#include <linux/module.h>
+#include <linux/platform_device.h>
+#include <linux/iopoll.h>
+#include <ub/ubfi/ubfi.h>
+
+#include "regs.h"
+#include "ummu.h"
+
+#define UMMU_DRV_NAME "ummu"
+
+int ummu_write_reg_sync(struct ummu_device *ummu, u32 val,
+			u32 reg_off, u32 ack_off)
+{
+	u32 reg;
+
+	writel_relaxed(val, ummu->base + reg_off);
+	return readl_relaxed_poll_timeout(ummu->base + ack_off, reg, reg == val,
+					  1, UMMU_REG_POLL_TIMEOUT_US);
+}
+
+static int ummu_update_gbpa(struct ummu_device *ummu, u32 set,
+			    u32 clr)
+{
+	void __iomem *gbpa = ummu->base + UMMU_GBPA;
+	u32 reg;
+	int ret;
+
+	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE_BIT), 1,
+					 UMMU_REG_POLL_TIMEOUT_US);
+	if (ret)
+		return ret;
+
+	reg &= ~clr;
+	reg |= set;
+	writel_relaxed(reg | GBPA_UPDATE_BIT, gbpa);
+	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE_BIT), 1,
+					 UMMU_REG_POLL_TIMEOUT_US);
+	if (ret)
+		dev_err(ummu->dev, "GBPA not responding to update\n");
+	return ret;
+}
+
+static int ummu_ioremap(struct ummu_device *ummu, resource_size_t start,
+			resource_size_t size)
+{
+	struct resource res = DEFINE_RES_MEM(start, size);
+
+	ummu->base = devm_ioremap_resource(ummu->dev, &res);
+	if (IS_ERR(ummu->base))
+		return PTR_ERR(ummu->base);
+
+	return 0;
+}
+
+static int ummu_device_register(struct ummu_device *ummu)
+{
+	int ret;
+
+	ret = iommu_device_sysfs_add(&ummu->core_dev.iommu, ummu->dev, NULL,
+				     "%s", dev_name(ummu->dev));
+	if (ret)
+		dev_err(ummu->dev, "add iommu sysfs failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
+static void ummu_device_unregister(struct ummu_device *ummu)
+{
+	iommu_device_sysfs_remove(&ummu->core_dev.iommu);
+}
+
+static void ummu_device_hw_probe_ver(struct ummu_device *ummu)
+{
+	u32 reg = readl_relaxed(ummu->base + UMMU_IIDR);
+
+	ummu->cap.prod_ver = (u16)FIELD_GET(IIDR_PROD_ID, reg);
+	/*
+	 * On the hisi chip with IIDR_PROD_ID set to 0,
+	 * ummu enables special_identify to perform some
+	 * specialized operations.
+	 */
+	if (!ummu->cap.prod_ver) {
+		ummu->cap.options |= UMMU_OPT_DOUBLE_PLBI;
+		ummu->cap.features &= ~UMMU_FEAT_STALLS;
+	}
+}
+
+static void ummu_device_hw_probe_cap0(struct ummu_device *ummu)
+{
+	u32 reg, pasids, ubrt_pasids, cap_pasids;
+
+	reg = readl_relaxed(ummu->base + UMMU_CAP0);
+
+	/* 2-level tect structures */
+	if (reg & CAP0_TECT_LVL_BIT)
+		ummu->cap.features |= UMMU_FEAT_2_LVL_TECT;
+
+	/* 2-level tct structures */
+	if (reg & CAP0_TCT_LVL_BIT)
+		ummu->cap.features |= UMMU_FEAT_2_LVL_TCT;
+
+	/* TID size */
+	ummu->cap.tid_bits = FIELD_GET(CAP0_TIDSIZE_MASK, reg);
+	/* The tid cap should follow the UB protocol */
+	ubrt_pasids = ummu->core_dev.iommu.max_pasids;
+	cap_pasids = 1 << ummu->cap.tid_bits;
+	if (ubrt_pasids > cap_pasids)
+		pr_warn("ubrt max_pasids[%u] beyond capacity.\n", ubrt_pasids);
+	pasids = min(cap_pasids, (1UL << UB_MAX_TID_BITS));
+	ummu->core_dev.iommu.max_pasids = min(ubrt_pasids, pasids);
+	/* TECTE_TAG size */
+	ummu->cap.deid_bits = FIELD_GET(CAP0_DEIDSIZE_MASK, reg);
+}
+
+static void ummu_device_hw_probe_cap1(struct ummu_device *ummu)
+{
+	u32  reg = readl_relaxed(ummu->base + UMMU_CAP1);
+
+	/* Maximum number of outstanding stalls */
+	ummu->evtq.max_stalls = FIELD_GET(CAP1_STALL_MAX, reg);
+
+	/* Support generation of WFE wake-up events to PE */
+	if (reg & CAP1_EVENT_GEN)
+		ummu->cap.features |= UMMU_FEAT_SEV;
+
+	/* MCMDQ's support, numbers and depth */
+	if (reg & CAP1_MCMDQ_SUPPORT) {
+		ummu->cap.features |= UMMU_FEAT_MCMDQ;
+		ummu->cap.mcmdq_log2num = FIELD_GET(CAP1_MCMDQ_LOG2NUM, reg);
+		ummu->cap.mcmdq_log2size = min(FIELD_GET(CAP1_MCMDQ_LOG2SIZE, reg),
+					       MCMDQ_MAX_LOG2SIZE);
+	}
+
+	/* EVENTQ's support, numbers and depth */
+	if (reg & CAP1_EVENTQ_SUPPORT) {
+		ummu->cap.features |= UMMU_FEAT_EVENTQ;
+		ummu->cap.evtq_log2num = FIELD_GET(CAP1_EVENTQ_LOG2NUM, reg);
+		ummu->cap.evtq_log2size = min(FIELD_GET(CAP1_EVENTQ_LOG2SIZE, reg),
+					      EVTQ_MAX_LOG2SIZE);
+
+	}
+}
+
+static int ummu_device_get_ttf(struct ummu_device *ummu, u32 reg)
+{
+	switch (FIELD_GET(CAP2_TTF_MASK, reg)) {
+	case CAP2_TTF_AARCH32_64:
+		ummu->cap.ias = CAP2_TTF_IAS_40;
+		break;
+	case CAP2_TTF_AARCH64:
+		break;
+	default:
+		dev_err(ummu->dev, "page table format not supported!\n");
+		return -ENXIO;
+	}
+	return 0;
+}
+
+static int ummu_device_get_trans_stage(struct ummu_device *ummu, u32 reg)
+{
+	if (!(reg & (CAP2_S1P_BIT | CAP2_S2P_BIT))) {
+		dev_err(ummu->dev, "no translation stage support!\n");
+		return -ENXIO;
+	}
+
+	if (reg & CAP2_S1P_BIT)
+		ummu->cap.features |= UMMU_FEAT_TRANS_S1;
+
+	if (reg & CAP2_S2P_BIT)
+		ummu->cap.features |= UMMU_FEAT_TRANS_S2;
+
+	if ((ummu->cap.features & UMMU_FEAT_TRANS_S1) &&
+	    (ummu->cap.features & UMMU_FEAT_TRANS_S2))
+		ummu->cap.features |= UMMU_FEAT_NESTING;
+
+	return 0;
+}
+
+static void ummu_device_get_pgsize(struct ummu_device *ummu, u32 reg)
+{
+	/* page sizes */
+	if (reg & CAP2_GRAN64K_BIT)
+		ummu->cap.pgsize_bitmap |= SZ_64K | SZ_512M;
+	if (reg & CAP2_GRAN16K_BIT)
+		ummu->cap.pgsize_bitmap |= SZ_16K | SZ_32M;
+	if (reg & CAP2_GRAN4K_BIT)
+		ummu->cap.pgsize_bitmap |= SZ_4K | SZ_2M | SZ_1G;
+}
+
+static void ummu_device_get_oas(struct ummu_device *ummu, u32 reg)
+{
+	/* output address size */
+	switch (FIELD_GET(CAP2_OAS_MASK, reg)) {
+	case CAP2_OAS_32_BIT:
+		ummu->cap.oas = CAP2_TTF_OAS_32;
+		break;
+	case CAP2_OAS_36_BIT:
+		ummu->cap.oas = CAP2_TTF_OAS_36;
+		break;
+	case CAP2_OAS_40_BIT:
+		ummu->cap.oas = CAP2_TTF_OAS_40;
+		break;
+	case CAP2_OAS_42_BIT:
+		ummu->cap.oas = CAP2_TTF_OAS_42;
+		break;
+	case CAP2_OAS_44_BIT:
+		ummu->cap.oas = CAP2_TTF_OAS_44;
+		break;
+	default:
+		dev_warn(ummu->dev,
+			 "unknown output address size. truncating to 48-bit\n");
+		fallthrough;
+	case CAP2_OAS_48_BIT:
+		ummu->cap.oas = CAP2_TTF_OAS_48;
+		break;
+	}
+}
+
+static int ummu_device_hw_probe_cap2(struct ummu_device *ummu)
+{
+	u32 reg = readl_relaxed(ummu->base + UMMU_CAP2);
+	int ret = ummu_device_get_ttf(ummu, reg);
+
+	if (ret)
+		return ret;
+
+	ret = ummu_device_get_trans_stage(ummu, reg);
+	if (ret)
+		return ret;
+
+	/* input address size */
+	if (FIELD_GET(CAP2_VA_EXT_MASK, reg) == CAP2_VA_EXT_52)
+		ummu->cap.features |= UMMU_FEAT_VAX;
+
+	ummu_device_get_pgsize(ummu, reg);
+
+	ummu_device_get_oas(ummu, reg);
+
+	ummu->cap.ias = max(ummu->cap.ias, ummu->cap.oas);
+
+	if (FIELD_GET(CAP2_RTLBI_BIT, reg))
+		ummu->cap.features |= UMMU_FEAT_RANGE_INV;
+
+	if (FIELD_GET(CAP2_BTLBI_BIT, reg))
+		ummu->cap.features |= UMMU_FEAT_BTM;
+	else
+		dev_warn(ummu->dev, "don't support BTM!\n");
+	return 0;
+}
+
+static void ummu_device_get_stall_model(struct ummu_device *ummu, u32 reg)
+{
+	switch (FIELD_GET(CAP3_STALL_MODEL_MASK, reg)) {
+	case CAP3_STALL_MODE_FORCE:
+		ummu->cap.features |= UMMU_FEAT_STALL_FORCE;
+		fallthrough;
+	case CAP3_STALL_MODE:
+		ummu->cap.features |= UMMU_FEAT_STALLS;
+	default:
+		break;
+	}
+}
+
+static void ummu_device_get_httu(struct ummu_device *ummu, u32 reg)
+{
+	switch (FIELD_GET(CAP3_HTTU_MASK, reg)) {
+	case CAP3_HTTU_ACCESS_DIRTY:
+		ummu->cap.features |= UMMU_FEAT_HD;
+		fallthrough;
+	case CAP3_HTTU_ACCESS:
+		ummu->cap.features |= UMMU_FEAT_HA;
+	default:
+		break;
+	}
+}
+
+static int ummu_device_get_ttendian(struct ummu_device *ummu, u32 reg)
+{
+	switch (FIELD_GET(CAP3_TTENDIAN_MASK, reg)) {
+	case CAP3_TTENDIAN_MIXED:
+		ummu->cap.features |= UMMU_FEAT_TT_LE | UMMU_FEAT_TT_BE;
+		break;
+#ifdef __BIG_ENDIAN
+	case CAP3_TTENDIAN_BE:
+		break;
+#else
+	case CAP3_TTENDIAN_LE:
+		break;
+#endif
+	default:
+		dev_err(ummu->dev, "unknown/unsupported TT endianness!\n");
+		return -ENXIO;
+	}
+	return 0;
+}
+
+static void ummu_device_get_bbm_level(struct ummu_device *ummu, u32 reg)
+{
+	switch (FIELD_GET(CAP3_BBML_MASK, reg)) {
+	case CAP3_BBML0:
+		break;
+	case CAP3_BBML1:
+		ummu->cap.features |= UMMU_FEAT_BBML1;
+		break;
+	case CAP3_BBML2:
+		ummu->cap.features |= UMMU_FEAT_BBML2;
+		break;
+	default:
+		dev_warn(ummu->dev, "unknown/unsupported BBM behavior level\n");
+	}
+}
+
+static int ummu_device_hw_probe_cap3(struct ummu_device *ummu)
+{
+	u32 reg = readl_relaxed(ummu->base + UMMU_CAP3);
+	int ret;
+
+	ummu_device_get_stall_model(ummu, reg);
+
+	if (reg & CAP3_MSI_SUPPORT_BIT)
+		ummu->cap.features |= UMMU_FEAT_MSI;
+
+	if (reg & CAP3_HYP_S1CTX_BIT) {
+		ummu->cap.features |= UMMU_FEAT_HYP;
+		if (cpus_have_cap(ARM64_HAS_VIRT_HOST_EXTN)) {
+			ummu->cap.features |= UMMU_FEAT_E2H;
+			pr_debug("support hypervisor and E2H\n");
+		}
+	}
+
+	ummu_device_get_httu(ummu, reg);
+
+	if (reg & CAP3_MTM_BIT)
+		ummu->cap.features |= UMMU_FEAT_MTM;
+
+	ret = ummu_device_get_ttendian(ummu, reg);
+	if (ret)
+		return ret;
+
+	if (reg & CAP3_COHACC_BIT) {
+		ummu->cap.features |= UMMU_FEAT_COHERENCY;
+		if (ummu->cap.features & UMMU_FEAT_MSI)
+			ummu->cap.options |= UMMU_OPT_MSIPOLL;
+	}
+
+	ummu_device_get_bbm_level(ummu, reg);
+
+	return 0;
+}
+
+static int ummu_device_hw_probe_cap4(struct ummu_device *ummu)
+{
+	u32 reg = readl_relaxed(ummu->base + UMMU_CAP4);
+	int hw_permq_ent;
+
+	hw_permq_ent = 1 << FIELD_GET(CAP4_UCMDQ_LOG2SIZE, reg);
+	ummu->cap.permq_ent_num.cmdq_num = hw_permq_ent;
+
+	hw_permq_ent = 1 << FIELD_GET(CAP4_UCPLQ_LOG2SIZE, reg);
+	ummu->cap.permq_ent_num.cplq_num = hw_permq_ent;
+
+	return 0;
+}
+
+static void ummu_device_hw_probe_cap5(struct ummu_device *ummu)
+{
+	u32 reg = readl_relaxed(ummu->base + UMMU_CAP5);
+
+	if (reg & CAP5_RANGE_PLBI_BIT)
+		ummu->cap.features |= UMMU_FEAT_RANGE_PLBI;
+
+	if (reg & CAP5_MAPT_SUPPORT)
+		ummu->cap.support_mapt = true;
+
+	if (reg & CAP5_PT_GRAN4K_BIT)
+		ummu->cap.ptsize_bitmap |= SZ_4K;
+
+	if (reg & CAP5_PT_GRAN2M_BIT)
+		ummu->cap.ptsize_bitmap |= SZ_2M;
+
+	if (reg & CAP5_TKVALCHK_BIT)
+		ummu->cap.features |= UMMU_FEAT_TOKEN_CHK;
+
+	/*
+	 * the ASID and VMID capabilities are determined based on
+	 * the bit widths of the ASID and VMID in the configuration table.
+	 */
+	ummu->cap.asid_bits = ilog2(UMMU_MAX_ASIDS);
+	ummu->cap.vmid_bits = ilog2(UMMU_MAX_VMIDS);
+
+	dev_info(ummu->dev, "ias = %u-bit, oas = %u-bit, features = 0x%08x.\n",
+		 ummu->cap.ias, ummu->cap.oas, ummu->cap.features);
+}
+
+static void ummu_device_hw_probe_cap6(struct ummu_device *ummu)
+{
+	u32 reg;
+
+	if (ummu->cap.features & UMMU_FEAT_MTM) {
+		reg = readl_relaxed(ummu->base + UMMU_CAP6);
+		ummu->cap.mtm_id_max = FIELD_GET(CAP6_MTM_ID_MAX, reg);
+		ummu->cap.mtm_gp_max = FIELD_GET(CAP6_MTM_GP_MAX, reg);
+	}
+	dev_dbg(ummu->dev, "partid_max %u, pmg_max %u.\n", ummu->cap.mtm_id_max,
+		ummu->cap.mtm_gp_max);
+}
+
+static int ummu_device_hw_init(struct ummu_device *ummu)
+{
+	int ret;
+
+	ummu_device_hw_probe_cap0(ummu);
+	ummu_device_hw_probe_cap1(ummu);
+
+	ret = ummu_device_hw_probe_cap2(ummu);
+	if (ret)
+		return ret;
+
+	ret = ummu_device_hw_probe_cap3(ummu);
+	if (ret)
+		return ret;
+
+	ret = ummu_device_hw_probe_cap4(ummu);
+	if (ret)
+		return ret;
+
+	ummu_device_hw_probe_cap5(ummu);
+	ummu_device_hw_probe_cap6(ummu);
+	ummu_device_hw_probe_ver(ummu);
+
+	return 0;
+}
+
+static void ummu_device_sync(struct ummu_device *ummu)
+{
+	u32 reg = readl_relaxed(ummu->base + UMMU_CR0);
+
+	if (reg & CR0_UMMU_EN) {
+		dev_warn(ummu->dev, "ummu currently enabled! Resetting...\n");
+		ummu_update_gbpa(ummu, GBPA_ABORT_BIT, 0);
+	}
+}
+
+static int ummu_device_disable(struct ummu_device *ummu)
+{
+	int ret;
+
+	ret = ummu_write_reg_sync(ummu, 0, UMMU_CR0, UMMU_CR0ACK);
+	if (ret)
+		dev_err(ummu->dev, "disable ummu interface failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
+static int ummu_device_enable(struct ummu_device *ummu)
+{
+	int ret;
+	u32 cr0;
+
+	cr0 = readl_relaxed(ummu->base + UMMU_CR0);
+	cr0 |= CR0_UMMU_EN;
+	ret = ummu_write_reg_sync(ummu, cr0, UMMU_CR0, UMMU_CR0ACK);
+	if (ret)
+		dev_err(ummu->dev, "enable ummu interface failed.\n");
+
+	return ret;
+}
+
+static void ummu_device_set_mem_attr(struct ummu_device *ummu)
+{
+	u32 reg;
+
+	reg = CR1_TECT_MODE_SEL | CR1_E2H |
+	      FIELD_PREP(CR1_TABLE_SH, UMMU_SH_ISH) |
+	      FIELD_PREP(CR1_TABLE_OC, UMMU_CACHE_WB) |
+	      FIELD_PREP(CR1_TABLE_IC, UMMU_CACHE_WB) |
+	      FIELD_PREP(CR1_QUEUE_SH, UMMU_SH_ISH) |
+	      FIELD_PREP(CR1_QUEUE_OC, UMMU_CACHE_WB) |
+	      FIELD_PREP(CR1_QUEUE_IC, UMMU_CACHE_WB);
+
+	writel_relaxed(reg, ummu->base + UMMU_CR1);
+}
+
+static int ummu_device_reset(struct ummu_device *ummu)
+{
+	int ret;
+
+	ummu_device_sync(ummu);
+
+	ret = ummu_device_disable(ummu);
+	if (ret)
+		return ret;
+
+	/* set configuration table and queue memory attributes */
+	ummu_device_set_mem_attr(ummu);
+
+	return ummu_device_enable(ummu);
+}
+
+static int ummu_device_ubrt_probe(struct ummu_device *ummu)
+{
+	struct fwnode_handle *fwnode = dev_fwnode(ummu->dev);
+	struct ubrt_fwnode *fw;
+	struct ummu_node *node;
+
+	if (!fwnode)
+		return -EINVAL;
+
+	fw = ubrt_fwnode_get(fwnode);
+	if (!fw) {
+		dev_err(ummu->dev, "get ubrt fwnode failed!\n");
+		return -ENXIO;
+	}
+
+	if (fw->type != UBRT_UMMU) {
+		dev_err(ummu->dev, "get invalid ubct type!\n");
+		return -ESPIPE;
+	}
+
+	node = (struct ummu_node *)fw->ubrt_node;
+
+	ummu->core_dev.iommu.min_pasids = node->min_tid;
+	ummu->core_dev.iommu.max_pasids = node->max_tid;
+
+	return 0;
+}
+
+static int ummu_device_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct ummu_device *ummu;
+	struct resource *res;
+	int ret;
+
+	ummu = devm_kzalloc(dev, sizeof(*ummu), GFP_KERNEL);
+	if (!ummu)
+		return -ENOMEM;
+
+	ummu->dev = dev;
+
+	ret = ummu_device_ubrt_probe(ummu);
+	if (ret) {
+		dev_err(dev, "failed to probe ummu_node: %d\n", ret);
+		return ret;
+	}
+
+	/* Base address */
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res) {
+		dev_err(dev, "IO resource is null\n");
+		return -EINVAL;
+	}
+
+	/*
+	 * Don't map the IMPLEMENTATION DEFINED regions, since they may contain
+	 * the root registers which are reserved by the bios.
+	 */
+	ret = ummu_ioremap(ummu, res->start, UMMU_REG_SZ);
+	if (ret)
+		return ret;
+
+	/* hardware init */
+	ret = ummu_device_hw_init(ummu);
+	if (ret)
+		return ret;
+
+	/* record ummu device */
+	platform_set_drvdata(pdev, ummu);
+
+	ret = ummu_device_reset(ummu);
+	if (ret)
+		return ret;
+
+	ret = ummu_device_register(ummu);
+	if (ret)
+		dev_err(dev, "probe ummu device failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
+static int ummu_device_remove(struct platform_device *pdev)
+{
+	struct ummu_device *ummu = platform_get_drvdata(pdev);
+
+	ummu_device_disable(ummu);
+	ummu_device_unregister(ummu);
+
+	dev_dbg(&pdev->dev, "Remove ummu successful!\n");
+	return 0;
+}
+
+static void ummu_device_shutdown(struct platform_device *pdev)
+{
+	struct ummu_device *ummu = platform_get_drvdata(pdev);
+
+	ummu_device_disable(ummu);
+}
+
+static const struct of_device_id hisi_ummu_of_match[] = {
+	{ .compatible = "ub,ummu", },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, hisi_ummu_of_match);
+
+static const struct acpi_device_id hisi_ummu_acpi_match[] = {
+	{ "HISI0551", 0 },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, hisi_ummu_acpi_match);
+
+struct platform_driver ummu_driver = {
+	.driver = {
+		.name = UMMU_DRV_NAME,
+		.suppress_bind_attrs = true,
+		.of_match_table = hisi_ummu_of_match,
+		.acpi_match_table = hisi_ummu_acpi_match,
+	},
+	.probe = ummu_device_probe,
+	.remove = ummu_device_remove,
+	.shutdown = ummu_device_shutdown,
+};
+
+module_driver(ummu_driver, platform_driver_register, platform_driver_unregister);
+
+MODULE_IMPORT_NS(UMMU_CORE_DRIVER);
+MODULE_DESCRIPTION("Hisilicon ummu driver");
+MODULE_AUTHOR("HiSilicon Tech. Co., Ltd.");
+MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:" UMMU_DRV_NAME);

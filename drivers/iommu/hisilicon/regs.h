@@ -1,0 +1,155 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
+/* Copyright (c) 2025 HiSilicon Technologies Co., Ltd. All rights reserved. */
+
+#ifndef __UMMU_REGS_H__
+#define __UMMU_REGS_H__
+
+#define UMMU_REG_SZ 0x5000
+
+/* MMIO registers */
+#define UMMU_IIDR 0x0
+#define IIDR_PROD_ID GENMASK(19, 8)
+#define IIDR_PROD_VARIANT GENMASK(7, 4)
+#define UMMU_AIDR 0x4
+
+#define UMMU_CAP0 0x10
+#define CAP0_TECT_LVL_BIT (1UL << 19)
+#define CAP0_TECT_MODE_MASK GENMASK(18, 17)
+#define CAP0_TCT_LVL_BIT (1UL << 16)
+#define CAP0_S2_ATTR_TYPE (1UL << 15)
+#define CAP0_ATTR_TYPES_OVR (1UL << 14)
+#define CAP0_ATTR_PERMS_OVR (1UL << 13)
+#define CAP0_TIDSIZE_MASK GENMASK(12, 8)
+#define CAP0_DEIDSIZE_MASK GENMASK(7, 0)
+
+#define UMMU_CAP1 0x14
+#define CAP1_STALL_MAX GENMASK(31, 20)
+#define CAP1_EVENT_GEN (1UL << 19)
+#define CAP1_MCMDQ_SUPPORT (1UL << 18)
+#define CAP1_MCMDQ_LOG2NUM GENMASK(17, 14)
+#define CAP1_MCMDQ_LOG2SIZE GENMASK(13, 10)
+#define MCMDQ_MAX_LOG2SIZE 15
+#define CAP1_EVENTQ_SUPPORT (1UL << 9)
+#define CAP1_EVENTQ_LOG2NUM GENMASK(8, 5)
+#define CAP1_EVENTQ_LOG2SIZE GENMASK(4, 0)
+#define EVTQ_MAX_LOG2SIZE 19
+
+#define UMMU_CAP2 0x18
+#define CAP2_TTF_MASK GENMASK(15, 14)
+#define CAP2_TTF_IAS_40 40
+#define CAP2_TTF_AARCH64 2
+#define CAP2_TTF_AARCH32_64 3
+#define CAP2_TRANS_SMALL_BIT (1UL << 13)
+#define CAP2_S1P_BIT (1UL << 12)
+#define CAP2_S2P_BIT (1UL << 11)
+#define CAP2_VA_EXT_MASK GENMASK(10, 9)
+#define CAP2_VA_EXT_52 1
+#define CAP2_GRAN64K_BIT (1UL << 8)
+#define CAP2_GRAN16K_BIT (1UL << 7)
+#define CAP2_GRAN4K_BIT (1UL << 6)
+#define CAP2_OAS_MASK GENMASK(5, 3)
+#define CAP2_OAS_32_BIT 0
+#define CAP2_OAS_36_BIT 1
+#define CAP2_OAS_40_BIT 2
+#define CAP2_OAS_42_BIT 3
+#define CAP2_OAS_44_BIT 4
+#define CAP2_OAS_48_BIT 5
+#define CAP2_TTF_OAS_32 32
+#define CAP2_TTF_OAS_36 36
+#define CAP2_TTF_OAS_40 40
+#define CAP2_TTF_OAS_42 42
+#define CAP2_TTF_OAS_44 44
+#define CAP2_TTF_OAS_48 48
+#define CAP2_RTLBI_BIT (1UL << 2)
+#define CAP2_BTLBI_BIT (1UL << 1)
+#define CAP2_VMIDTLBI_BIT (1UL << 0)
+
+#define UMMU_CAP3 0x1C
+#define CAP3_SATIMAX_MASK GENMASK(20, 15)
+#define CAP3_TERM_MODEL_BIT (1UL << 14)
+#define CAP3_STALL_MODEL_MASK GENMASK(13, 12)
+#define CAP3_STALL_MODE 0
+#define CAP3_STALL_MODE_FORCE 2
+#define CAP3_MSI_SUPPORT_BIT (1UL << 11)
+#define CAP3_HYP_S1CTX_BIT (1UL << 10)
+#define CAP3_HTTU_MASK GENMASK(9, 8)
+#define CAP3_HTTU_ACCESS_DIRTY 2
+#define CAP3_HTTU_ACCESS 1
+#define CAP3_MTM_BIT (1UL << 7)
+#define CAP3_TTENDIAN_MASK GENMASK(6, 5)
+#define CAP3_TTENDIAN_MIXED 0
+#define CAP3_TTENDIAN_LE 2
+#define CAP3_TTENDIAN_BE 3
+#define CAP3_COHACC_BIT (1UL << 4)
+#define CAP3_BBML_MASK GENMASK(3, 2)
+#define CAP3_BBML0 0
+#define CAP3_BBML1 1
+#define CAP3_BBML2 2
+#define CAP3_S2_EXE_NEVER_CTRL_BIT (1UL << 1)
+#define CAP3_HIER_ARRT_DISABLE_BIT (1UL << 0)
+
+#define UMMU_CAP4 0x20
+#define CAP4_UEQ_SUPPORT (1UL << 24)
+#define CAP4_UEQ_LOG2NUM GENMASK(23, 20)
+#define CAP4_UEQ_LOG2SIZE GENMASK(19, 16)
+#define CAP4_UCPLQ_LOG2SIZE GENMASK(15, 12)
+#define CAP4_UCMDQ_LOG2SIZE GENMASK(11, 8)
+#define CAP4_UCMDQ_CPLQ_LOG2NUM GENMASK(7, 0)
+
+#define UMMU_CAP5 0x24
+#define CAP5_BRDCAST_PLBI_BIT (1UL << 9)
+#define CAP5_RANGE_PLBI_BIT (1UL << 8)
+#define CAP5_TKVALCHK_MOD GENMASK(7, 6)
+#define CAP5_TKVALCHK_BIT (1UL << 5)
+#define CAP5_PT_GRAN4K_BIT (1UL << 4)
+#define CAP5_PT_GRAN2M_BIT (1UL << 3)
+#define CAP5_MAPT_MODE_MASK GENMASK(2, 1)
+#define CAP5_MAPT_SUPPORT (1UL << 0)
+
+#define UMMU_CAP6 0x28
+#define CAP6_MTM_GP_MAX GENMASK(23, 16)
+#define CAP6_MTM_ID_MAX GENMASK(15, 0)
+
+#define UMMU_CR0 0x30
+#define UMMU_CR0ACK 0x34
+#define CR0_MAPT_EN (1UL << 5)
+#define CR0_VMID_WILDCARD_MASK GENMASK(4, 2)
+#define CR0_EVENTQ_EN (1UL << 1)
+#define CR0_UMMU_EN (1UL << 0)
+
+#define UMMU_CR1 0x38
+#define CR1_TECT_MODE_SEL (1UL << 15)
+#define CR1_PRIVATE_TLB (1UL << 14)
+#define CR1_BAD_EID_RECORD (1UL << 13)
+#define CR1_E2H (1UL << 12)
+#define CR1_TABLE_SH GENMASK(11, 10)
+#define CR1_TABLE_OC GENMASK(9, 8)
+#define CR1_TABLE_IC GENMASK(7, 6)
+#define CR1_QUEUE_SH GENMASK(5, 4)
+#define CR1_QUEUE_OC GENMASK(3, 2)
+#define CR1_QUEUE_IC GENMASK(1, 0)
+
+#define UMMU_CR2 0x3C
+#define CR2_PRIVATE_PLB (1UL << 6)
+#define CR2_UE_QUEUE_SH GENMASK(5, 4)
+#define CR2_UE_QUEUE_OC GENMASK(3, 2)
+#define CR2_UE_QUEUE_IC GENMASK(1, 0)
+
+#define UMMU_CR3 0x40
+#define CR3_UPDATE_FLAG (1UL << 31)
+#define CR3_TRANS_MTM_GP GENMASK(23, 16)
+#define CR3_TRANS_MTM_ID GENMASK(15, 0)
+
+#define UMMU_GBPA 0x50
+#define GBPA_UPDATE_BIT (1UL << 31)
+#define GBPA_ABORT_BIT (1UL << 15)
+
+/* Common memory attribute values */
+#define UMMU_SH_NSH 0
+#define UMMU_CACHE_WB 1
+#define UMMU_SH_OSH 2
+#define UMMU_SH_ISH 3
+
+#define UMMU_REG_POLL_TIMEOUT_US 5
+
+#endif /* __UMMU_REGS_H__ */

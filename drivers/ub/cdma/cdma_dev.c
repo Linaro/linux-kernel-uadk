@@ -12,12 +12,26 @@
 #include "cdma.h"
 #include "cdma_cmd.h"
 #include "cdma_tid.h"
+#include "cdma_context.h"
 #include <ub/ubase/ubase_comm_ctrlq.h>
 #include <ub/ubase/ubase_comm_dev.h>
+#include "cdma_queue.h"
 #include "cdma_dev.h"
 
 static DEFINE_XARRAY(cdma_devs_tbl);
 static atomic_t cdma_devs_num = ATOMIC_INIT(0);
+
+struct cdma_dev *get_cdma_dev_by_eid(u32 eid)
+{
+	struct cdma_dev *cdev = NULL;
+	unsigned long index = 0;
+
+	xa_for_each(&cdma_devs_tbl, index, cdev)
+		if (cdev->eid == eid)
+			return cdev;
+
+	return NULL;
+}
 
 struct xarray *get_cdma_dev_tbl(u32 *devs_num)
 {
@@ -63,6 +77,40 @@ static void cdma_del_device_from_list(struct cdma_dev *cdev)
 	xa_erase(&cdma_devs_tbl, adev->id);
 }
 
+static void cdma_tbl_init(struct cdma_table *table, u32 max, u32 min)
+{
+	if (!max || max < min)
+		return;
+
+	spin_lock_init(&table->lock);
+	idr_init(&table->idr_tbl.idr);
+	table->idr_tbl.max = max;
+	table->idr_tbl.min = min;
+	table->idr_tbl.next = min;
+}
+
+static void cdma_tbl_destroy(struct cdma_dev *cdev, struct cdma_table *table,
+			     const char *table_name)
+{
+	if (!idr_is_empty(&table->idr_tbl.idr))
+		dev_err(cdev->dev, "IDR not empty in clean up %s table.\n",
+			table_name);
+	idr_destroy(&table->idr_tbl.idr);
+}
+
+static void cdma_init_tables(struct cdma_dev *cdev)
+{
+	struct cdma_res *queue = &cdev->caps.queue;
+
+	cdma_tbl_init(&cdev->queue_table, queue->start_idx + queue->max_cnt - 1,
+		      queue->start_idx);
+}
+
+static void cdma_destroy_tables(struct cdma_dev *cdev)
+{
+	cdma_tbl_destroy(cdev, &cdev->queue_table, "QUEUE");
+}
+
 static void cdma_init_base_dev(struct cdma_dev *cdev)
 {
 	struct cdma_device_attr *attr = &cdev->base.attr;
@@ -102,6 +150,7 @@ static int cdma_init_dev_param(struct cdma_dev *cdev,
 		return ret;
 
 	cdma_init_base_dev(cdev);
+	cdma_init_tables(cdev);
 
 	dev_set_drvdata(&adev->dev, cdev);
 
@@ -120,6 +169,16 @@ static void cdma_uninit_dev_param(struct cdma_dev *cdev)
 	mutex_destroy(&cdev->eu_mutex);
 	mutex_destroy(&cdev->file_mutex);
 	dev_set_drvdata(&cdev->adev->dev, NULL);
+	cdma_destroy_tables(cdev);
+}
+
+static void cdma_release_table_res(struct cdma_dev *cdev)
+{
+	struct cdma_queue *queue;
+	int id;
+
+	idr_for_each_entry(&cdev->queue_table.idr_tbl.idr, queue, id)
+		cdma_delete_queue(cdev, queue->id);
 }
 
 static int cdma_ctrlq_eu_add(struct cdma_dev *cdev, struct eu_info *eu)
@@ -296,6 +355,9 @@ struct cdma_dev *cdma_create_dev(struct auxiliary_device *adev)
 	if (cdma_create_arm_db_page(cdev))
 		goto unregister_crq;
 
+	idr_init(&cdev->ctx_idr);
+	spin_lock_init(&cdev->ctx_lock);
+
 	dev_dbg(&adev->dev, "cdma.%u init succeeded.\n", adev->id);
 
 	return cdev;
@@ -315,10 +377,19 @@ free:
 
 void cdma_destroy_dev(struct cdma_dev *cdev)
 {
+	struct cdma_context *tmp;
+	int id;
+
 	if (!cdev)
 		return;
 
 	ubase_virt_unregister(cdev->adev);
+
+	cdma_release_table_res(cdev);
+
+	idr_for_each_entry(&cdev->ctx_idr, tmp, id)
+		cdma_free_context(cdev, tmp);
+	idr_destroy(&cdev->ctx_idr);
 
 	cdma_destroy_arm_db_page(cdev);
 	ubase_ctrlq_unregister_crq_event(cdev->adev,

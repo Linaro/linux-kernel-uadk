@@ -12,6 +12,8 @@
 
 enum cdma_cmd {
 	CDMA_CMD_QUERY_DEV_INFO,
+	CDMA_CMD_CREATE_CTX,
+	CDMA_CMD_CREATE_QUEUE,
 	CDMA_CMD_MAX
 };
 
@@ -62,6 +64,29 @@ struct cdma_device_attr {
 struct cdma_cmd_query_device_attr_args {
 	struct {
 		struct cdma_device_attr attr;
+	} out;
+};
+
+struct cdma_create_context_args {
+	struct {
+		__u8 cqe_size;
+		__u8 dwqe_enable;
+		int async_fd;
+	} out;
+};
+
+struct cdma_cmd_create_queue_args {
+	struct {
+		__u32 queue_depth;
+		__u32 dcna;
+		__u32 rmt_eid;
+		__u8  priority;
+		__u64 user_ctx;
+		__u32 trans_mode;
+	} in;
+	struct {
+		int queue_id;
+		__u64 handle;
 	} out;
 };
 

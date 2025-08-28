@@ -13,6 +13,15 @@ struct dma_device {
 	void *private_data;
 };
 
+struct queue_cfg {
+	u32 queue_depth;
+	u8 priority;
+	u64 user_ctx;
+	u32 dcna;
+	struct dev_eid rmt_eid;
+	u32 trans_mode;
+};
+
 struct dma_context {
 	struct dma_device *dma_dev;
 	u32 tid; /* data valid only in bit 0-19 */
@@ -23,5 +32,10 @@ struct dma_device *dma_get_device_list(u32 *num_devices);
 void dma_free_device_list(struct dma_device *dev_list, u32 num_devices);
 
 struct dma_device *dma_get_device_by_eid(struct dev_eid *eid);
+
+int dma_create_context(struct dma_device *dma_dev);
+
+int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id,
+		    struct queue_cfg *cfg);
 
 #endif

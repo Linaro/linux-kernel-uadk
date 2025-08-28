@@ -7,6 +7,7 @@
 #include "cdma_dev.h"
 #include "cdma_cmd.h"
 #include "cdma_context.h"
+#include "cdma_queue.h"
 #include "cdma.h"
 #include <ub/cdma/cdma_api.h>
 
@@ -135,3 +136,104 @@ struct dma_device *dma_get_device_by_eid(struct dev_eid *eid)
 	return NULL;
 }
 EXPORT_SYMBOL_GPL(dma_get_device_by_eid);
+
+int dma_create_context(struct dma_device *dma_dev)
+{
+	struct cdma_ctx_res *ctx_res;
+	struct cdma_context *ctx;
+	struct cdma_dev *cdev;
+
+	if (!dma_dev || !dma_dev->private_data) {
+		pr_err("the dma_dev does not exist.\n");
+		return -EINVAL;
+	}
+
+	cdev = get_cdma_dev_by_eid(dma_dev->attr.eid.dw0);
+	if (!cdev) {
+		pr_err("can't find cdev by eid, eid = 0x%x\n",
+		       dma_dev->attr.eid.dw0);
+		return -EINVAL;
+	}
+
+	if (cdev->status == CDMA_SUSPEND) {
+		pr_warn("cdma device is not prepared, eid = 0x%x.\n",
+			dma_dev->attr.eid.dw0);
+		return -EINVAL;
+	}
+
+	ctx_res = (struct cdma_ctx_res *)dma_dev->private_data;
+	if (ctx_res->ctx) {
+		pr_err("ctx has been created.\n");
+		return -EEXIST;
+	}
+
+	atomic_inc(&dma_dev->ref_cnt);
+	ctx = cdma_alloc_context(cdev, true);
+	if (IS_ERR(ctx)) {
+		pr_err("alloc context failed, ret = %ld\n", PTR_ERR(ctx));
+		atomic_dec(&dma_dev->ref_cnt);
+		return PTR_ERR(ctx);
+	}
+	ctx_res->ctx = ctx;
+
+	return ctx->handle;
+}
+EXPORT_SYMBOL_GPL(dma_create_context);
+
+int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id, struct queue_cfg *cfg)
+{
+	struct cdma_ctx_res *ctx_res;
+	struct cdma_queue *queue;
+	struct cdma_context *ctx;
+	struct cdma_dev *cdev;
+	int ret;
+
+	if (!cfg || !dma_dev || !dma_dev->private_data)
+		return -EINVAL;
+
+	cdev = get_cdma_dev_by_eid(dma_dev->attr.eid.dw0);
+	if (!cdev) {
+		pr_err("can't find cdev by eid, eid = 0x%x.\n",
+		       dma_dev->attr.eid.dw0);
+		return -EINVAL;
+	}
+
+	if (cdev->status == CDMA_SUSPEND) {
+		pr_warn("cdma device is not prepared, eid = 0x%x.\n",
+			dma_dev->attr.eid.dw0);
+		return -EINVAL;
+	}
+
+	ctx = cdma_find_ctx_by_handle(cdev, ctx_id);
+	if (!ctx) {
+		dev_err(cdev->dev, "invalid ctx_id = %d.\n", ctx_id);
+		return -EINVAL;
+	}
+	atomic_inc(&ctx->ref_cnt);
+
+	queue = cdma_create_queue(cdev, ctx, cfg, dma_dev->attr.eu.eid_idx,
+				  true);
+	if (!queue) {
+		dev_err(cdev->dev, "create queue failed.\n");
+		ret = -EINVAL;
+		goto decrease_cnt;
+	}
+
+	ctx_res = (struct cdma_ctx_res *)dma_dev->private_data;
+	ret = xa_err(
+		xa_store(&ctx_res->queue_xa, queue->id, queue, GFP_KERNEL));
+	if (ret) {
+		dev_err(cdev->dev, "store queue to ctx_res failed, ret = %d\n",
+			ret);
+		goto free_queue;
+	}
+
+	return queue->id;
+
+free_queue:
+	cdma_delete_queue(cdev, queue->id);
+decrease_cnt:
+	atomic_dec(&ctx->ref_cnt);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dma_alloc_queue);

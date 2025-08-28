@@ -27,6 +27,7 @@ enum cdma_ctrlq_eu_op {
 
 struct cdma_dev *cdma_create_dev(struct auxiliary_device *adev);
 void cdma_destroy_dev(struct cdma_dev *cdev);
+struct cdma_dev *get_cdma_dev_by_eid(u32 eid);
 struct xarray *get_cdma_dev_tbl(u32 *devices_num);
 bool cdma_find_seid_in_eus(struct eu_info *eus, u8 eu_num, struct dev_eid *eid,
 			   struct eu_info *eu_out);

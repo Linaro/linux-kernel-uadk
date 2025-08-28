@@ -13,6 +13,10 @@ struct cdma_dev;
 struct cdma_file {
 	struct cdma_dev *cdev;
 	struct list_head list;
+	struct mutex ctx_mutex;
+	struct cdma_context *uctx;
+	struct idr idr;
+	spinlock_t idr_lock;
 	struct kref ref;
 };
 

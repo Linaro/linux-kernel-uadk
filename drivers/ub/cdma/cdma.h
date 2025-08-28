@@ -21,6 +21,13 @@ enum cdma_status {
 	CDMA_SUSPEND,
 };
 
+enum {
+	CDMA_CAP_FEATURE_AR		= BIT(0),
+	CDMA_CAP_FEATURE_JFC_INLINE	= BIT(4),
+	CDMA_CAP_FEATURE_DIRECT_WQE	= BIT(11),
+	CDMA_CAP_FEATURE_CONG_CTRL	= BIT(16),
+};
+
 struct cdma_res {
 	u32 max_cnt;
 	u32 start_idx;
@@ -78,6 +85,18 @@ struct cdma_caps {
 	struct cdma_tbl seid;
 };
 
+struct cdma_idr {
+	struct idr idr;
+	u32 min;
+	u32 max;
+	u32 next;
+};
+
+struct cdma_table {
+	spinlock_t lock;
+	struct cdma_idr idr_tbl;
+};
+
 struct cdma_chardev {
 	struct device *dev;
 
@@ -106,10 +125,15 @@ struct cdma_dev {
 	void __iomem *k_db_base;
 	resource_size_t db_base;
 	struct iommu_sva *ksva;
+	/* ctx manager */
+	struct list_head ctx_list;
+	struct idr ctx_idr;
+	spinlock_t ctx_lock;
 	struct mutex eu_mutex;
 	struct mutex db_mutex;
 	struct list_head db_page;
 
+	struct cdma_table queue_table;
 	struct mutex file_mutex;
 	struct list_head file_list;
 	struct page *arm_db_page;

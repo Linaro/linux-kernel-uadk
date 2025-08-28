@@ -7,8 +7,10 @@
 #include <linux/fs.h>
 #include <ub/ubus/ubus.h>
 #include "cdma_ioctl.h"
+#include "cdma_context.h"
 #include "cdma_chardev.h"
 #include "cdma_types.h"
+#include "cdma_uobj.h"
 #include "cdma.h"
 
 #define CDMA_DEVICE_NAME "cdma/dev"
@@ -80,10 +82,13 @@ static int cdma_open(struct inode *inode, struct file *file)
 	if (!cfile)
 		return -ENOMEM;
 
+	cdma_init_uobj_idr(cfile);
 	mutex_lock(&cdev->file_mutex);
 	cfile->cdev = cdev;
+	cfile->uctx = NULL;
 	kref_init(&cfile->ref);
 	file->private_data = cfile;
+	mutex_init(&cfile->ctx_mutex);
 	list_add_tail(&cfile->list, &cdev->file_list);
 	nonseekable_open(inode, file);
 	mutex_unlock(&cdev->file_mutex);
@@ -102,6 +107,11 @@ static int cdma_close(struct inode *inode, struct file *file)
 	list_del(&cfile->list);
 	mutex_unlock(&cdev->file_mutex);
 
+	mutex_lock(&cfile->ctx_mutex);
+	cdma_cleanup_context_uobj(cfile);
+	cfile->uctx = NULL;
+
+	mutex_unlock(&cfile->ctx_mutex);
 	kref_put(&cfile->ref, cdma_release_file);
 	pr_debug("cdma close success.\n");
 
@@ -184,5 +194,7 @@ void cdma_release_file(struct kref *ref)
 {
 	struct cdma_file *cfile = container_of(ref, struct cdma_file, ref);
 
+	mutex_destroy(&cfile->ctx_mutex);
+	idr_destroy(&cfile->idr);
 	kfree(cfile);
 }

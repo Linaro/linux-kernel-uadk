@@ -7,6 +7,7 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
+#include <linux/xarray.h>
 #include <ub/cdma/cdma_api.h>
 
 struct cdma_context {
@@ -20,10 +21,16 @@ struct cdma_context {
 	u32 tid;
 	bool is_kernel;
 	atomic_t ref_cnt;
+	struct list_head queue_list;
 };
 
 struct cdma_ctx_res {
 	struct cdma_context *ctx;
+	struct xarray queue_xa;
 };
+
+struct cdma_context *cdma_find_ctx_by_handle(struct cdma_dev *cdev, int handle);
+struct cdma_context *cdma_alloc_context(struct cdma_dev *cdev, bool is_kernel);
+void cdma_free_context(struct cdma_dev *cdev, struct cdma_context *ctx);
 
 #endif /* CDMA_CONTEXT_H */

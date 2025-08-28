@@ -105,6 +105,28 @@ free_context:
 	return ret;
 }
 
+static int cdma_delete_ucontext(struct cdma_ioctl_hdr *hdr,
+				struct cdma_file *cfile)
+{
+	struct cdma_dev *cdev = cfile->cdev;
+
+	if (!cfile->uctx) {
+		dev_err(cdev->dev, "cdma context has not been created.\n");
+		return -ENOENT;
+	}
+	if (!list_empty(&cfile->uctx->queue_list)) {
+		dev_err(cdev->dev,
+			"queue/segment is still in use, ctx handle = %d.\n",
+			cfile->uctx->handle);
+		return -EBUSY;
+	}
+
+	cdma_free_context(cdev, cfile->uctx);
+	cfile->uctx = NULL;
+
+	return 0;
+}
+
 static int cdma_cmd_create_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *cfile)
 {
 	struct cdma_cmd_create_queue_args arg = { 0 };
@@ -165,10 +187,48 @@ err_create_queue:
 	return ret;
 }
 
+static int cdma_cmd_delete_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *cfile)
+{
+	struct cdma_cmd_delete_queue_args arg = { 0 };
+	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_queue *queue;
+	struct cdma_uobj *uobj;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len != sizeof(arg))
+		return -EINVAL;
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret) {
+		dev_err(cdev->dev, "delete queue get user data failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	uobj = cdma_uobj_get(cfile, arg.in.handle, UOBJ_TYPE_QUEUE);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev, "get queue uobj failed, handle = %llu.\n",
+			arg.in.handle);
+		return -EINVAL;
+	}
+
+	queue = (struct cdma_queue *)uobj->object;
+
+	cdma_uobj_delete(uobj);
+	list_del(&queue->list);
+	ret = cdma_delete_queue(cdev, queue->id);
+	if (ret)
+		dev_err(cdev->dev, "delete queue failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
 static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_QUERY_DEV_INFO] = cdma_query_dev,
 	[CDMA_CMD_CREATE_CTX] = cdma_create_ucontext,
+	[CDMA_CMD_DELETE_CTX] = cdma_delete_ucontext,
 	[CDMA_CMD_CREATE_QUEUE] = cdma_cmd_create_queue,
+	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,
 };
 
 int cdma_cmd_parse(struct cdma_file *cfile, struct cdma_ioctl_hdr *hdr)

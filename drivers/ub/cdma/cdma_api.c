@@ -180,6 +180,44 @@ int dma_create_context(struct dma_device *dma_dev)
 }
 EXPORT_SYMBOL_GPL(dma_create_context);
 
+void dma_delete_context(struct dma_device *dma_dev, int handle)
+{
+	struct cdma_ctx_res *ctx_res;
+	struct cdma_context *ctx;
+	struct cdma_dev *cdev;
+	int ref_cnt;
+
+	if (!dma_dev || !dma_dev->private_data)
+		return;
+
+	cdev = get_cdma_dev_by_eid(dma_dev->attr.eid.dw0);
+	if (!cdev) {
+		pr_err("can't find cdev by eid, eid = 0x%x\n",
+		       dma_dev->attr.eid.dw0);
+		return;
+	}
+
+	ctx_res = (struct cdma_ctx_res *)dma_dev->private_data;
+	ctx = ctx_res->ctx;
+	if (!ctx) {
+		dev_err(cdev->dev, "no context needed to be free\n");
+		return;
+	}
+
+	ref_cnt = atomic_read(&ctx->ref_cnt);
+	if (ref_cnt > 0) {
+		dev_warn(cdev->dev,
+			 "context resourse is still in use, cnt = %d.\n",
+			 ref_cnt);
+		return;
+	}
+
+	cdma_free_context(cdev, ctx);
+	ctx_res->ctx = NULL;
+	atomic_dec(&dma_dev->ref_cnt);
+}
+EXPORT_SYMBOL_GPL(dma_delete_context);
+
 int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id, struct queue_cfg *cfg)
 {
 	struct cdma_ctx_res *ctx_res;
@@ -237,3 +275,36 @@ decrease_cnt:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(dma_alloc_queue);
+
+void dma_free_queue(struct dma_device *dma_dev, int queue_id)
+{
+	struct cdma_ctx_res *ctx_res;
+	struct cdma_context *ctx;
+	struct cdma_queue *queue;
+	struct cdma_dev *cdev;
+
+	if (!dma_dev || !dma_dev->private_data)
+		return;
+
+	cdev = get_cdma_dev_by_eid(dma_dev->attr.eid.dw0);
+	if (!cdev) {
+		pr_err("can't find cdev by eid, eid = 0x%x\n",
+		       dma_dev->attr.eid.dw0);
+		return;
+	}
+
+	ctx_res = (struct cdma_ctx_res *)dma_dev->private_data;
+	queue = (struct cdma_queue *)xa_load(&ctx_res->queue_xa, queue_id);
+	if (!queue) {
+		dev_err(cdev->dev, "no queue found in this device, id = %d\n",
+			queue_id);
+		return;
+	}
+	xa_erase(&ctx_res->queue_xa, queue_id);
+	ctx = queue->ctx;
+
+	cdma_delete_queue(cdev, queue_id);
+
+	atomic_dec(&ctx->ref_cnt);
+}
+EXPORT_SYMBOL_GPL(dma_free_queue);

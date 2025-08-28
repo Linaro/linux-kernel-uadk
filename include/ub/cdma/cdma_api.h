@@ -35,7 +35,11 @@ struct dma_device *dma_get_device_by_eid(struct dev_eid *eid);
 
 int dma_create_context(struct dma_device *dma_dev);
 
+void dma_delete_context(struct dma_device *dma_dev, int handle);
+
 int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id,
 		    struct queue_cfg *cfg);
+
+void dma_free_queue(struct dma_device *dma_dev, int queue_id);
 
 #endif

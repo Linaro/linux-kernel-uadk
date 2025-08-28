@@ -13,7 +13,9 @@
 enum cdma_cmd {
 	CDMA_CMD_QUERY_DEV_INFO,
 	CDMA_CMD_CREATE_CTX,
+	CDMA_CMD_DELETE_CTX,
 	CDMA_CMD_CREATE_QUEUE,
+	CDMA_CMD_DELETE_QUEUE,
 	CDMA_CMD_MAX
 };
 
@@ -88,6 +90,13 @@ struct cdma_cmd_create_queue_args {
 		int queue_id;
 		__u64 handle;
 	} out;
+};
+
+struct cdma_cmd_delete_queue_args {
+	struct {
+		__u32 queue_id;
+		__u64 handle;
+	} in;
 };
 
 #endif

@@ -5,10 +5,112 @@
 
 #include <linux/delay.h>
 #include "cdma_cmd.h"
+#include "cdma_context.h"
 #include "cdma_mbox.h"
 #include "cdma_common.h"
 #include "cdma_db.h"
 #include "cdma_jfc.h"
+
+static int cdma_get_cmd_from_user(struct cdma_create_jfc_ucmd *ucmd,
+				  struct cdma_dev *cdev,
+				  struct cdma_udata *udata,
+				  struct cdma_jfc *jfc,
+				  struct cdma_jfc_cfg *cfg)
+{
+	struct cdma_context *ctx;
+	u32 depth = cfg->depth;
+	int ret;
+
+	if (!udata) {
+		jfc->arm_sn = 1;
+		jfc->buf.entry_cnt = depth ? roundup_pow_of_two(depth) : depth;
+		return 0;
+	}
+
+	if (!udata->udrv_data || !udata->udrv_data->in_addr ||
+		udata->udrv_data->in_len != (u32)sizeof(*ucmd)) {
+		dev_err(cdev->dev, "invalid parameter.\n");
+		return -EINVAL;
+	}
+
+	ret = (int)copy_from_user(ucmd, (void *)udata->udrv_data->in_addr,
+				  (u32)sizeof(*ucmd));
+	if (ret) {
+		dev_err(cdev->dev,
+			"copy udata from user failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	jfc->mode = ucmd->mode;
+	jfc->db.db_addr = ucmd->db_addr;
+
+	ctx = udata->uctx;
+	jfc->base.ctx = ctx;
+	jfc->tid = ctx->tid;
+
+	if (cdev->caps.cqe_size == CDMA_DEFAULT_CQE_SIZE)
+		jfc->buf.entry_cnt = ucmd->buf_len >> CDMA_JFC_DEFAULT_CQE_SHIFT;
+	else
+		jfc->buf.entry_cnt = ucmd->buf_len >> CDMA_JFC_OTHER_CQE_SHIFT;
+
+	return ret;
+}
+
+static int cdma_check_jfc_cfg(struct cdma_dev *cdev, struct cdma_jfc *jfc,
+			      struct cdma_jfc_cfg *cfg)
+{
+	if (!jfc->buf.entry_cnt || jfc->buf.entry_cnt > cdev->caps.jfc.depth) {
+		dev_err(cdev->dev, "invalid jfc depth = %u, cap depth = %u.\n",
+			jfc->buf.entry_cnt, cdev->caps.jfc.depth);
+		return -EINVAL;
+	}
+
+	if (jfc->buf.entry_cnt < CDMA_JFC_DEPTH_MIN)
+		jfc->buf.entry_cnt = CDMA_JFC_DEPTH_MIN;
+
+	if (cfg->ceqn >= cdev->caps.comp_vector_cnt) {
+		dev_err(cdev->dev, "invalid ceqn = %u, cap ceq cnt = %u.\n",
+			cfg->ceqn, cdev->caps.comp_vector_cnt);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void cdma_init_jfc_param(struct cdma_jfc_cfg *cfg, struct cdma_jfc *jfc)
+{
+	jfc->base.id = jfc->jfcn;
+	jfc->base.jfc_cfg = *cfg;
+	jfc->ceqn = cfg->ceqn;
+}
+
+static int cdma_jfc_id_alloc(struct cdma_dev *cdev, struct cdma_jfc *jfc)
+{
+	struct cdma_table *jfc_tbl = &cdev->jfc_table;
+	u32 min = jfc_tbl->idr_tbl.min;
+	u32 max = jfc_tbl->idr_tbl.max;
+	unsigned long flags;
+	int id;
+
+	idr_preload(GFP_KERNEL);
+	spin_lock_irqsave(&jfc_tbl->lock, flags);
+	id = idr_alloc(&jfc_tbl->idr_tbl.idr, jfc, jfc_tbl->idr_tbl.next, max,
+		       GFP_NOWAIT);
+	if (id < 0) {
+		id = idr_alloc(&jfc_tbl->idr_tbl.idr, jfc, min, max,
+			       GFP_NOWAIT);
+		if (id < 0)
+			dev_err(cdev->dev, "alloc jfc id failed.\n");
+	}
+
+	jfc_tbl->idr_tbl.next = (id >= 0 && id + 1 <= max) ? id + 1 : min;
+	spin_unlock_irqrestore(&jfc_tbl->lock, flags);
+	idr_preload_end();
+
+	jfc->jfcn = id;
+
+	return id;
+}
 
 static void cdma_jfc_id_free(struct cdma_dev *cdev, u32 jfcn)
 {
@@ -35,6 +137,50 @@ static struct cdma_jfc *cdma_id_find_jfc(struct cdma_dev *cdev, u32 jfcn)
 	return jfc;
 }
 
+static int cdma_get_jfc_buf(struct cdma_dev *cdev,
+			    struct cdma_create_jfc_ucmd *ucmd,
+			    struct cdma_udata *udata, struct cdma_jfc *jfc)
+{
+	u32 size;
+	int ret;
+
+	if (udata) {
+		jfc->buf.umem = cdma_umem_get(cdev, ucmd->buf_addr,
+					      ucmd->buf_len, false);
+		if (IS_ERR(jfc->buf.umem)) {
+			ret = PTR_ERR(jfc->buf.umem);
+			dev_err(cdev->dev, "get umem failed, ret = %d.\n",
+				ret);
+			return ret;
+		}
+		jfc->buf.addr = ucmd->buf_addr;
+		ret = cdma_pin_sw_db(jfc->base.ctx, &jfc->db);
+		if (ret)
+			cdma_umem_release(jfc->buf.umem, false);
+
+		return ret;
+	}
+
+	spin_lock_init(&jfc->lock);
+	jfc->buf.entry_size = cdev->caps.cqe_size;
+	jfc->tid = cdev->tid;
+	size = jfc->buf.entry_size * jfc->buf.entry_cnt;
+	ret = cdma_k_alloc_buf(cdev, size, &jfc->buf);
+	if (ret) {
+		dev_err(cdev->dev, "alloc buffer for jfc failed.\n");
+		return ret;
+	}
+
+	ret = cdma_alloc_sw_db(cdev, &jfc->db);
+	if (ret) {
+		dev_err(cdev->dev, "alloc sw db for jfc failed: %u.\n",
+			jfc->jfcn);
+		cdma_k_free_buf(cdev, size, &jfc->buf);
+	}
+
+	return ret;
+}
+
 static void cdma_free_jfc_buf(struct cdma_dev *cdev, struct cdma_jfc *jfc)
 {
 	u32 size;
@@ -47,6 +193,37 @@ static void cdma_free_jfc_buf(struct cdma_dev *cdev, struct cdma_jfc *jfc)
 		cdma_k_free_buf(cdev, size, &jfc->buf);
 		cdma_free_sw_db(cdev, &jfc->db);
 	}
+}
+
+static void cdma_construct_jfc_ctx(struct cdma_dev *cdev,
+				   struct cdma_jfc *jfc,
+				   struct cdma_jfc_ctx *ctx)
+{
+	memset(ctx, 0, sizeof(*ctx));
+
+	ctx->state = CDMA_JFC_STATE_VALID;
+	ctx->arm_st = jfc_arm_mode ? CDMA_CTX_NO_ARMED : CDMA_CTX_ALWAYS_ARMED;
+	ctx->shift = ilog2(jfc->buf.entry_cnt) - CDMA_JFC_DEPTH_SHIFT_BASE;
+
+	if (cdev->caps.cqe_size == CDMA_DEFAULT_CQE_SIZE)
+		ctx->cqe_size = CDMA_128_CQE_SIZE;
+	else
+		ctx->cqe_size = CDMA_64_CQE_SIZE;
+
+	ctx->record_db_en = CDMA_RECORD_EN;
+	ctx->jfc_type = CDMA_NORMAL_JFC_TYPE;
+	ctx->cqe_va_l = jfc->buf.addr >> CQE_VA_L_OFFSET;
+	ctx->cqe_va_h = jfc->buf.addr >> CQE_VA_H_OFFSET;
+	ctx->cqe_token_id = jfc->tid;
+
+	if (cqe_mode)
+		ctx->cq_cnt_mode = CDMA_CQE_CNT_MODE_BY_CI_PI_GAP;
+	else
+		ctx->cq_cnt_mode = CDMA_CQE_CNT_MODE_BY_COUNT;
+
+	ctx->ceqn = jfc->ceqn;
+	ctx->record_db_addr_l = jfc->db.db_addr >> CDMA_DB_L_OFFSET;
+	ctx->record_db_addr_h = jfc->db.db_addr >> CDMA_DB_H_OFFSET;
 }
 
 static int cdma_query_jfc_destroy_done(struct cdma_dev *cdev, uint32_t jfcn)
@@ -94,6 +271,17 @@ static int cdma_destroy_and_flush_jfc(struct cdma_dev *cdev, u32 jfcn)
 	return -ETIMEDOUT;
 }
 
+static int cdma_post_create_jfc_mbox(struct cdma_dev *cdev, struct cdma_jfc *jfc)
+{
+	struct ubase_mbx_attr attr = { 0 };
+	struct cdma_jfc_ctx ctx = { 0 };
+
+	cdma_construct_jfc_ctx(cdev, jfc, &ctx);
+	cdma_fill_mbx_attr(&attr, jfc->jfcn, CDMA_CMD_CREATE_JFC_CONTEXT, 0);
+
+	return cdma_post_mailbox_ctx(cdev, (void *)&ctx, sizeof(ctx), &attr);
+}
+
 int cdma_post_destroy_jfc_mbox(struct cdma_dev *cdev, u32 jfcn,
 			       enum cdma_jfc_state state)
 {
@@ -104,6 +292,57 @@ int cdma_post_destroy_jfc_mbox(struct cdma_dev *cdev, u32 jfcn,
 	cdma_fill_mbx_attr(&attr, jfcn, CDMA_CMD_DESTROY_JFC_CONTEXT, 0);
 
 	return cdma_post_mailbox_ctx(cdev, (void *)&ctx, sizeof(ctx), &attr);
+}
+
+struct cdma_base_jfc *cdma_create_jfc(struct cdma_dev *cdev,
+				      struct cdma_jfc_cfg *cfg,
+				      struct cdma_udata *udata)
+{
+	struct cdma_create_jfc_ucmd ucmd = { 0 };
+	struct cdma_jfc *jfc;
+	int ret;
+
+	jfc = kzalloc(sizeof(*jfc), GFP_KERNEL);
+	if (!jfc)
+		return NULL;
+
+	ret = cdma_get_cmd_from_user(&ucmd, cdev, udata, jfc, cfg);
+	if (ret)
+		goto err_get_cmd;
+
+	ret = cdma_check_jfc_cfg(cdev, jfc, cfg);
+	if (ret)
+		goto err_check_cfg;
+
+	ret = cdma_jfc_id_alloc(cdev, jfc);
+	if (ret < 0)
+		goto err_alloc_jfc_id;
+
+	cdma_init_jfc_param(cfg, jfc);
+	ret = cdma_get_jfc_buf(cdev, &ucmd, udata, jfc);
+	if (ret)
+		goto err_get_jfc_buf;
+
+	ret = cdma_post_create_jfc_mbox(cdev, jfc);
+	if (ret)
+		goto err_alloc_cqc;
+
+	jfc->base.dev = cdev;
+
+	dev_dbg(cdev->dev, "create jfc id = %u, queue id = %u.\n",
+		jfc->jfcn, cfg->queue_id);
+
+	return &jfc->base;
+
+err_alloc_cqc:
+	cdma_free_jfc_buf(cdev, jfc);
+err_get_jfc_buf:
+	cdma_jfc_id_free(cdev, jfc->jfcn);
+err_alloc_jfc_id:
+err_check_cfg:
+err_get_cmd:
+	kfree(jfc);
+	return NULL;
 }
 
 int cdma_delete_jfc(struct cdma_dev *cdev, u32 jfcn,

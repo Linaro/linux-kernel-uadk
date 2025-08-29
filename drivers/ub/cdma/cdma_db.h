@@ -4,9 +4,8 @@
 #ifndef __CDMA_DB_H__
 #define __CDMA_DB_H__
 
-#include "cdma.h"
-
 struct cdma_context;
+struct cdma_dev;
 
 struct cdma_sw_db_page {
 	struct list_head list;
@@ -32,7 +31,11 @@ struct cdma_sw_db {
 	u32 *db_record;
 };
 
+int cdma_pin_sw_db(struct cdma_context *ctx, struct cdma_sw_db *db);
+
 void cdma_unpin_sw_db(struct cdma_context *ctx, struct cdma_sw_db *db);
+
+int cdma_alloc_sw_db(struct cdma_dev *dev, struct cdma_sw_db *db);
 
 void cdma_free_sw_db(struct cdma_dev *dev, struct cdma_sw_db *db);
 

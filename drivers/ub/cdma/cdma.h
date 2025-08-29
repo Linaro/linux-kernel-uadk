@@ -12,11 +12,21 @@
 #include <ub/cdma/cdma_api.h>
 
 extern u32 jfc_arm_mode;
+extern bool cqe_mode;
 
+#define CDMA_HW_PAGE_SHIFT	12
+#define CDMA_HW_PAGE_SIZE	(1 << CDMA_HW_PAGE_SHIFT)
+
+#define CDMA_DEFAULT_CQE_SIZE	128
 #define CDMA_RESET_WAIT_TIME	3000
 #define CDMA_MAX_SL_NUM		16
 
 #define CDMA_UPI_MASK		0x7FFF
+
+enum cdma_cqe_size {
+	CDMA_64_CQE_SIZE,
+	CDMA_128_CQE_SIZE,
+};
 
 enum cdma_status {
 	CDMA_NORMAL,

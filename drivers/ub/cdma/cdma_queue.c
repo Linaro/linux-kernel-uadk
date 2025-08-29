@@ -21,6 +21,35 @@ struct cdma_queue *cdma_find_queue(struct cdma_dev *cdev, u32 queue_id)
 	return queue;
 }
 
+static void cdma_k_assemble_jfc_cfg(struct cdma_jfc_cfg *jfc_cfg,
+				    struct queue_cfg *cfg,
+				    struct cdma_queue *queue)
+{
+	jfc_cfg->depth = cfg->queue_depth;
+	jfc_cfg->queue_id = queue->id;
+}
+
+static int cdma_create_queue_res(struct cdma_dev *cdev, struct queue_cfg *cfg,
+				 struct cdma_queue *queue, u32 eid_index)
+{
+	struct cdma_jfc_cfg jfc_cfg = { 0 };
+
+	cdma_k_assemble_jfc_cfg(&jfc_cfg, cfg, queue);
+
+	queue->jfc = cdma_create_jfc(cdev, &jfc_cfg, NULL);
+	if (!queue->jfc) {
+		dev_err(cdev->dev, "create jfc failed.\n");
+		return -EFAULT;
+	}
+
+	queue->jfc_id = queue->jfc->id;
+
+	dev_dbg(cdev->dev, "set queue %u jfc id: %u.\n",
+		queue->id, queue->jfc_id);
+
+	return 0;
+}
+
 static void cdma_delete_queue_res(struct cdma_dev *cdev,
 				  struct cdma_queue *queue)
 {
@@ -60,6 +89,7 @@ struct cdma_queue *cdma_create_queue(struct cdma_dev *cdev,
 				     bool is_kernel)
 {
 	struct cdma_queue *queue;
+	int ret;
 	int id;
 
 	queue = kzalloc(sizeof(*queue), GFP_KERNEL);
@@ -76,8 +106,16 @@ struct cdma_queue *cdma_create_queue(struct cdma_dev *cdev,
 	queue->id = id;
 	queue->cfg = *cfg;
 
-	if (is_kernel)
+	if (is_kernel) {
+		ret = cdma_create_queue_res(cdev, cfg, queue, eid_index);
+		if (ret) {
+			dev_err(cdev->dev, "create queue res failed.\n");
+			cdma_delete_queue_id(cdev, id);
+			kfree(queue);
+			return NULL;
+		}
 		queue->is_kernel = true;
+	}
 
 	return queue;
 }

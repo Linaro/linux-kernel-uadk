@@ -32,6 +32,11 @@ static void cdma_num_free(struct cdma_dev *cdev)
 	spin_unlock(&cdma_num_mg.lock);
 }
 
+static inline int cdma_get_mmap_cmd(struct vm_area_struct *vma)
+{
+	return (vma->vm_pgoff & MAP_COMMAND_MASK);
+}
+
 static int cdma_num_alloc(struct cdma_dev *cdev)
 {
 #define CDMA_START 0
@@ -67,6 +72,58 @@ static long cdma_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	pr_err("invalid ioctl command, command = %u.\n", cmd);
 	return -ENOIOCTLCMD;
+}
+
+static int cdma_remap_pfn_range(struct cdma_file *cfile, struct vm_area_struct *vma)
+{
+#define JFC_DB_UNMAP_BOUND 1
+	struct cdma_dev *cdev = cfile->cdev;
+	resource_size_t db_addr;
+	u32 cmd;
+
+	db_addr = cdev->db_base;
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+
+	cmd = cdma_get_mmap_cmd(vma);
+	switch (cmd) {
+	case CDMA_MMAP_JFC_PAGE:
+		if (io_remap_pfn_range(vma, vma->vm_start,
+				       jfc_arm_mode > JFC_DB_UNMAP_BOUND ?
+				       (uint64_t)db_addr >> PAGE_SHIFT :
+				       page_to_pfn(cdev->arm_db_page),
+				       PAGE_SIZE, vma->vm_page_prot)) {
+			dev_err(cdev->dev, "remap jfc page fail.\n");
+			return -EAGAIN;
+		}
+		break;
+	default:
+		dev_err(cdev->dev,
+			"mmap failed, cmd(%u) is not supported.\n", cmd);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int cdma_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct cdma_file *cfile = (struct cdma_file *)file->private_data;
+	int ret;
+
+	if (((vma->vm_end - vma->vm_start) % PAGE_SIZE) != 0) {
+		pr_err("mmap failed, expect vm area size to be an integer multiple of page size.\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&cfile->ctx_mutex);
+	ret = cdma_remap_pfn_range(cfile, vma);
+	if (ret) {
+		mutex_unlock(&cfile->ctx_mutex);
+		return ret;
+	}
+	mutex_unlock(&cfile->ctx_mutex);
+
+	return 0;
 }
 
 static int cdma_open(struct inode *inode, struct file *file)
@@ -121,6 +178,7 @@ static int cdma_close(struct inode *inode, struct file *file)
 static const struct file_operations cdma_ops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = cdma_ioctl,
+	.mmap = cdma_mmap,
 	.open = cdma_open,
 	.release = cdma_close,
 };

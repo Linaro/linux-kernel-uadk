@@ -7,10 +7,43 @@
 #include "cdma_types.h"
 #include "cdma_db.h"
 
+#define CDMA_JFC_DEPTH_MIN 64
+#define CDMA_JFC_DEPTH_SHIFT_BASE 6
+#define CDMA_JFC_DEFAULT_CQE_SHIFT 7
+#define CDMA_JFC_OTHER_CQE_SHIFT 6
+
+#define CDMA_DB_L_OFFSET 6
+#define CDMA_DB_H_OFFSET 38
+
+#define CQE_VA_L_OFFSET 12
+#define CQE_VA_H_OFFSET 32
+
+enum cdma_record_db {
+	CDMA_NO_RECORD_EN,
+	CDMA_RECORD_EN
+};
+
 enum cdma_jfc_state {
 	CDMA_JFC_STATE_INVALID,
 	CDMA_JFC_STATE_VALID,
 	CDMA_JFC_STATE_ERROR
+};
+
+enum cdma_armed_jfc {
+	CDMA_CTX_NO_ARMED,
+	CDMA_CTX_ALWAYS_ARMED,
+	CDMA_CTX_REG_NEXT_CEQE,
+	CDMA_CTX_REG_NEXT_SOLICITED_CEQE
+};
+
+enum cdma_jfc_type {
+	CDMA_NORMAL_JFC_TYPE,
+	CDMA_RAW_JFC_TYPE
+};
+
+enum cdma_cq_cnt_mode {
+	CDMA_CQE_CNT_MODE_BY_COUNT,
+	CDMA_CQE_CNT_MODE_BY_CI_PI_GAP
 };
 
 struct cdma_jfc {
@@ -23,6 +56,8 @@ struct cdma_jfc {
 	u32 ci;
 	u32 arm_sn;
 	spinlock_t lock;
+	refcount_t event_refcount;
+	struct completion event_comp;
 	u32 mode;
 };
 
@@ -97,6 +132,10 @@ struct cdma_jfc_ctx {
 
 int cdma_post_destroy_jfc_mbox(struct cdma_dev *cdev, u32 jfcn,
 			       enum cdma_jfc_state state);
+
+struct cdma_base_jfc *cdma_create_jfc(struct cdma_dev *cdev,
+				      struct cdma_jfc_cfg *cfg,
+				      struct cdma_udata *udata);
 
 int cdma_delete_jfc(struct cdma_dev *cdev, u32 jfcn,
 		    struct cdma_cmd_delete_jfc_args *arg);

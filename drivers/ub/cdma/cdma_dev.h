@@ -11,8 +11,6 @@
 #define CDMA_UE_MAX_NUM 64
 
 struct cdma_dev;
-struct eu_info;
-struct dev_eid;
 
 struct cdma_ctrlq_eu_info {
 	struct eu_info eu;

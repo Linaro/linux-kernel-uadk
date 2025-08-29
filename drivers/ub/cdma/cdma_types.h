@@ -10,6 +10,18 @@
 
 struct cdma_dev;
 
+struct cdma_udrv_priv {
+	u64 in_addr;
+	u32 in_len;
+	u64 out_addr;
+	u32 out_len;
+};
+
+struct cdma_udata {
+	struct cdma_context *uctx;
+	struct cdma_udrv_priv *udrv_data;
+};
+
 struct cdma_jfc_cfg {
 	u32 depth;
 	u32 ceqn;

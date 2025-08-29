@@ -18,6 +18,10 @@ module_param(jfc_arm_mode, uint, 0444);
 MODULE_PARM_DESC(jfc_arm_mode,
 		 "Set the ARM mode of the JFC, default: 0(0:Always ARM, others: NO ARM)");
 
+bool cqe_mode = true;
+module_param(cqe_mode, bool, 0444);
+MODULE_PARM_DESC(cqe_mode, "Set cqe reporting mode, default: 1 (0:BY_COUNT, 1:BY_CI_PI_GAP)");
+
 struct class *cdma_cdev_class;
 
 static int cdma_init_dev_info(struct auxiliary_device *auxdev, struct cdma_dev *cdev)

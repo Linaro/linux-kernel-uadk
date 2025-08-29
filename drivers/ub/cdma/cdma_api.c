@@ -311,6 +311,78 @@ void dma_free_queue(struct dma_device *dma_dev, int queue_id)
 }
 EXPORT_SYMBOL_GPL(dma_free_queue);
 
+struct dma_seg *dma_register_seg(struct dma_device *dma_dev, int ctx_id,
+				 struct dma_seg_cfg *cfg)
+{
+	struct cdma_ctx_res *ctx_res;
+	struct cdma_segment *seg;
+	struct cdma_context *ctx;
+	struct dma_seg *ret_seg;
+	struct cdma_dev *cdev;
+	int ret;
+
+	if (!dma_dev || !dma_dev->private_data || !cfg || !cfg->sva || !cfg->len)
+		return NULL;
+
+	cdev = get_cdma_dev_by_eid(dma_dev->attr.eid.dw0);
+	if (!cdev) {
+		pr_err("can not find normal cdev by eid, eid = 0x%x\n",
+		       dma_dev->attr.eid.dw0);
+		return NULL;
+	}
+
+	if (cdev->status == CDMA_SUSPEND) {
+		pr_warn("cdma device is not prepared, eid = 0x%x.\n",
+			dma_dev->attr.eid.dw0);
+		return NULL;
+	}
+
+	ctx = cdma_find_ctx_by_handle(cdev, ctx_id);
+	if (!ctx) {
+		dev_err(cdev->dev, "find ctx by handle failed, handle = %d.\n",
+			ctx_id);
+		return NULL;
+	}
+	atomic_inc(&ctx->ref_cnt);
+
+	seg = cdma_register_seg(cdev, cfg, true);
+	if (!seg)
+		goto decrease_cnt;
+
+	seg->ctx = ctx;
+	ret = cdma_seg_grant(cdev, seg, cfg);
+	if (ret)
+		goto unregister_seg;
+
+	ret_seg = kzalloc(sizeof(struct dma_seg), GFP_KERNEL);
+	if (!ret_seg)
+		goto ungrant_seg;
+
+	memcpy(ret_seg, &seg->base, sizeof(struct dma_seg));
+
+	ctx_res = (struct cdma_ctx_res *)dma_dev->private_data;
+	ret = xa_err(xa_store(&ctx_res->seg_xa, ret_seg->handle, seg,
+			      GFP_KERNEL));
+	if (ret) {
+		dev_err(cdev->dev, "store seg to ctx_res failed, ret = %d\n",
+			ret);
+		goto free_seg;
+	}
+
+	return ret_seg;
+
+free_seg:
+	kfree(ret_seg);
+ungrant_seg:
+	cdma_seg_ungrant(seg);
+unregister_seg:
+	cdma_unregister_seg(cdev, seg);
+decrease_cnt:
+	atomic_dec(&ctx->ref_cnt);
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(dma_register_seg);
+
 void dma_unregister_seg(struct dma_device *dma_dev, struct dma_seg *dma_seg)
 {
 	struct cdma_ctx_res *ctx_res;

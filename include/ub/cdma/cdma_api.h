@@ -87,6 +87,9 @@ int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id,
 
 void dma_free_queue(struct dma_device *dma_dev, int queue_id);
 
+struct dma_seg *dma_register_seg(struct dma_device *dma_dev, int ctx_id,
+				 struct dma_seg_cfg *cfg);
+
 void dma_unregister_seg(struct dma_device *dma_dev, struct dma_seg *dma_seg);
 
 struct dma_seg *dma_import_seg(struct dma_seg_cfg *cfg);

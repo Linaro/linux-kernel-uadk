@@ -512,6 +512,67 @@ static int cdma_cmd_delete_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *c
 	return ret;
 }
 
+static int cdma_cmd_register_seg(struct cdma_ioctl_hdr *hdr,
+				 struct cdma_file *cfile)
+{
+	struct cdma_cmd_register_seg_args arg = { 0 };
+	struct cdma_dev *cdev = cfile->cdev;
+	struct dma_seg_cfg cfg = { 0 };
+	struct cdma_segment *seg;
+	struct cdma_uobj *uobj;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len != sizeof(arg) || !cfile->uctx) {
+		dev_err(cdev->dev, "register seg arg invalid.\n");
+		return -EINVAL;
+	}
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret) {
+		dev_err(cdev->dev,
+			"register seg get user data failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	uobj = cdma_uobj_create(cfile, UOBJ_TYPE_SEGMENT);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev, "create seg uobj failed.\n");
+		return -ENOMEM;
+	}
+
+	cfg.sva = arg.in.addr;
+	cfg.len = arg.in.len;
+	seg = cdma_register_seg(cdev, &cfg, false);
+	if (!seg) {
+		dev_err(cdev->dev, "register seg failed.\n");
+		ret = -EINVAL;
+		goto delete_uobj;
+	}
+	seg->ctx = cfile->uctx;
+
+	list_add_tail(&seg->list, &cfile->uctx->seg_list);
+	arg.out.handle = uobj->id;
+	uobj->object = seg;
+
+	ret = (int)copy_to_user((void *)hdr->args_addr, &arg, (u32)sizeof(arg));
+	if (ret) {
+		dev_err(cdev->dev,
+			"register seg copy to user failed, ret = %d.\n", ret);
+		ret = -EFAULT;
+		goto free_seg;
+	}
+	return 0;
+
+free_seg:
+	list_del(&seg->list);
+	cdma_unregister_seg(cdev, seg);
+delete_uobj:
+	cdma_uobj_delete(uobj);
+
+	return ret;
+}
+
 static int cdma_cmd_unregister_seg(struct cdma_ioctl_hdr *hdr,
 				   struct cdma_file *cfile)
 {
@@ -727,6 +788,7 @@ static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_DELETE_CTP] = cdma_cmd_delete_ctp,
 	[CDMA_CMD_CREATE_JFS] = cdma_cmd_create_jfs,
 	[CDMA_CMD_DELETE_JFS] = cdma_cmd_delete_jfs,
+	[CDMA_CMD_REGISTER_SEG] = cdma_cmd_register_seg,
 	[CDMA_CMD_UNREGISTER_SEG] = cdma_cmd_unregister_seg,
 	[CDMA_CMD_CREATE_QUEUE] = cdma_cmd_create_queue,
 	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,

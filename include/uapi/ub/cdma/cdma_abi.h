@@ -73,6 +73,7 @@ enum cdma_cmd {
 	CDMA_CMD_DELETE_CTP,
 	CDMA_CMD_CREATE_JFS,
 	CDMA_CMD_DELETE_JFS,
+	CDMA_CMD_REGISTER_SEG,
 	CDMA_CMD_UNREGISTER_SEG,
 	CDMA_CMD_CREATE_QUEUE,
 	CDMA_CMD_DELETE_QUEUE,
@@ -226,6 +227,16 @@ struct cdma_cmd_delete_jfc_args {
 	struct {
 		__u32 comp_events_reported;
 		__u32 async_events_reported;
+	} out;
+};
+
+struct cdma_cmd_register_seg_args {
+	struct {
+		__u64 addr;
+		__u64 len;
+	} in;
+	struct {
+		__u64 handle;
 	} out;
 };
 

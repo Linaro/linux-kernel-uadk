@@ -112,6 +112,7 @@ struct cdma_context *cdma_alloc_context(struct cdma_dev *cdev, bool is_kernel)
 	INIT_LIST_HEAD(&ctx->pgdir_list);
 	mutex_init(&ctx->pgdir_mutex);
 	INIT_LIST_HEAD(&ctx->queue_list);
+	INIT_LIST_HEAD(&ctx->seg_list);
 
 	return ctx;
 

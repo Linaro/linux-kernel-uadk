@@ -19,6 +19,7 @@ struct cdma_context {
 	spinlock_t lock;
 	int handle;
 	u32 tid;
+	void *jfae;
 	bool is_kernel;
 	atomic_t ref_cnt;
 	struct list_head queue_list;

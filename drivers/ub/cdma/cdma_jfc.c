@@ -8,6 +8,7 @@
 #include "cdma_context.h"
 #include "cdma_mbox.h"
 #include "cdma_common.h"
+#include "cdma_event.h"
 #include "cdma_db.h"
 #include "cdma_jfc.h"
 
@@ -271,6 +272,12 @@ static int cdma_destroy_and_flush_jfc(struct cdma_dev *cdev, u32 jfcn)
 	return -ETIMEDOUT;
 }
 
+static void cdma_release_jfc_event(struct cdma_jfc *jfc)
+{
+	cdma_release_async_event(jfc->base.ctx,
+		&jfc->base.jfc_event.async_event_list);
+}
+
 static int cdma_post_create_jfc_mbox(struct cdma_dev *cdev, struct cdma_jfc *jfc)
 {
 	struct ubase_mbx_attr attr = { 0 };
@@ -323,10 +330,19 @@ struct cdma_base_jfc *cdma_create_jfc(struct cdma_dev *cdev,
 	if (ret)
 		goto err_get_jfc_buf;
 
+	if (udata) {
+		ret = cdma_get_jfae(jfc->base.ctx);
+		if (ret)
+			goto err_get_jfae;
+	}
+
 	ret = cdma_post_create_jfc_mbox(cdev, jfc);
 	if (ret)
 		goto err_alloc_cqc;
 
+	refcount_set(&jfc->event_refcount, 1);
+	init_completion(&jfc->event_comp);
+	jfc->base.jfae_handler = cdma_jfc_async_event_cb;
 	jfc->base.dev = cdev;
 
 	dev_dbg(cdev->dev, "create jfc id = %u, queue id = %u.\n",
@@ -335,6 +351,9 @@ struct cdma_base_jfc *cdma_create_jfc(struct cdma_dev *cdev,
 	return &jfc->base;
 
 err_alloc_cqc:
+	if (udata)
+		cdma_put_jfae(jfc->base.ctx);
+err_get_jfae:
 	cdma_free_jfc_buf(cdev, jfc);
 err_get_jfc_buf:
 	cdma_jfc_id_free(cdev, jfc->jfcn);
@@ -348,6 +367,7 @@ err_get_cmd:
 int cdma_delete_jfc(struct cdma_dev *cdev, u32 jfcn,
 		    struct cdma_cmd_delete_jfc_args *arg)
 {
+	struct cdma_jfc_event *jfc_event;
 	struct cdma_jfc *jfc;
 	int ret;
 
@@ -373,11 +393,20 @@ int cdma_delete_jfc(struct cdma_dev *cdev, u32 jfcn,
 	if (ret)
 		dev_err(cdev->dev, "jfc delete failed, jfcn = %u.\n", jfcn);
 
+	if (refcount_dec_and_test(&jfc->event_refcount))
+		complete(&jfc->event_comp);
+	wait_for_completion(&jfc->event_comp);
+
 	cdma_free_jfc_buf(cdev, jfc);
 	cdma_jfc_id_free(cdev, jfc->jfcn);
+	if (arg) {
+		jfc_event = &jfc->base.jfc_event;
+		arg->out.async_events_reported = jfc_event->async_events_reported;
+	}
 
 	pr_debug("Leave %s, jfcn: %u.\n", __func__, jfc->jfcn);
 
+	cdma_release_jfc_event(jfc);
 	kfree(jfc);
 
 	return 0;

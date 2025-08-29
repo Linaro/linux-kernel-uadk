@@ -7,8 +7,12 @@
 #include <linux/list.h>
 #include <linux/idr.h>
 #include <linux/spinlock.h>
+#include "cdma.h"
 
-struct cdma_dev;
+enum cdma_event_type {
+	CDMA_EVENT_JFC_ERR,
+	CDMA_EVENT_JFS_ERR,
+};
 
 struct cdma_ucontext {
 	struct cdma_dev *dev;
@@ -71,13 +75,28 @@ struct cdma_udata {
 	struct cdma_udrv_priv *udrv_data;
 };
 
+struct cdma_event {
+	struct cdma_dev *dev;
+	union {
+		struct cdma_base_jfc *jfc;
+		struct cdma_base_jfs *jfs;
+		u32 eid_idx;
+	} element;
+	enum cdma_event_type event_type;
+};
+
+typedef void (*cdma_event_callback_t)(struct cdma_event *event,
+				      struct cdma_context *ctx);
+
 struct cdma_base_jfs {
 	struct cdma_dev *dev;
 	struct cdma_context *ctx;
 	struct cdma_jfs_cfg cfg;
+	cdma_event_callback_t jfae_handler;
 	u64 usr_jfs;
 	u32 id;
 	atomic_t use_cnt;
+	struct cdma_jfs_event jfs_event;
 };
 
 struct cdma_jfc_cfg {
@@ -91,8 +110,10 @@ struct cdma_base_jfc {
 	struct cdma_context *ctx;
 	struct cdma_jfc_cfg jfc_cfg;
 	u32 id;
+	cdma_event_callback_t jfae_handler;
 	struct hlist_node hnode;
 	atomic_t use_cnt;
+	struct cdma_jfc_event jfc_event;
 };
 
 struct cdma_file {

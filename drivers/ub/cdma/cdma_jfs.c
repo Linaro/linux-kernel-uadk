@@ -12,6 +12,7 @@
 #include "cdma_cmd.h"
 #include "cdma_common.h"
 #include "cdma_mbox.h"
+#include "cdma_event.h"
 #include "cdma_context.h"
 #include "cdma_jfs.h"
 
@@ -296,13 +297,21 @@ struct cdma_base_jfs *cdma_create_jfs(struct cdma_dev *cdev,
 	if (ret)
 		goto err_get_jfs_buf;
 
+	if (udata) {
+		ret = cdma_get_jfae(jfs->base_jfs.ctx);
+		if (ret)
+			goto err_get_jfae;
+	}
+
 	ret = cdma_create_hw_jfs_ctx(cdev, jfs, cfg);
 	if (ret)
 		goto err_create_hw_jfsc;
 
 	cdma_set_query_flush_time(&jfs->sq, cfg->err_timeout);
-
+	refcount_set(&jfs->ae_ref_cnt, 1);
+	init_completion(&jfs->ae_comp);
 	jfs->sq.state = CDMA_JETTY_READY;
+	jfs->base_jfs.jfae_handler = cdma_jfs_async_event_cb;
 	jfs->base_jfs.dev = cdev;
 
 	dev_dbg(cdev->dev,
@@ -312,6 +321,9 @@ struct cdma_base_jfs *cdma_create_jfs(struct cdma_dev *cdev,
 	return &jfs->base_jfs;
 
 err_create_hw_jfsc:
+	if (udata)
+		cdma_put_jfae(jfs->base_jfs.ctx);
+err_get_jfae:
 	cdma_free_sq_buf(cdev, &jfs->sq);
 err_get_jfs_buf:
 	cdma_free_jfs_id(cdev, jfs->sq.id);
@@ -499,6 +511,12 @@ static int cdma_modify_and_destroy_jfs(struct cdma_dev *cdev,
 	return ret;
 }
 
+static inline void cdma_release_jfs_event(struct cdma_jfs *jfs)
+{
+	cdma_release_async_event(jfs->base_jfs.ctx,
+		&jfs->base_jfs.jfs_event.async_event_list);
+}
+
 int cdma_delete_jfs(struct cdma_dev *cdev, u32 jfs_id)
 {
 	struct cdma_jfs *jfs;
@@ -524,11 +542,17 @@ int cdma_delete_jfs(struct cdma_dev *cdev, u32 jfs_id)
 	if (ret)
 		dev_err(cdev->dev, "jfs delete failed, id = %u.\n", jfs->id);
 
+	if (refcount_dec_and_test(&jfs->ae_ref_cnt))
+		complete(&jfs->ae_comp);
+	wait_for_completion(&jfs->ae_comp);
+
 	cdma_free_sq_buf(cdev, &jfs->sq);
 
 	cdma_free_jfs_id(cdev, jfs_id);
 
 	pr_debug("Leave %s, jfsn: %u.\n", __func__, jfs_id);
+
+	cdma_release_jfs_event(jfs);
 
 	kfree(jfs);
 

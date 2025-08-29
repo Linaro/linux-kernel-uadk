@@ -10,6 +10,7 @@
 #include "cdma_dev.h"
 #include "cdma_chardev.h"
 #include <ub/ubase/ubase_comm_dev.h>
+#include "cdma_eq.h"
 #include "cdma_cmd.h"
 
 /* Enabling jfc_arm_mode will cause jfc to report cqe; otherwise, it will not. */
@@ -24,9 +25,29 @@ MODULE_PARM_DESC(cqe_mode, "Set cqe reporting mode, default: 1 (0:BY_COUNT, 1:BY
 
 struct class *cdma_cdev_class;
 
+static int cdma_register_event(struct auxiliary_device *adev)
+{
+	int ret;
+
+	ret = cdma_reg_ae_event(adev);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static inline void cdma_unregister_event(struct auxiliary_device *adev)
+{
+	cdma_unreg_ae_event(adev);
+}
+
 static int cdma_init_dev_info(struct auxiliary_device *auxdev, struct cdma_dev *cdev)
 {
 	int ret;
+
+	ret = cdma_register_event(auxdev);
+	if (ret)
+		return ret;
 
 	/* query eu failure does not affect driver loading, as eu can be updated. */
 	ret = cdma_ctrlq_query_eu(cdev);
@@ -77,6 +98,7 @@ static void cdma_uninit_dev(struct auxiliary_device *auxdev)
 		return;
 	}
 
+	cdma_unregister_event(auxdev);
 	cdma_destroy_chardev(cdev);
 	cdma_destroy_dev(cdev);
 }

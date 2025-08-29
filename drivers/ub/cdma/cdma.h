@@ -8,7 +8,7 @@
 #include <linux/types.h>
 #include <linux/cdev.h>
 #include <ub/ubus/ubus.h>
-
+#include <ub/ubase/ubase_comm_eq.h>
 #include <ub/cdma/cdma_api.h>
 
 extern u32 jfc_arm_mode;
@@ -187,9 +187,26 @@ struct cdma_dev {
 	struct cdma_table ctp_table;
 	struct cdma_table jfs_table;
 	struct cdma_table jfc_table;
+	struct ubase_event_nb *ae_event_addr[UBASE_EVENT_TYPE_MAX];
 	struct mutex file_mutex;
 	struct list_head file_list;
 	struct page *arm_db_page;
 };
+
+struct cdma_jfs_event {
+	struct list_head async_event_list;
+	u32 async_events_reported;
+};
+
+struct cdma_jfc_event {
+	struct cdma_base_jfc *jfc;
+	struct list_head async_event_list;
+	u32 async_events_reported;
+};
+
+static inline struct cdma_dev *get_cdma_dev(struct auxiliary_device *adev)
+{
+	return (struct cdma_dev *)dev_get_drvdata(&adev->dev);
+}
 
 #endif /* _CDMA_H_ */

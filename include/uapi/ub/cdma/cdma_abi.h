@@ -10,6 +10,13 @@
 #define CDMA_IOC_MAGIC 'C'
 #define CDMA_SYNC _IOWR(CDMA_IOC_MAGIC, 0, struct cdma_ioctl_hdr)
 
+/* cdma event ioctl cmd */
+#define CDMA_EVENT_CMD_MAGIC 'F'
+#define JFAE_CMD_GET_ASYNC_EVENT 0
+
+#define CDMA_CMD_GET_ASYNC_EVENT	\
+	_IOWR(CDMA_EVENT_CMD_MAGIC, JFAE_CMD_GET_ASYNC_EVENT, struct cdma_cmd_async_event)
+
 #define CDMA_DOORBELL_OFFSET 0x80
 
 #define MAP_COMMAND_MASK 0xff
@@ -97,6 +104,11 @@ struct cdma_cmd_create_jfs_args {
 	struct cdma_cmd_udrv_priv udata;
 };
 
+struct cdma_cmd_async_event {
+	__u64 event_data;
+	__u32 event_type;
+};
+
 struct cdma_cmd_delete_jfs_args {
 	struct {
 		__u32 jfs_id;
@@ -156,6 +168,9 @@ struct cdma_cmd_delete_jfc_args {
 		__u64 handle; /* handle of jfc */
 		__u32 queue_id;
 	} in;
+	struct {
+		__u32 async_events_reported;
+	} out;
 };
 
 struct dev_eid {

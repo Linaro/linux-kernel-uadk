@@ -12,6 +12,7 @@
 #include "cdma_tp.h"
 #include "cdma_jfs.h"
 #include "cdma_queue.h"
+#include "cdma_event.h"
 #include "cdma_jfc.h"
 #include "cdma_uobj.h"
 #include "cdma_ioctl.h"
@@ -65,6 +66,7 @@ static int cdma_create_ucontext(struct cdma_ioctl_hdr *hdr,
 	struct cdma_create_context_args args = { 0 };
 	struct cdma_dev *cdev = cfile->cdev;
 	struct cdma_context *ctx;
+	struct cdma_jfae *jfae;
 	int ret;
 
 	if (cfile->uctx) {
@@ -87,22 +89,34 @@ static int cdma_create_ucontext(struct cdma_ioctl_hdr *hdr,
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 
+	ctx->jfae = cdma_alloc_jfae(cfile);
+	if (!ctx->jfae) {
+		dev_err(cdev->dev, "create jfae failed.\n");
+		ret = -EFAULT;
+		goto free_context;
+	}
+
+	jfae = (struct cdma_jfae *)ctx->jfae;
+	jfae->ctx = ctx;
 	args.out.cqe_size = cdev->caps.cqe_size;
 	args.out.dwqe_enable =
 		!!(cdev->caps.feature & CDMA_CAP_FEATURE_DIRECT_WQE);
+	args.out.async_fd = jfae->fd;
 	cfile->uctx = ctx;
 
 	ret = (int)copy_to_user((void *)hdr->args_addr, &args,
 				(u32)sizeof(args));
 	if (ret) {
 		dev_err(cdev->dev, "copy ctx to user failed, ret = %d.\n", ret);
-		goto free_context;
+		goto free_jfae;
 	}
 
 	return ret;
 
-free_context:
+free_jfae:
 	cfile->uctx = NULL;
+	cdma_free_jfae((struct cdma_jfae *)ctx->jfae);
+free_context:
 	cdma_free_context(cdev, ctx);
 
 	return ret;
@@ -270,6 +284,7 @@ static int cdma_cmd_create_jfs(struct cdma_ioctl_hdr *hdr,
 {
 	struct cdma_cmd_create_jfs_args arg = { 0 };
 	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_jfs_event *jfs_event;
 	struct cdma_jfs_cfg cfg = { 0 };
 	struct cdma_udata udata = { 0 };
 	struct cdma_base_jfs *jfs;
@@ -316,6 +331,9 @@ static int cdma_cmd_create_jfs(struct cdma_ioctl_hdr *hdr,
 	}
 
 	uobj->object = jfs;
+	jfs_event = &jfs->jfs_event;
+	jfs_event->async_events_reported = 0;
+	INIT_LIST_HEAD(&jfs_event->async_event_list);
 
 	arg.out.id = jfs->id;
 	arg.out.handle = uobj->id;
@@ -497,6 +515,7 @@ static int cdma_cmd_create_jfc(struct cdma_ioctl_hdr *hdr,
 {
 	struct cdma_cmd_create_jfc_args arg = { 0 };
 	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_jfc_event *jfc_event;
 	struct cdma_jfc_cfg cfg = { 0 };
 	struct cdma_udata udata = { 0 };
 	struct cdma_base_jfc *jfc;
@@ -541,7 +560,9 @@ static int cdma_cmd_create_jfc(struct cdma_ioctl_hdr *hdr,
 		goto err_create_jfc;
 	}
 
+	jfc_event = &jfc->jfc_event;
 	uobj->object = jfc;
+	cdma_init_jfc_event(jfc_event, jfc);
 
 	arg.out.id = jfc->id;
 	arg.out.depth = jfc->jfc_cfg.depth;

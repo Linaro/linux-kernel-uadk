@@ -23,6 +23,34 @@ struct cdma_udrv_priv {
 	u32 out_len;
 };
 
+union cdma_jfs_flag {
+	struct {
+		u32 error_suspend : 1;
+		u32 outorder_comp : 1;
+		u32 reserved : 30;
+	} bs;
+	u32 value;
+};
+
+struct cdma_jfs_cfg {
+	u32 depth;
+	union cdma_jfs_flag flag;
+	u32 eid_index;
+	u8 priority;
+	u8 max_sge;
+	u8 max_rsge;
+	u8 rnr_retry;
+	u8 err_timeout;
+	u32 jfc_id;
+	u32 sqe_pos;
+	u32 rmt_eid;
+	u32 tpn;
+	u32 pld_pos;
+	u32 pld_token_id;
+	u32 queue_id;
+	u32 trans_mode;
+};
+
 struct cdma_tp_cfg {
 	u32 scna;
 	u32 dcna;
@@ -41,6 +69,15 @@ struct cdma_base_tp {
 struct cdma_udata {
 	struct cdma_context *uctx;
 	struct cdma_udrv_priv *udrv_data;
+};
+
+struct cdma_base_jfs {
+	struct cdma_dev *dev;
+	struct cdma_context *ctx;
+	struct cdma_jfs_cfg cfg;
+	u64 usr_jfs;
+	u32 id;
+	atomic_t use_cnt;
 };
 
 struct cdma_jfc_cfg {

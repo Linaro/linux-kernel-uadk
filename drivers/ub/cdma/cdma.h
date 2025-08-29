@@ -185,6 +185,7 @@ struct cdma_dev {
 
 	struct cdma_table queue_table;
 	struct cdma_table ctp_table;
+	struct cdma_table jfs_table;
 	struct cdma_table jfc_table;
 	struct mutex file_mutex;
 	struct list_head file_list;

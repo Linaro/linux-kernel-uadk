@@ -10,6 +10,7 @@
 #include "cdma_context.h"
 #include "cdma_types.h"
 #include "cdma_tp.h"
+#include "cdma_jfs.h"
 #include "cdma_queue.h"
 #include "cdma_jfc.h"
 #include "cdma_uobj.h"
@@ -245,6 +246,56 @@ static int cdma_cmd_delete_ctp(struct cdma_ioctl_hdr *hdr,
 	return ret;
 }
 
+static int cdma_cmd_delete_jfs(struct cdma_ioctl_hdr *hdr,
+			       struct cdma_file *cfile)
+{
+	struct cdma_cmd_delete_jfs_args arg = { 0 };
+	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_base_jfs *base_jfs;
+	struct cdma_queue *queue;
+	struct cdma_uobj *uobj;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len != (u32)sizeof(arg))
+		return -EINVAL;
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret) {
+		dev_err(&cdev->adev->dev,
+			"delete jfs get user data failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	uobj = cdma_uobj_get(cfile, arg.in.queue_id, UOBJ_TYPE_QUEUE);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev,
+			"delete jfs, get queue uobj failed, queue id = %u.\n",
+			arg.in.queue_id);
+		return -EINVAL;
+	}
+	queue = uobj->object;
+
+	uobj = cdma_uobj_get(cfile, arg.in.handle, UOBJ_TYPE_JFS);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev, "get jfs uobj failed, handle = %llu.\n",
+			arg.in.handle);
+		return -EINVAL;
+	}
+
+	base_jfs = uobj->object;
+	ret = cdma_delete_jfs(cdev, base_jfs->id);
+	if (ret) {
+		dev_err(&cdev->adev->dev, "delete jfs failed.\n");
+		return ret;
+	}
+
+	cdma_set_queue_res(cdev, queue, QUEUE_RES_JFS, NULL);
+	cdma_uobj_delete(uobj);
+
+	return 0;
+}
+
 static int cdma_cmd_create_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *cfile)
 {
 	struct cdma_cmd_create_queue_args arg = { 0 };
@@ -331,8 +382,8 @@ static int cdma_cmd_delete_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *c
 	}
 
 	queue = (struct cdma_queue *)uobj->object;
-	if (queue->jfc || queue->tp) {
-		dev_err(cdev->dev, "jfc/tp is still in use.");
+	if (queue->jfc || queue->jfs || queue->tp) {
+		dev_err(cdev->dev, "jfc/jfs/tp is still in use.");
 		return -EBUSY;
 	}
 
@@ -479,6 +530,7 @@ static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_DELETE_CTX] = cdma_delete_ucontext,
 	[CDMA_CMD_CREATE_CTP] = cdma_cmd_create_ctp,
 	[CDMA_CMD_DELETE_CTP] = cdma_cmd_delete_ctp,
+	[CDMA_CMD_DELETE_JFS] = cdma_cmd_delete_jfs,
 	[CDMA_CMD_CREATE_QUEUE] = cdma_cmd_create_queue,
 	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,
 	[CDMA_CMD_CREATE_JFC] = cdma_cmd_create_jfc,

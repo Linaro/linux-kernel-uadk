@@ -10,17 +10,20 @@ struct queue_cfg;
 
 enum cdma_queue_res_type {
 	QUEUE_RES_TP,
+	QUEUE_RES_JFS,
 	QUEUE_RES_JFC
 };
 
 struct cdma_queue {
 	struct cdma_base_jfc *jfc;
+	struct cdma_base_jfs *jfs;
 	struct cdma_base_tp *tp;
 	struct cdma_context *ctx;
 	u32 id;
 	struct queue_cfg cfg;
 	bool is_kernel;
 	struct list_head list;
+	u32 jfs_id;
 	u32 jfc_id;
 };
 

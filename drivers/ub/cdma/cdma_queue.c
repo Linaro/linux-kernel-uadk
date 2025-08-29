@@ -6,6 +6,7 @@
 #include "cdma_common.h"
 #include "cdma_context.h"
 #include "cdma_jfc.h"
+#include "cdma_jfs.h"
 #include "cdma_tp.h"
 #include "cdma_queue.h"
 #include "cdma.h"
@@ -78,6 +79,8 @@ delete_jfc:
 static void cdma_delete_queue_res(struct cdma_dev *cdev,
 				  struct cdma_queue *queue)
 {
+	cdma_delete_jfs(cdev, queue->jfs->id);
+	queue->jfs = NULL;
 	cdma_delete_ctp(cdev, queue->tp->tp_id);
 	queue->tp = NULL;
 	cdma_delete_jfc(cdev, queue->jfc->id, NULL);
@@ -189,6 +192,11 @@ void cdma_set_queue_res(struct cdma_dev *cdev, struct cdma_queue *queue,
 	switch (type) {
 	case QUEUE_RES_TP:
 		queue->tp = res;
+		break;
+	case QUEUE_RES_JFS:
+		queue->jfs = res;
+		if (queue->jfs)
+			queue->jfs_id = queue->jfs->id;
 		break;
 	case QUEUE_RES_JFC:
 		queue->jfc = res;

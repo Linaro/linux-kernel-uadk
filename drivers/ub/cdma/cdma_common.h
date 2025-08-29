@@ -11,6 +11,33 @@
 
 #define CDMA_DB_SIZE 64
 
+enum cdma_jetty_state {
+	CDMA_JETTY_RESET,
+	CDMA_JETTY_READY,
+	CDMA_JETTY_SUSPENDED,
+	CDMA_JETTY_ERROR,
+};
+
+struct cdma_jetty_queue {
+	struct cdma_buf buf;
+	void *kva_curr;
+	u32 id;
+	void __iomem *db_addr;
+	void __iomem *dwqe_addr;
+	u32 pi;
+	u32 ci;
+	spinlock_t lock;
+	u32 max_inline_size;
+	u32 max_sge_num;
+	u32 tid;
+	bool flush_flag;
+	bool is_jetty;
+	u32 sqe_bb_cnt;
+	enum cdma_jetty_state state;
+	u32 non_pin;
+	u32 ta_tmo;
+};
+
 struct cdma_umem_param {
 	struct cdma_dev *dev;
 	u64 va;

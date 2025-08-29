@@ -7,6 +7,16 @@
 #include "cdma_common.h"
 #include "cdma_types.h"
 
+#define MAX_WQEBB_NUM 4
+#define CDMA_JFS_WQEBB_SIZE 64
+#define CDMA_JFS_SGE_SIZE 16
+#define SQE_WRITE_NOTIFY_CTL_LEN 80
+
+#define CDMA_TA_TIMEOUT_128MS 128
+#define CDMA_TA_TIMEOUT_1000MS 1000
+#define CDMA_TA_TIMEOUT_8000MS 8000
+#define CDMA_TA_TIMEOUT_64000MS 64000
+
 #define CDMA_RCV_SEND_MAX_DIFF 512U
 
 struct cdma_jfs {
@@ -140,6 +150,9 @@ struct cdma_jfs_ctx {
 	u32 taack_nack_bm[32];
 };
 
+struct cdma_base_jfs *cdma_create_jfs(struct cdma_dev *cdev,
+				      struct cdma_jfs_cfg *cfg,
+				      struct cdma_udata *udata);
 int cdma_delete_jfs(struct cdma_dev *cdev, u32 jfs_id);
 
 #endif

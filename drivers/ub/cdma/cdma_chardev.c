@@ -9,6 +9,7 @@
 #include "cdma_ioctl.h"
 #include "cdma_context.h"
 #include "cdma_chardev.h"
+#include "cdma_jfs.h"
 #include "cdma_types.h"
 #include "cdma_uobj.h"
 #include "cdma.h"
@@ -30,6 +31,11 @@ static void cdma_num_free(struct cdma_dev *cdev)
 	spin_lock(&cdma_num_mg.lock);
 	idr_remove(&cdma_num_mg.idr, cdev->chardev.dev_num);
 	spin_unlock(&cdma_num_mg.lock);
+}
+
+static inline u64 cdma_get_mmap_idx(struct vm_area_struct *vma)
+{
+	return (vma->vm_pgoff >> MAP_INDEX_SHIFT) & MAP_INDEX_MASK;
 }
 
 static inline int cdma_get_mmap_cmd(struct vm_area_struct *vma)
@@ -74,11 +80,39 @@ static long cdma_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return -ENOIOCTLCMD;
 }
 
+static int cdma_remap_check_jfs_id(struct cdma_file *cfile, u32 jfs_id)
+{
+	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_jfs *jfs;
+	int ret = -EINVAL;
+
+	spin_lock(&cdev->jfs_table.lock);
+	jfs = idr_find(&cdev->jfs_table.idr_tbl.idr, jfs_id);
+	if (!jfs) {
+		spin_unlock(&cdev->jfs_table.lock);
+		dev_err(cdev->dev,
+			"check failed, jfs_id = %u not exist.\n", jfs_id);
+		return ret;
+	}
+
+	if (cfile->uctx != jfs->base_jfs.ctx) {
+		dev_err(cdev->dev,
+			"check failed, jfs_id = %u, uctx invalid\n", jfs_id);
+		spin_unlock(&cdev->jfs_table.lock);
+		return -EINVAL;
+	}
+	spin_unlock(&cdev->jfs_table.lock);
+
+	return 0;
+}
+
 static int cdma_remap_pfn_range(struct cdma_file *cfile, struct vm_area_struct *vma)
 {
 #define JFC_DB_UNMAP_BOUND 1
 	struct cdma_dev *cdev = cfile->cdev;
 	resource_size_t db_addr;
+	u64 address;
+	u32 jfs_id;
 	u32 cmd;
 
 	db_addr = cdev->db_base;
@@ -93,6 +127,22 @@ static int cdma_remap_pfn_range(struct cdma_file *cfile, struct vm_area_struct *
 				       page_to_pfn(cdev->arm_db_page),
 				       PAGE_SIZE, vma->vm_page_prot)) {
 			dev_err(cdev->dev, "remap jfc page fail.\n");
+			return -EAGAIN;
+		}
+		break;
+	case CDMA_MMAP_JETTY_DSQE:
+		jfs_id = cdma_get_mmap_idx(vma);
+		if (cdma_remap_check_jfs_id(cfile, jfs_id)) {
+			dev_err(cdev->dev,
+				"mmap failed, invalid jfs_id = %u\n", jfs_id);
+			return -EINVAL;
+		}
+
+		address = (uint64_t)db_addr + CDMA_JETTY_DSQE_OFFSET + jfs_id * PAGE_SIZE;
+
+		if (io_remap_pfn_range(vma, vma->vm_start, address >> PAGE_SHIFT,
+				       PAGE_SIZE, vma->vm_page_prot)) {
+			dev_err(cdev->dev, "remap jetty page failed.\n");
 			return -EAGAIN;
 		}
 		break;

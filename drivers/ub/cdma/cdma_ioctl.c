@@ -246,6 +246,102 @@ static int cdma_cmd_delete_ctp(struct cdma_ioctl_hdr *hdr,
 	return ret;
 }
 
+static void cdma_config_jfs(struct cdma_jfs_cfg *cfg,
+			    const struct cdma_cmd_create_jfs_args *arg)
+{
+	cfg->depth = arg->in.depth;
+	cfg->flag.value = arg->in.flag;
+	cfg->eid_index = arg->in.eid_idx;
+	cfg->max_sge = arg->in.max_sge;
+	cfg->max_rsge = arg->in.max_rsge;
+	cfg->rnr_retry = arg->in.rnr_retry;
+	cfg->err_timeout = arg->in.err_timeout;
+	cfg->priority = arg->in.priority;
+	cfg->jfc_id = arg->in.jfc_id;
+	cfg->rmt_eid = arg->in.rmt_eid;
+	cfg->pld_token_id = arg->in.pld_token_id;
+	cfg->tpn = arg->in.tpn;
+	cfg->queue_id = arg->in.queue_id;
+	cfg->trans_mode = arg->in.trans_mode;
+}
+
+static int cdma_cmd_create_jfs(struct cdma_ioctl_hdr *hdr,
+			       struct cdma_file *cfile)
+{
+	struct cdma_cmd_create_jfs_args arg = { 0 };
+	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_jfs_cfg cfg = { 0 };
+	struct cdma_udata udata = { 0 };
+	struct cdma_base_jfs *jfs;
+	struct cdma_queue *queue;
+	struct cdma_uobj *uobj;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len != (u32)sizeof(arg) || !cfile->uctx)
+		return -EINVAL;
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret) {
+		dev_err(&cdev->adev->dev,
+			"create jfs get user data failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	uobj = cdma_uobj_get(cfile, arg.in.queue_id, UOBJ_TYPE_QUEUE);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev,
+			"create jfs, get queue uobj failed, queue id = %u.\n",
+			arg.in.queue_id);
+		return -EINVAL;
+	}
+	queue = (struct cdma_queue *)uobj->object;
+
+	uobj = cdma_uobj_create(cfile, UOBJ_TYPE_JFS);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev, "create jfs uobj failed.\n");
+		return -ENOMEM;
+	}
+
+	udata.uctx = cfile->uctx;
+	udata.udrv_data = (struct cdma_udrv_priv *)&arg.udata;
+	arg.in.queue_id = queue->id;
+	cdma_config_jfs(&cfg, &arg);
+
+	jfs = cdma_create_jfs(cdev, &cfg, &udata);
+	if (!jfs) {
+		dev_err(&cdev->adev->dev, "create jfs failed.\n");
+		ret = -EFAULT;
+		goto err_create_jfs;
+	}
+
+	uobj->object = jfs;
+
+	arg.out.id = jfs->id;
+	arg.out.handle = uobj->id;
+	arg.out.depth = jfs->cfg.depth;
+	arg.out.max_sge = jfs->cfg.max_sge;
+	arg.out.max_rsge = jfs->cfg.max_rsge;
+
+	ret = (int)copy_to_user((void *)hdr->args_addr, &arg, (u32)sizeof(arg));
+	if (ret) {
+		ret = -EFAULT;
+		dev_err(&cdev->adev->dev,
+			"create jfs copy to user data failed, ret = %d.\n",
+			ret);
+		goto err_copy_to_usr;
+	}
+
+	cdma_set_queue_res(cdev, queue, QUEUE_RES_JFS, jfs);
+
+	return 0;
+err_copy_to_usr:
+	cdma_delete_jfs(cdev, jfs->id);
+err_create_jfs:
+	cdma_uobj_delete(uobj);
+	return ret;
+}
+
 static int cdma_cmd_delete_jfs(struct cdma_ioctl_hdr *hdr,
 			       struct cdma_file *cfile)
 {
@@ -530,6 +626,7 @@ static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_DELETE_CTX] = cdma_delete_ucontext,
 	[CDMA_CMD_CREATE_CTP] = cdma_cmd_create_ctp,
 	[CDMA_CMD_DELETE_CTP] = cdma_cmd_delete_ctp,
+	[CDMA_CMD_CREATE_JFS] = cdma_cmd_create_jfs,
 	[CDMA_CMD_DELETE_JFS] = cdma_cmd_delete_jfs,
 	[CDMA_CMD_CREATE_QUEUE] = cdma_cmd_create_queue,
 	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,

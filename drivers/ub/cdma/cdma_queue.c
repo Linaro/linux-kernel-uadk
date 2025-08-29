@@ -23,6 +23,24 @@ struct cdma_queue *cdma_find_queue(struct cdma_dev *cdev, u32 queue_id)
 	return queue;
 }
 
+static void cdma_k_assemble_jfs_cfg(struct cdma_jfs_cfg *jfs_cfg,
+				    struct cdma_dev *cdev,
+				    u32 eid_index,
+				    struct queue_cfg *cfg,
+				    struct cdma_queue *queue)
+{
+	jfs_cfg->eid_index = eid_index;
+	jfs_cfg->max_rsge = cdev->base.attr.dev_cap.max_jfs_rsge;
+	jfs_cfg->max_sge = cdev->base.attr.dev_cap.max_jfs_sge;
+	jfs_cfg->depth = cfg->queue_depth;
+	jfs_cfg->err_timeout = CDMA_TYPICAL_ERR_TIMEOUT;
+	jfs_cfg->priority = cfg->priority;
+	jfs_cfg->rnr_retry = CDMA_TYPICAL_RNR_RETRY;
+	jfs_cfg->rmt_eid = cfg->rmt_eid.dw0;
+	jfs_cfg->queue_id = queue->id;
+	jfs_cfg->trans_mode = cfg->trans_mode;
+}
+
 static void cdma_k_assemble_jfc_cfg(struct cdma_jfc_cfg *jfc_cfg,
 				    struct queue_cfg *cfg,
 				    struct cdma_queue *queue)
@@ -44,9 +62,11 @@ static int cdma_create_queue_res(struct cdma_dev *cdev, struct queue_cfg *cfg,
 				 struct cdma_queue *queue, u32 eid_index)
 {
 	struct cdma_jfc_cfg jfc_cfg = { 0 };
+	struct cdma_jfs_cfg jfs_cfg = { 0 };
 	struct cdma_tp_cfg tp_cfg = { 0 };
 	int ret;
 
+	cdma_k_assemble_jfs_cfg(&jfs_cfg, cdev, eid_index, cfg, queue);
 	cdma_k_assemble_jfc_cfg(&jfc_cfg, cfg, queue);
 	cdma_k_assemble_tp_cfg(&tp_cfg, cdev, cfg);
 
@@ -63,13 +83,25 @@ static int cdma_create_queue_res(struct cdma_dev *cdev, struct queue_cfg *cfg,
 		goto delete_jfc;
 	}
 
+	jfs_cfg.tpn = queue->tp->tpn;
+	jfs_cfg.jfc_id = queue->jfc->id;
+	queue->jfs = cdma_create_jfs(cdev, &jfs_cfg, NULL);
+	if (!queue->jfs) {
+		dev_err(cdev->dev, "create jfs failed.\n");
+		ret = -EFAULT;
+		goto delete_tp;
+	}
+
+	queue->jfs_id = queue->jfs->id;
 	queue->jfc_id = queue->jfc->id;
 
-	dev_dbg(cdev->dev, "set queue %u jfc id: %u.\n",
-		queue->id, queue->jfc_id);
+	dev_dbg(cdev->dev, "set queue %u jfs id: %u, jfc id: %u.\n",
+		queue->id, queue->jfs_id, queue->jfc_id);
 
 	return 0;
 
+delete_tp:
+	cdma_delete_ctp(cdev, queue->tp->tp_id);
 delete_jfc:
 	cdma_delete_jfc(cdev, queue->jfc->id, NULL);
 

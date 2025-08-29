@@ -105,12 +105,15 @@ static void cdma_tbl_destroy(struct cdma_dev *cdev, struct cdma_table *table,
 static void cdma_init_tables(struct cdma_dev *cdev)
 {
 	struct cdma_res *queue = &cdev->caps.queue;
+	struct cdma_res *jfs = &cdev->caps.jfs;
 	struct cdma_res *jfc = &cdev->caps.jfc;
 
 	cdma_tbl_init(&cdev->queue_table, queue->start_idx + queue->max_cnt - 1,
 		      queue->start_idx);
 	cdma_tbl_init(&cdev->jfc_table, jfc->start_idx + jfc->max_cnt - 1,
 		      jfc->start_idx);
+	cdma_tbl_init(&cdev->jfs_table, jfs->max_cnt + jfs->start_idx - 1,
+		      jfs->start_idx);
 	cdma_tbl_init(&cdev->ctp_table, CDMA_RANGE_INDEX_ENTRY_CNT, 0);
 }
 

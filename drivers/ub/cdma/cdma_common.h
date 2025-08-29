@@ -7,15 +7,41 @@
 #include <linux/types.h>
 #include "cdma.h"
 
+#define JETTY_DSQE_OFFSET 0x1000
+#define CDMA_USER_DATA_H_OFFSET 32U
+
+#define SQE_TOKEN_ID_L_MASK GENMASK(11, 0)
+#define SQE_TOKEN_ID_H_OFFSET 12U
+#define SQE_TOKEN_ID_H_MASK GENMASK(7, 0)
+#define SQE_VA_L_OFFSET 12U
+#define SQE_VA_L_VALID_BIT GENMASK(19, 0)
+#define SQE_VA_H_OFFSET 32U
+#define SQE_VA_H_VALID_BIT GENMASK(31, 0)
+#define WQE_BB_SIZE_SHIFT 6
+#define AVAIL_SGMT_OST_INIT 512
+
 #define CDMA_RANGE_INDEX_ENTRY_CNT 0x100000
 
 #define CDMA_DB_SIZE 64
+
+#define SQE_PLD_TOKEN_ID_MASK GENMASK(19, 0)
+
+enum cdma_jfsc_mode {
+	CDMA_JFS_MODE,
+	CDMA_JETTY_MODE,
+};
 
 enum cdma_jetty_state {
 	CDMA_JETTY_RESET,
 	CDMA_JETTY_READY,
 	CDMA_JETTY_SUSPENDED,
 	CDMA_JETTY_ERROR,
+};
+
+enum cdma_jetty_type {
+	CDMA_JETTY_ROL = 2,
+	CDMA_JETTY_ROI,
+	CDMA_JETTY_TYPE_RESERVED,
 };
 
 struct cdma_jetty_queue {

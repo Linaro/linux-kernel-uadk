@@ -10,7 +10,15 @@
 #define CDMA_IOC_MAGIC 'C'
 #define CDMA_SYNC _IOWR(CDMA_IOC_MAGIC, 0, struct cdma_ioctl_hdr)
 
+#define CDMA_DOORBELL_OFFSET 0x80
+
 #define MAP_COMMAND_MASK 0xff
+#define MAP_INDEX_MASK 0xffffff
+#define MAP_INDEX_SHIFT 8
+
+/* cdma queue cfg deault value */
+#define CDMA_TYPICAL_RNR_RETRY 7
+#define CDMA_TYPICAL_ERR_TIMEOUT 2 /* 0:128ms 1:1s 2:8s 3:64s */
 
 enum db_mmap_type {
 	CDMA_MMAP_JFC_PAGE,
@@ -23,6 +31,7 @@ enum cdma_cmd {
 	CDMA_CMD_DELETE_CTX,
 	CDMA_CMD_CREATE_CTP,
 	CDMA_CMD_DELETE_CTP,
+	CDMA_CMD_CREATE_JFS,
 	CDMA_CMD_DELETE_JFS,
 	CDMA_CMD_CREATE_QUEUE,
 	CDMA_CMD_DELETE_QUEUE,
@@ -37,11 +46,55 @@ struct cdma_ioctl_hdr {
 	__u64 args_addr;
 };
 
+struct cdma_create_jfs_ucmd {
+	__u64 buf_addr;
+	__u32 buf_len;
+	__u64 db_addr;
+	__u64 idx_addr;
+	__u32 idx_len;
+	__u64 jetty_addr;
+	__u32 sqe_bb_cnt;
+	__u32 jetty_type;
+	__u32 non_pin;
+	__u32 jfs_id;
+	__u32 queue_id;
+	__u32 tid;
+};
+
 struct cdma_cmd_udrv_priv {
 	__u64 in_addr;
 	__u32 in_len;
 	__u64 out_addr;
 	__u32 out_len;
+};
+
+struct cdma_cmd_create_jfs_args {
+	struct {
+		__u32 depth;
+		__u32 flag;
+		__u32 eid_idx;
+		__u8 priority;
+		__u8 max_sge;
+		__u8 max_rsge;
+		__u8 retry_cnt;
+		__u8 rnr_retry;
+		__u8 err_timeout;
+		__u32 jfc_id;
+		__u32 queue_id;
+		__u32 rmt_eid;
+		__u32 pld_token_id;
+		__u32 tpn;
+		__u64 dma_jfs; /* dma jfs pointer */
+		__u32 trans_mode;
+	} in;
+	struct {
+		__u32 id;
+		__u32 depth;
+		__u8 max_sge;
+		__u8 max_rsge;
+		__u64 handle;
+	} out;
+	struct cdma_cmd_udrv_priv udata;
 };
 
 struct cdma_cmd_delete_jfs_args {

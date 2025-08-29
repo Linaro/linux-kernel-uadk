@@ -23,11 +23,13 @@ struct cdma_context {
 	bool is_kernel;
 	atomic_t ref_cnt;
 	struct list_head queue_list;
+	struct list_head seg_list;
 };
 
 struct cdma_ctx_res {
 	struct cdma_context *ctx;
 	struct xarray queue_xa;
+	struct xarray seg_xa;
 };
 
 struct cdma_context *cdma_find_ctx_by_handle(struct cdma_dev *cdev, int handle);

@@ -51,6 +51,22 @@ struct queue_cfg {
 	u32 trans_mode;
 };
 
+struct dma_seg {
+	u64 handle;
+	u64 sva;
+	u64 len;
+	u32 tid; /* data valid only in bit 0-19 */
+	u32 token_value;
+	bool token_value_valid;
+};
+
+struct dma_seg_cfg {
+	u64 sva;
+	u64 len;
+	u32 token_value;
+	bool token_value_valid;
+};
+
 struct dma_context {
 	struct dma_device *dma_dev;
 	u32 tid; /* data valid only in bit 0-19 */
@@ -70,6 +86,12 @@ int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id,
 		    struct queue_cfg *cfg);
 
 void dma_free_queue(struct dma_device *dma_dev, int queue_id);
+
+void dma_unregister_seg(struct dma_device *dma_dev, struct dma_seg *dma_seg);
+
+struct dma_seg *dma_import_seg(struct dma_seg_cfg *cfg);
+
+void dma_unimport_seg(struct dma_seg *dma_seg);
 
 int dma_poll_queue(struct dma_device *dma_dev, int queue_id, u32 cr_cnt,
 		   struct dma_cr *cr);

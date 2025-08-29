@@ -14,6 +14,7 @@
 #include "cdma_queue.h"
 #include "cdma_event.h"
 #include "cdma_jfc.h"
+#include "cdma_segment.h"
 #include "cdma_uobj.h"
 #include "cdma_ioctl.h"
 
@@ -131,7 +132,8 @@ static int cdma_delete_ucontext(struct cdma_ioctl_hdr *hdr,
 		dev_err(cdev->dev, "cdma context has not been created.\n");
 		return -ENOENT;
 	}
-	if (!list_empty(&cfile->uctx->queue_list)) {
+	if (!list_empty(&cfile->uctx->queue_list) ||
+	    !list_empty(&cfile->uctx->seg_list)) {
 		dev_err(cdev->dev,
 			"queue/segment is still in use, ctx handle = %d.\n",
 			cfile->uctx->handle);
@@ -510,6 +512,42 @@ static int cdma_cmd_delete_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *c
 	return ret;
 }
 
+static int cdma_cmd_unregister_seg(struct cdma_ioctl_hdr *hdr,
+				   struct cdma_file *cfile)
+{
+	struct cdma_cmd_unregister_seg_args arg = { 0 };
+	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_segment *seg;
+	struct cdma_uobj *uobj;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len != sizeof(arg)) {
+		dev_err(cdev->dev, "unregister seg arg invalid.\n");
+		return -EINVAL;
+	}
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret) {
+		dev_err(cdev->dev,
+			"unregister seg get user data failed, ret = %d.\n",
+			ret);
+		return -EFAULT;
+	}
+
+	uobj = cdma_uobj_get(cfile, arg.in.handle, UOBJ_TYPE_SEGMENT);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev, "get seg uobj failed.\n");
+		return -EINVAL;
+	}
+	seg = uobj->object;
+	list_del(&seg->list);
+	cdma_unregister_seg(cdev, seg);
+	cdma_uobj_delete(uobj);
+
+	return ret;
+}
+
 static int cdma_cmd_create_jfc(struct cdma_ioctl_hdr *hdr,
 			       struct cdma_file *cfile)
 {
@@ -689,6 +727,7 @@ static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_DELETE_CTP] = cdma_cmd_delete_ctp,
 	[CDMA_CMD_CREATE_JFS] = cdma_cmd_create_jfs,
 	[CDMA_CMD_DELETE_JFS] = cdma_cmd_delete_jfs,
+	[CDMA_CMD_UNREGISTER_SEG] = cdma_cmd_unregister_seg,
 	[CDMA_CMD_CREATE_QUEUE] = cdma_cmd_create_queue,
 	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,
 	[CDMA_CMD_CREATE_JFC] = cdma_cmd_create_jfc,

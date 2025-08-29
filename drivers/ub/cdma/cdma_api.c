@@ -4,6 +4,7 @@
 #define pr_fmt(fmt) "CDMA: " fmt
 #define dev_fmt pr_fmt
 
+#include "cdma_segment.h"
 #include "cdma_dev.h"
 #include "cdma_cmd.h"
 #include "cdma_context.h"
@@ -309,6 +310,60 @@ void dma_free_queue(struct dma_device *dma_dev, int queue_id)
 	atomic_dec(&ctx->ref_cnt);
 }
 EXPORT_SYMBOL_GPL(dma_free_queue);
+
+void dma_unregister_seg(struct dma_device *dma_dev, struct dma_seg *dma_seg)
+{
+	struct cdma_ctx_res *ctx_res;
+	struct cdma_context *ctx;
+	struct cdma_segment *seg;
+	struct cdma_dev *cdev;
+
+	if (!dma_dev || !dma_dev->private_data || !dma_seg)
+		return;
+
+	cdev = get_cdma_dev_by_eid(dma_dev->attr.eid.dw0);
+	if (!cdev) {
+		pr_err("can not find cdev by eid, eid = 0x%x\n",
+		       dma_dev->attr.eid.dw0);
+		return;
+	}
+
+	ctx_res = (struct cdma_ctx_res *)dma_dev->private_data;
+	seg = xa_load(&ctx_res->seg_xa, dma_seg->handle);
+	if (!seg) {
+		dev_err(cdev->dev,
+			"no segment found in this device, handle = %llu\n",
+			dma_seg->handle);
+		return;
+	}
+	xa_erase(&ctx_res->seg_xa, dma_seg->handle);
+	ctx = seg->ctx;
+
+	cdma_seg_ungrant(seg);
+	cdma_unregister_seg(cdev, seg);
+	kfree(dma_seg);
+
+	atomic_dec(&ctx->ref_cnt);
+}
+EXPORT_SYMBOL_GPL(dma_unregister_seg);
+
+struct dma_seg *dma_import_seg(struct dma_seg_cfg *cfg)
+{
+	if (!cfg || !cfg->sva || !cfg->len)
+		return NULL;
+
+	return cdma_import_seg(cfg);
+}
+EXPORT_SYMBOL_GPL(dma_import_seg);
+
+void dma_unimport_seg(struct dma_seg *dma_seg)
+{
+	if (!dma_seg)
+		return;
+
+	cdma_unimport_seg(dma_seg);
+}
+EXPORT_SYMBOL_GPL(dma_unimport_seg);
 
 int dma_poll_queue(struct dma_device *dma_dev, int queue_id, u32 cr_cnt,
 		   struct dma_cr *cr)

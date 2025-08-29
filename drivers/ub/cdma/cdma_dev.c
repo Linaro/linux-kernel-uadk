@@ -122,6 +122,7 @@ static void cdma_init_tables(struct cdma_dev *cdev)
 
 static void cdma_destroy_tables(struct cdma_dev *cdev)
 {
+	cdma_tbl_destroy(cdev, &cdev->seg_table, "SEG");
 	cdma_tbl_destroy(cdev, &cdev->ctp_table, "CTP");
 	cdma_tbl_destroy(cdev, &cdev->jfs_table, "JFS");
 	cdma_tbl_destroy(cdev, &cdev->jfc_table, "JFC");
@@ -193,6 +194,7 @@ static void cdma_uninit_dev_param(struct cdma_dev *cdev)
 static void cdma_release_table_res(struct cdma_dev *cdev)
 {
 	struct cdma_queue *queue;
+	struct cdma_segment *seg;
 	struct cdma_jfc *jfc;
 	struct cdma_jfs *jfs;
 	struct cdma_tp *tmp;
@@ -209,6 +211,9 @@ static void cdma_release_table_res(struct cdma_dev *cdev)
 
 	idr_for_each_entry(&cdev->queue_table.idr_tbl.idr, queue, id)
 		cdma_delete_queue(cdev, queue->id);
+
+	idr_for_each_entry(&cdev->seg_table.idr_tbl.idr, seg, id)
+		cdma_unregister_seg(cdev, seg);
 }
 
 static int cdma_ctrlq_eu_add(struct cdma_dev *cdev, struct eu_info *eu)

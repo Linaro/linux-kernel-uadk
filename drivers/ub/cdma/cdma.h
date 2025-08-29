@@ -188,6 +188,7 @@ struct cdma_dev {
 	struct cdma_table jfs_table;
 	struct cdma_table jfc_table;
 	struct cdma_table jfce_table;
+	struct cdma_table seg_table;
 	struct ubase_event_nb *ae_event_addr[UBASE_EVENT_TYPE_MAX];
 	struct mutex file_mutex;
 	struct list_head file_list;

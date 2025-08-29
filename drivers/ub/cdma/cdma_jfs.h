@@ -6,6 +6,7 @@
 
 #include "cdma_common.h"
 #include "cdma_types.h"
+#include "cdma_segment.h"
 
 #define MAX_WQEBB_NUM 4
 #define CDMA_JFS_WQEBB_SIZE 64

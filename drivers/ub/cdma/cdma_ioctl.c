@@ -567,7 +567,11 @@ static int cdma_cmd_create_jfc(struct cdma_ioctl_hdr *hdr,
 	arg.out.id = jfc->id;
 	arg.out.depth = jfc->jfc_cfg.depth;
 	arg.out.handle = uobj->id;
-
+	jfc_event->jfce = cdma_get_jfce_from_id(cdev, arg.in.jfce_id);
+	if (!jfc_event->jfce) {
+		ret = -EFAULT;
+		goto err_get_jfce;
+	}
 	ret = (int)copy_to_user((void *)hdr->args_addr, &arg, (u32)sizeof(arg));
 	if (ret != 0) {
 		dev_err(cdev->dev, "copy jfc to user failed, ret = %d.\n", ret);
@@ -579,6 +583,7 @@ static int cdma_cmd_create_jfc(struct cdma_ioctl_hdr *hdr,
 
 	return 0;
 err_copy_to_user:
+err_get_jfce:
 	cdma_delete_jfc(cdev, jfc->id, NULL);
 err_create_jfc:
 	cdma_uobj_delete(uobj);
@@ -641,6 +646,41 @@ static int cdma_cmd_delete_jfc(struct cdma_ioctl_hdr *hdr,
 	return 0;
 }
 
+static int cdma_cmd_create_jfce(struct cdma_ioctl_hdr *hdr,
+				struct cdma_file *cfile)
+{
+	struct cdma_cmd_create_jfce_args arg = { 0 };
+	struct cdma_jfce *jfce;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len != (u32)sizeof(arg))
+		return -EINVAL;
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret)
+		return -EFAULT;
+
+	jfce = cdma_alloc_jfce(cfile);
+	if (IS_ERR(jfce))
+		return PTR_ERR(jfce);
+
+	arg.out.fd = jfce->fd;
+	arg.out.id = jfce->id;
+	ret = (int)copy_to_user((void *)hdr->args_addr, &arg, (u32)sizeof(arg));
+	if (ret) {
+		ret = -EFAULT;
+		goto err_out;
+	}
+
+	return 0;
+
+err_out:
+	cdma_free_jfce(jfce);
+
+	return ret;
+}
+
 static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_QUERY_DEV_INFO] = cdma_query_dev,
 	[CDMA_CMD_CREATE_CTX] = cdma_create_ucontext,
@@ -653,6 +693,7 @@ static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,
 	[CDMA_CMD_CREATE_JFC] = cdma_cmd_create_jfc,
 	[CDMA_CMD_DELETE_JFC] = cdma_cmd_delete_jfc,
+	[CDMA_CMD_CREATE_JFCE] = cdma_cmd_create_jfce,
 };
 
 int cdma_cmd_parse(struct cdma_file *cfile, struct cdma_ioctl_hdr *hdr)

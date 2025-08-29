@@ -12,5 +12,7 @@ struct cdma_ae_operation {
 
 int cdma_reg_ae_event(struct auxiliary_device *adev);
 void cdma_unreg_ae_event(struct auxiliary_device *adev);
+int cdma_reg_ce_event(struct auxiliary_device *adev);
+void cdma_unreg_ce_event(struct auxiliary_device *adev);
 
 #endif

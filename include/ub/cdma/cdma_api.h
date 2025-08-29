@@ -13,6 +13,35 @@ struct dma_device {
 	void *private_data;
 };
 
+enum dma_cr_opcode {
+	DMA_CR_OPC_SEND = 0x00,
+	DMA_CR_OPC_SEND_WITH_IMM,
+	DMA_CR_OPC_SEND_WITH_INV,
+	DMA_CR_OPC_WRITE_WITH_IMM,
+};
+
+union dma_cr_flag {
+	struct {
+		u8 s_r : 1;
+		u8 jetty : 1;
+		u8 suspend_done : 1;
+		u8 flush_err_done : 1;
+		u8 reserved : 4;
+	} bs;
+	u8 value;
+};
+
+struct dma_cr {
+	enum dma_cr_status status;
+	u64 user_ctx;
+	enum dma_cr_opcode opcode;
+	union dma_cr_flag flag;
+	u32 completion_len;
+	u32 local_id;
+	u32 remote_id;
+	u32 tpn;
+};
+
 struct queue_cfg {
 	u32 queue_depth;
 	u8 priority;
@@ -41,5 +70,8 @@ int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id,
 		    struct queue_cfg *cfg);
 
 void dma_free_queue(struct dma_device *dma_dev, int queue_id);
+
+int dma_poll_queue(struct dma_device *dma_dev, int queue_id, u32 cr_cnt,
+		   struct dma_cr *cr);
 
 #endif

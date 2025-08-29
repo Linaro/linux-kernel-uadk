@@ -10,6 +10,7 @@
 #include "cdma_common.h"
 #include "cdma_event.h"
 #include "cdma_db.h"
+#include "cdma_jfs.h"
 #include "cdma_jfc.h"
 
 static int cdma_get_cmd_from_user(struct cdma_create_jfc_ucmd *ucmd,
@@ -82,6 +83,7 @@ static void cdma_init_jfc_param(struct cdma_jfc_cfg *cfg, struct cdma_jfc *jfc)
 {
 	jfc->base.id = jfc->jfcn;
 	jfc->base.jfc_cfg = *cfg;
+	jfc->base.jfc_event.jfce = NULL;
 	jfc->ceqn = cfg->ceqn;
 }
 
@@ -272,8 +274,171 @@ static int cdma_destroy_and_flush_jfc(struct cdma_dev *cdev, u32 jfcn)
 	return -ETIMEDOUT;
 }
 
+static inline void *cdma_get_buf_entry(struct cdma_buf *buf, u32 n)
+{
+	uint32_t entry_index = n & buf->entry_cnt_mask;
+
+	return (char *)buf->kva + (entry_index * buf->entry_size);
+}
+
+static struct cdma_jfc_cqe *cdma_get_next_cqe(struct cdma_jfc *jfc, u32 n)
+{
+	struct cdma_jfc_cqe *cqe;
+	u32 valid_owner;
+
+	cqe = (struct cdma_jfc_cqe *)cdma_get_buf_entry(&jfc->buf, n);
+	valid_owner = (jfc->ci >> jfc->buf.entry_cnt_mask_ilog2) &
+		      CDMA_JFC_DB_VALID_OWNER_M;
+	if (!(cqe->owner ^ valid_owner))
+		return NULL;
+
+	return cqe;
+}
+
+static struct cdma_jetty_queue *cdma_update_jetty_idx(struct cdma_jfc_cqe *cqe)
+{
+	struct cdma_jetty_queue *queue;
+	u32 entry_idx;
+
+	entry_idx = cqe->entry_idx;
+	queue = (struct cdma_jetty_queue *)((u64)cqe->user_data_h <<
+		CDMA_ADDR_SHIFT | cqe->user_data_l);
+	if (!queue)
+		return NULL;
+
+	if (!!cqe->fd)
+		return queue;
+
+	queue->ci += (entry_idx - queue->ci) & (queue->buf.entry_cnt - 1);
+
+	return queue;
+}
+
+static enum jfc_poll_state cdma_get_cr_status(u8 src_status,
+					      u8 substatus,
+					      enum dma_cr_status *dst_status)
+{
+struct cdma_cqe_status {
+	bool is_valid;
+	enum dma_cr_status cr_status;
+};
+
+	static struct cdma_cqe_status map[CDMA_CQE_STATUS_NUM][CDMA_CQE_SUB_STATUS_NUM] = {
+		{{true, DMA_CR_SUCCESS}, {false, DMA_CR_SUCCESS}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}, {false, DMA_CR_SUCCESS}},
+		{{true, DMA_CR_UNSUPPORTED_OPCODE_ERR}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}},
+		{{false, DMA_CR_SUCCESS}, {true, DMA_CR_LOC_LEN_ERR},
+		 {true, DMA_CR_LOC_ACCESS_ERR}, {true, DMA_CR_REM_RESP_LEN_ERR},
+		 {true, DMA_CR_LOC_DATA_POISON}},
+		{{false, DMA_CR_SUCCESS}, {true, DMA_CR_REM_UNSUPPORTED_REQ_ERR},
+		 {true, DMA_CR_REM_ACCESS_ABORT_ERR}, {false, DMA_CR_SUCCESS},
+		 {true, DMA_CR_REM_DATA_POISON}},
+		{{true, DMA_CR_RNR_RETRY_CNT_EXC_ERR}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}},
+		{{true, DMA_CR_ACK_TIMEOUT_ERR}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}},
+		{{true, DMA_CR_WR_FLUSH_ERR}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}, {false, DMA_CR_SUCCESS},
+		 {false, DMA_CR_SUCCESS}}
+	};
+
+	if ((src_status < CDMA_CQE_STATUS_NUM) && (substatus < CDMA_CQE_SUB_STATUS_NUM) &&
+		map[src_status][substatus].is_valid) {
+		*dst_status = map[src_status][substatus].cr_status;
+		return JFC_OK;
+	}
+
+	return JFC_POLL_ERR;
+}
+
+static enum jfc_poll_state cdma_update_flush_cr(struct cdma_jetty_queue *queue,
+						struct cdma_jfc_cqe *cqe,
+						struct dma_cr *cr)
+{
+	if (cdma_get_cr_status(cqe->status, cqe->substatus, &cr->status))
+		return JFC_POLL_ERR;
+
+	if (cqe->fd) {
+		cr->status = DMA_CR_WR_FLUSH_ERR_DONE;
+		queue->flush_flag = true;
+	} else {
+		queue->ci++;
+	}
+
+	return JFC_OK;
+}
+
+static enum jfc_poll_state cdma_parse_cqe_for_jfc(struct cdma_dev *cdev,
+						  struct cdma_jfc_cqe *cqe,
+						  struct dma_cr *cr)
+{
+	struct cdma_jetty_queue *queue;
+	struct cdma_jfs *jfs;
+
+	queue = cdma_update_jetty_idx(cqe);
+	if (!queue) {
+		dev_err(cdev->dev, "update jetty idx failed.\n");
+		return JFC_POLL_ERR;
+	}
+
+	jfs = container_of(queue, struct cdma_jfs, sq);
+	cr->flag.bs.s_r = cqe->s_r;
+	cr->flag.bs.jetty = cqe->is_jetty;
+	cr->completion_len = cqe->byte_cnt;
+	cr->tpn = cqe->tpn;
+	cr->local_id = cqe->local_num_h << CDMA_SRC_IDX_SHIFT | cqe->local_num_l;
+	cr->remote_id = cqe->rmt_idx;
+
+	if (cqe->status)
+		dev_warn(cdev->dev, "get sq %u cqe status abnormal, ci = %u, pi = %u.\n",
+			 queue->id, queue->ci, queue->pi);
+
+	if (cdma_update_flush_cr(queue, cqe, cr)) {
+		dev_err(cdev->dev,
+			"update cr failed, status = %u, substatus = %u.\n",
+			cqe->status, cqe->substatus);
+		return JFC_POLL_ERR;
+	}
+
+	return JFC_OK;
+}
+
+static enum jfc_poll_state cdma_poll_one(struct cdma_dev *cdev,
+					 struct cdma_jfc *jfc,
+					 struct dma_cr *cr)
+{
+	enum dma_cr_status status;
+	struct cdma_jfc_cqe *cqe;
+
+	cqe = cdma_get_next_cqe(jfc, jfc->ci);
+	if (!cqe)
+		return JFC_EMPTY;
+
+	++jfc->ci;
+	/* Ensure that the reading of the event is completed before parsing. */
+	rmb();
+
+	if (cdma_parse_cqe_for_jfc(cdev, cqe, cr))
+		return JFC_POLL_ERR;
+
+	status = cr->status;
+	if (status == DMA_CR_WR_FLUSH_ERR_DONE || status == DMA_CR_WR_SUSPEND_DONE) {
+		dev_info(cdev->dev, "poll cr flush/suspend done, jfc id = %u, status = %u.\n",
+			 jfc->jfcn, status);
+		return JFC_EMPTY;
+	}
+
+	return JFC_OK;
+}
+
 static void cdma_release_jfc_event(struct cdma_jfc *jfc)
 {
+	cdma_release_comp_event(jfc->base.jfc_event.jfce,
+			&jfc->base.jfc_event.comp_event_list);
 	cdma_release_async_event(jfc->base.ctx,
 		&jfc->base.jfc_event.async_event_list);
 }
@@ -343,6 +508,7 @@ struct cdma_base_jfc *cdma_create_jfc(struct cdma_dev *cdev,
 	refcount_set(&jfc->event_refcount, 1);
 	init_completion(&jfc->event_comp);
 	jfc->base.jfae_handler = cdma_jfc_async_event_cb;
+	jfc->base.jfce_handler = cdma_jfc_comp_event_cb;
 	jfc->base.dev = cdev;
 
 	dev_dbg(cdev->dev, "create jfc id = %u, queue id = %u.\n",
@@ -401,6 +567,7 @@ int cdma_delete_jfc(struct cdma_dev *cdev, u32 jfcn,
 	cdma_jfc_id_free(cdev, jfc->jfcn);
 	if (arg) {
 		jfc_event = &jfc->base.jfc_event;
+		arg->out.comp_events_reported = jfc_event->comp_events_reported;
 		arg->out.async_events_reported = jfc_event->async_events_reported;
 	}
 
@@ -410,4 +577,69 @@ int cdma_delete_jfc(struct cdma_dev *cdev, u32 jfcn,
 	kfree(jfc);
 
 	return 0;
+}
+
+int cdma_jfc_completion(struct notifier_block *nb, unsigned long jfcn,
+			void *data)
+{
+	struct auxiliary_device *adev = (struct auxiliary_device *)data;
+	struct cdma_base_jfc *base_jfc;
+	struct cdma_table *jfc_tbl;
+	struct cdma_dev *cdev;
+	struct cdma_jfc *jfc;
+	unsigned long flags;
+
+	if (!adev)
+		return -EINVAL;
+
+	cdev = get_cdma_dev(adev);
+	jfc_tbl = &cdev->jfc_table;
+	spin_lock_irqsave(&jfc_tbl->lock, flags);
+	jfc = idr_find(&jfc_tbl->idr_tbl.idr, jfcn);
+	if (!jfc) {
+		dev_warn(cdev->dev, "can not find jfc, jfcn = %lu.\n", jfcn);
+		spin_unlock_irqrestore(&jfc_tbl->lock, flags);
+		return -EINVAL;
+	}
+
+	++jfc->arm_sn;
+	base_jfc = &jfc->base;
+	if (base_jfc->jfce_handler) {
+		refcount_inc(&jfc->event_refcount);
+		spin_unlock_irqrestore(&jfc_tbl->lock, flags);
+		base_jfc->jfce_handler(base_jfc);
+		if (refcount_dec_and_test(&jfc->event_refcount))
+			complete(&jfc->event_comp);
+	} else {
+		spin_unlock_irqrestore(&jfc_tbl->lock, flags);
+	}
+
+	return 0;
+}
+
+/* thanks to drivers/infiniband/hw/bnxt_re/ib_verbs.c */
+int cdma_poll_jfc(struct cdma_base_jfc *base_jfc, int cr_cnt,
+		  struct dma_cr *cr)
+{
+	struct cdma_jfc *jfc = to_cdma_jfc(base_jfc);
+	enum jfc_poll_state err = JFC_OK;
+	int npolled = 0;
+
+	jfc->buf.entry_cnt_mask = jfc->buf.entry_cnt - 1;
+	jfc->buf.entry_cnt_mask_ilog2 = ilog2(jfc->buf.entry_cnt);
+
+	spin_lock(&jfc->lock);
+
+	for (npolled = 0; npolled < cr_cnt; ++npolled) {
+		err = cdma_poll_one(base_jfc->dev, jfc, cr + npolled);
+		if (err != JFC_OK)
+			break;
+	}
+
+	if (npolled)
+		*jfc->db.db_record = jfc->ci & (u32)CDMA_JFC_DB_CI_IDX_M;
+
+	spin_unlock(&jfc->lock);
+
+	return err == JFC_POLL_ERR ? -CDMA_INTER_ERR : npolled;
 }

@@ -8,6 +8,7 @@
 #include "cdma_cmd.h"
 #include "cdma_context.h"
 #include "cdma_queue.h"
+#include "cdma_jfc.h"
 #include "cdma.h"
 #include <ub/cdma/cdma_api.h>
 
@@ -308,3 +309,38 @@ void dma_free_queue(struct dma_device *dma_dev, int queue_id)
 	atomic_dec(&ctx->ref_cnt);
 }
 EXPORT_SYMBOL_GPL(dma_free_queue);
+
+int dma_poll_queue(struct dma_device *dma_dev, int queue_id, u32 cr_cnt,
+		   struct dma_cr *cr)
+{
+	struct cdma_queue *cdma_queue;
+	struct cdma_dev *cdev;
+	u32 eid;
+
+	if (!dma_dev || !cr_cnt || !cr) {
+		pr_err("the poll queue input parameter is invalid.\n");
+		return -EINVAL;
+	}
+
+	eid = dma_dev->attr.eid.dw0;
+	cdev = get_cdma_dev_by_eid(eid);
+	if (!cdev) {
+		pr_err("get cdma dev failed, eid = 0x%x.\n", eid);
+		return -EINVAL;
+	}
+
+	if (cdev->status == CDMA_SUSPEND) {
+		pr_warn("cdma device is not prepared, eid = 0x%x.\n", eid);
+		return -EINVAL;
+	}
+
+	cdma_queue = cdma_find_queue(cdev, queue_id);
+	if (!cdma_queue || !cdma_queue->jfc) {
+		dev_err(cdev->dev, "get cdma queue failed, queue_id = %d.\n",
+			queue_id);
+		return -EINVAL;
+	}
+
+	return cdma_poll_jfc(cdma_queue->jfc, cr_cnt, cr);
+}
+EXPORT_SYMBOL_GPL(dma_poll_queue);

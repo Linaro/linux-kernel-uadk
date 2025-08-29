@@ -33,11 +33,21 @@ static int cdma_register_event(struct auxiliary_device *adev)
 	if (ret)
 		return ret;
 
+	ret = cdma_reg_ce_event(adev);
+	if (ret)
+		goto err_ce_register;
+
 	return 0;
+
+err_ce_register:
+	cdma_unreg_ae_event(adev);
+
+	return ret;
 }
 
 static inline void cdma_unregister_event(struct auxiliary_device *adev)
 {
+	cdma_unreg_ce_event(adev);
 	cdma_unreg_ae_event(adev);
 }
 

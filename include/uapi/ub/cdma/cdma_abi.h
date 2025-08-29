@@ -13,11 +13,21 @@
 /* cdma event ioctl cmd */
 #define CDMA_EVENT_CMD_MAGIC 'F'
 #define JFAE_CMD_GET_ASYNC_EVENT 0
+#define JFCE_CMD_WAIT_EVENT 0
 
 #define CDMA_CMD_GET_ASYNC_EVENT	\
 	_IOWR(CDMA_EVENT_CMD_MAGIC, JFAE_CMD_GET_ASYNC_EVENT, struct cdma_cmd_async_event)
+#define CDMA_CMD_WAIT_JFC \
+	_IOWR(CDMA_EVENT_CMD_MAGIC, JFCE_CMD_WAIT_EVENT, struct cdma_cmd_jfce_wait_args)
 
+#define CDMA_ADDR_SHIFT 32
 #define CDMA_DOORBELL_OFFSET 0x80
+
+#define CDMA_JFC_DB_CI_IDX_M GENMASK(21, 0)
+#define CDMA_JFC_DB_VALID_OWNER_M 1
+#define CDMA_INTER_ERR 1
+#define CDMA_SRC_IDX_SHIFT 16
+#define CDMA_MAX_JFCE_EVENT_CNT 72
 
 #define MAP_COMMAND_MASK 0xff
 #define MAP_INDEX_MASK 0xffffff
@@ -26,6 +36,29 @@
 /* cdma queue cfg deault value */
 #define CDMA_TYPICAL_RNR_RETRY 7
 #define CDMA_TYPICAL_ERR_TIMEOUT 2 /* 0:128ms 1:1s 2:8s 3:64s */
+
+#define CDMA_CQE_STATUS_NUM 7
+#define CDMA_CQE_SUB_STATUS_NUM 5
+
+enum dma_cr_status {
+	DMA_CR_SUCCESS = 0,
+	DMA_CR_UNSUPPORTED_OPCODE_ERR,
+	DMA_CR_LOC_LEN_ERR,
+	DMA_CR_LOC_OPERATION_ERR,
+	DMA_CR_LOC_ACCESS_ERR,
+	DMA_CR_REM_RESP_LEN_ERR,
+	DMA_CR_REM_UNSUPPORTED_REQ_ERR,
+	DMA_CR_REM_OPERATION_ERR,
+	DMA_CR_REM_ACCESS_ABORT_ERR,
+	DMA_CR_ACK_TIMEOUT_ERR,
+	DMA_CR_RNR_RETRY_CNT_EXC_ERR,
+	DMA_CR_WR_FLUSH_ERR,
+	DMA_CR_WR_SUSPEND_DONE,
+	DMA_CR_WR_FLUSH_ERR_DONE,
+	DMA_CR_WR_UNHANDLED,
+	DMA_CR_LOC_DATA_POISON,
+	DMA_CR_REM_DATA_POISON,
+};
 
 enum db_mmap_type {
 	CDMA_MMAP_JFC_PAGE,
@@ -44,7 +77,21 @@ enum cdma_cmd {
 	CDMA_CMD_DELETE_QUEUE,
 	CDMA_CMD_CREATE_JFC,
 	CDMA_CMD_DELETE_JFC,
+	CDMA_CMD_CREATE_JFCE,
 	CDMA_CMD_MAX
+};
+
+enum {
+	CQE_FOR_SEND,
+	CQE_FOR_RECEIVE
+};
+
+enum hw_cqe_opcode {
+	HW_CQE_OPC_SEND				= 0x00,
+	HW_CQE_OPC_SEND_WITH_IMM		= 0x01,
+	HW_CQE_OPC_SEND_WITH_INV		= 0x02,
+	HW_CQE_OPC_WRITE_WITH_IMM		= 0x03,
+	HW_CQE_OPC_ERR				= 0xff
 };
 
 struct cdma_ioctl_hdr {
@@ -146,6 +193,13 @@ struct cdma_cmd_delete_ctp_args {
 	} out;
 };
 
+struct cdma_cmd_create_jfce_args {
+	struct {
+		int fd;
+		int id;
+	} out;
+};
+
 struct cdma_cmd_create_jfc_args {
 	struct {
 		__u32 depth; /* in terms of CQEBB */
@@ -169,6 +223,7 @@ struct cdma_cmd_delete_jfc_args {
 		__u32 queue_id;
 	} in;
 	struct {
+		__u32 comp_events_reported;
 		__u32 async_events_reported;
 	} out;
 };
@@ -263,6 +318,23 @@ struct cdma_cmd_delete_queue_args {
 		__u32 queue_id;
 		__u64 handle;
 	} in;
+};
+
+struct cdma_cmd_jfce_wait_args {
+	struct {
+		__u32 max_event_cnt;
+		int time_out;
+	} in;
+	struct {
+		__u32 event_cnt;
+		__u64 event_data[CDMA_MAX_JFCE_EVENT_CNT];
+	} out;
+};
+
+enum jfc_poll_state {
+	JFC_OK,
+	JFC_EMPTY,
+	JFC_POLL_ERR,
 };
 
 #endif

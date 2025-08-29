@@ -40,6 +40,19 @@ struct cdma_jfe_event {
 	u32 *counter;
 };
 
+struct cdma_jfce {
+	int id;
+	int fd;
+	struct cdma_dev *cdev;
+	struct cdma_file *cfile;
+	struct file *file;
+	struct cdma_jfe jfe;
+};
+
+struct cdma_jfce *cdma_alloc_jfce(struct cdma_file *cfile);
+
+void cdma_free_jfce(struct cdma_jfce *jfce);
+
 void cdma_jfs_async_event_cb(struct cdma_event *event, struct cdma_context *ctx);
 
 void cdma_jfc_async_event_cb(struct cdma_event *event, struct cdma_context *ctx);
@@ -50,7 +63,15 @@ void cdma_free_jfae(struct cdma_jfae *jfae);
 
 int cdma_get_jfae(struct cdma_context *ctx);
 
+struct cdma_jfce *cdma_get_jfce_from_id(struct cdma_dev *cdev, int jfce_id);
+
+void cdma_jfc_comp_event_cb(struct cdma_base_jfc *jfc);
+
+void cdma_destroy_jfce(struct cdma_jfce *jfce);
+
 void cdma_init_jfc_event(struct cdma_jfc_event *event, struct cdma_base_jfc *jfc);
+
+void cdma_release_comp_event(struct cdma_jfce *jfce, struct list_head *event_list);
 
 void cdma_release_async_event(struct cdma_context *ctx, struct list_head *event_list);
 

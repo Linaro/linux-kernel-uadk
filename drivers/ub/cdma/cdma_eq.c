@@ -192,3 +192,32 @@ void cdma_unreg_ae_event(struct auxiliary_device *adev)
 		}
 	}
 }
+
+/* thanks to drivers/infiniband/hw/erdma/erdma_eq.c */
+int cdma_reg_ce_event(struct auxiliary_device *adev)
+{
+	struct cdma_dev *cdma_dev;
+	int ret;
+
+	if (!adev)
+		return -EINVAL;
+
+	cdma_dev = get_cdma_dev(adev);
+	if (!cdma_dev)
+		return -EINVAL;
+
+	ret = ubase_comp_register(adev, cdma_jfc_completion);
+	if (ret)
+		dev_err(cdma_dev->dev,
+			"register ce event failed, ret = %d.\n", ret);
+
+	return ret;
+}
+
+void cdma_unreg_ce_event(struct auxiliary_device *adev)
+{
+	if (!adev)
+		return;
+
+	ubase_comp_unregister(adev);
+}

@@ -105,11 +105,14 @@ static void cdma_tbl_destroy(struct cdma_dev *cdev, struct cdma_table *table,
 static void cdma_init_tables(struct cdma_dev *cdev)
 {
 	struct cdma_res *queue = &cdev->caps.queue;
+	struct cdma_res *jfce = &cdev->caps.jfce;
 	struct cdma_res *jfs = &cdev->caps.jfs;
 	struct cdma_res *jfc = &cdev->caps.jfc;
 
 	cdma_tbl_init(&cdev->queue_table, queue->start_idx + queue->max_cnt - 1,
 		      queue->start_idx);
+	cdma_tbl_init(&cdev->jfce_table, jfce->start_idx + jfce->max_cnt - 1,
+		      jfce->start_idx);
 	cdma_tbl_init(&cdev->jfc_table, jfc->start_idx + jfc->max_cnt - 1,
 		      jfc->start_idx);
 	cdma_tbl_init(&cdev->jfs_table, jfs->max_cnt + jfs->start_idx - 1,
@@ -122,6 +125,7 @@ static void cdma_destroy_tables(struct cdma_dev *cdev)
 	cdma_tbl_destroy(cdev, &cdev->ctp_table, "CTP");
 	cdma_tbl_destroy(cdev, &cdev->jfs_table, "JFS");
 	cdma_tbl_destroy(cdev, &cdev->jfc_table, "JFC");
+	cdma_tbl_destroy(cdev, &cdev->jfce_table, "JFCE");
 	cdma_tbl_destroy(cdev, &cdev->queue_table, "QUEUE");
 }
 

@@ -105,11 +105,16 @@ struct cdma_jfc_cfg {
 	u32 queue_id;
 };
 
+struct cdma_base_jfc;
+
+typedef void (*cdma_comp_callback_t)(struct cdma_base_jfc *jfc);
+
 struct cdma_base_jfc {
 	struct cdma_dev *dev;
 	struct cdma_context *ctx;
 	struct cdma_jfc_cfg jfc_cfg;
 	u32 id;
+	cdma_comp_callback_t jfce_handler;
 	cdma_event_callback_t jfae_handler;
 	struct hlist_node hnode;
 	atomic_t use_cnt;

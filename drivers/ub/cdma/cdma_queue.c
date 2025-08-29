@@ -3,7 +3,9 @@
 
 #define dev_fmt(fmt) "CDMA: " fmt
 
+#include "cdma_common.h"
 #include "cdma_context.h"
+#include "cdma_jfc.h"
 #include "cdma_queue.h"
 #include "cdma.h"
 
@@ -17,6 +19,13 @@ struct cdma_queue *cdma_find_queue(struct cdma_dev *cdev, u32 queue_id)
 	spin_unlock(&cdev->queue_table.lock);
 
 	return queue;
+}
+
+static void cdma_delete_queue_res(struct cdma_dev *cdev,
+				  struct cdma_queue *queue)
+{
+	cdma_delete_jfc(cdev, queue->jfc->id, NULL);
+	queue->jfc = NULL;
 }
 
 static int cdma_alloc_queue_id(struct cdma_dev *cdev, struct cdma_queue *queue)
@@ -97,7 +106,29 @@ int cdma_delete_queue(struct cdma_dev *cdev, u32 queue_id)
 
 	cdma_delete_queue_id(cdev, queue_id);
 
+	if (queue->is_kernel)
+		cdma_delete_queue_res(cdev, queue);
 	kfree(queue);
 
 	return 0;
+}
+
+void cdma_set_queue_res(struct cdma_dev *cdev, struct cdma_queue *queue,
+			enum cdma_queue_res_type type, void *res)
+{
+	dev_dbg(cdev->dev,
+			"set queue %u resource type = %u, null flag = %u.\n",
+			queue->id, type, res == NULL);
+
+	spin_lock(&cdev->queue_table.lock);
+	switch (type) {
+	case QUEUE_RES_JFC:
+		queue->jfc = res;
+		if (queue->jfc)
+			queue->jfc_id = queue->jfc->id;
+		break;
+	default:
+		break;
+	}
+	spin_unlock(&cdev->queue_table.lock);
 }

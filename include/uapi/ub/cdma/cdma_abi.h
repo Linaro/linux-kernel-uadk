@@ -10,12 +10,21 @@
 #define CDMA_IOC_MAGIC 'C'
 #define CDMA_SYNC _IOWR(CDMA_IOC_MAGIC, 0, struct cdma_ioctl_hdr)
 
+#define MAP_COMMAND_MASK 0xff
+
+enum db_mmap_type {
+	CDMA_MMAP_JFC_PAGE,
+	CDMA_MMAP_JETTY_DSQE
+};
+
 enum cdma_cmd {
 	CDMA_CMD_QUERY_DEV_INFO,
 	CDMA_CMD_CREATE_CTX,
 	CDMA_CMD_DELETE_CTX,
 	CDMA_CMD_CREATE_QUEUE,
 	CDMA_CMD_DELETE_QUEUE,
+	CDMA_CMD_CREATE_JFC,
+	CDMA_CMD_DELETE_JFC,
 	CDMA_CMD_MAX
 };
 
@@ -23,6 +32,37 @@ struct cdma_ioctl_hdr {
 	__u32 command;
 	__u32 args_len;
 	__u64 args_addr;
+};
+
+struct cdma_cmd_udrv_priv {
+	__u64 in_addr;
+	__u32 in_len;
+	__u64 out_addr;
+	__u32 out_len;
+};
+
+struct cdma_cmd_create_jfc_args {
+	struct {
+		__u32 depth; /* in terms of CQEBB */
+		int jfce_fd;
+		int jfce_id;
+		__u32 ceqn;
+		__u32 queue_id;
+	} in;
+	struct {
+		__u32 id;
+		__u32 depth;
+		__u64 handle; /* handle of the allocated jfc obj in kernel */
+	} out;
+	struct cdma_cmd_udrv_priv udata;
+};
+
+struct cdma_cmd_delete_jfc_args {
+	struct {
+		__u32 jfcn;
+		__u64 handle; /* handle of jfc */
+		__u32 queue_id;
+	} in;
 };
 
 struct dev_eid {
@@ -75,6 +115,24 @@ struct cdma_create_context_args {
 		__u8 dwqe_enable;
 		int async_fd;
 	} out;
+};
+
+struct cdma_jfc_db {
+	__u32 ci : 24;
+	__u32 notify : 1;
+	__u32 arm_sn : 2;
+	__u32 type : 1;
+	__u32 rsv1 : 4;
+	__u32 jfcn : 20;
+	__u32 rsv2 : 12;
+};
+
+struct cdma_create_jfc_ucmd {
+	__u64 buf_addr;
+	__u32 buf_len;
+	__u64 db_addr;
+	__u32 mode;
+	__u32 tid;
 };
 
 struct cdma_cmd_create_queue_args {

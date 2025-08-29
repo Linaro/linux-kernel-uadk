@@ -15,6 +15,7 @@
 #include "cdma_context.h"
 #include <ub/ubase/ubase_comm_ctrlq.h>
 #include <ub/ubase/ubase_comm_dev.h>
+#include "cdma_jfc.h"
 #include "cdma_queue.h"
 #include "cdma_dev.h"
 
@@ -108,6 +109,7 @@ static void cdma_init_tables(struct cdma_dev *cdev)
 
 static void cdma_destroy_tables(struct cdma_dev *cdev)
 {
+	cdma_tbl_destroy(cdev, &cdev->jfc_table, "JFC");
 	cdma_tbl_destroy(cdev, &cdev->queue_table, "QUEUE");
 }
 
@@ -175,7 +177,11 @@ static void cdma_uninit_dev_param(struct cdma_dev *cdev)
 static void cdma_release_table_res(struct cdma_dev *cdev)
 {
 	struct cdma_queue *queue;
+	struct cdma_jfc *jfc;
 	int id;
+
+	idr_for_each_entry(&cdev->jfc_table.idr_tbl.idr, jfc, id)
+		cdma_delete_jfc(cdev, jfc->jfcn, NULL);
 
 	idr_for_each_entry(&cdev->queue_table.idr_tbl.idr, queue, id)
 		cdma_delete_queue(cdev, queue->id);

@@ -10,6 +10,21 @@
 
 struct cdma_dev;
 
+struct cdma_jfc_cfg {
+	u32 depth;
+	u32 ceqn;
+	u32 queue_id;
+};
+
+struct cdma_base_jfc {
+	struct cdma_dev *dev;
+	struct cdma_context *ctx;
+	struct cdma_jfc_cfg jfc_cfg;
+	u32 id;
+	struct hlist_node hnode;
+	atomic_t use_cnt;
+};
+
 struct cdma_file {
 	struct cdma_dev *cdev;
 	struct list_head list;

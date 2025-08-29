@@ -11,6 +11,8 @@
 
 #include <ub/cdma/cdma_api.h>
 
+extern u32 jfc_arm_mode;
+
 #define CDMA_RESET_WAIT_TIME	3000
 #define CDMA_MAX_SL_NUM		16
 
@@ -107,6 +109,44 @@ struct cdma_chardev {
 	dev_t devno;
 };
 
+union cdma_umem_flag {
+	struct {
+		u32 non_pin : 1;  /* 0: pinned to physical memory. 1: non pin. */
+		u32 writable : 1; /* 0: read-only. 1: writable. */
+		u32 reserved : 30;
+	} bs;
+	u32 value;
+};
+
+struct cdma_umem {
+	struct mm_struct *owning_mm;
+	union cdma_umem_flag flag;
+	struct sg_table sg_head;
+	struct cdma_dev *dev;
+
+	u64 length;
+	u32 nmap;
+	u64 va;
+};
+
+struct cdma_buf {
+	dma_addr_t addr; /* pass to hw */
+	union {
+		void  *kva; /* used for kernel mode */
+		struct iova_slot *slot;
+		void *kva_or_slot;
+	};
+	void *aligned_va;
+	struct cdma_umem *umem;
+	u32 entry_cnt_mask;
+	u32 entry_cnt_mask_ilog2;
+	u32 entry_size;
+	u32 entry_cnt;
+	u32 cnt_per_page_shift;
+	struct xarray id_table_xa;
+	struct mutex id_table_mutex;
+};
+
 struct cdma_dev {
 	struct dma_device base;
 	struct device *dev;
@@ -134,6 +174,7 @@ struct cdma_dev {
 	struct list_head db_page;
 
 	struct cdma_table queue_table;
+	struct cdma_table jfc_table;
 	struct mutex file_mutex;
 	struct list_head file_list;
 	struct page *arm_db_page;

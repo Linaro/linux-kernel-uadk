@@ -10,6 +10,7 @@
 #include "cdma_context.h"
 #include "cdma_types.h"
 #include "cdma_queue.h"
+#include "cdma_jfc.h"
 #include "cdma_uobj.h"
 #include "cdma_ioctl.h"
 
@@ -213,6 +214,10 @@ static int cdma_cmd_delete_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *c
 	}
 
 	queue = (struct cdma_queue *)uobj->object;
+	if (queue->jfc) {
+		dev_err(cdev->dev, "jfc is still in use.");
+		return -EBUSY;
+	}
 
 	cdma_uobj_delete(uobj);
 	list_del(&queue->list);
@@ -223,12 +228,69 @@ static int cdma_cmd_delete_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *c
 	return ret;
 }
 
+static int cdma_cmd_delete_jfc(struct cdma_ioctl_hdr *hdr,
+			       struct cdma_file *cfile)
+{
+	struct cdma_cmd_delete_jfc_args arg = { 0 };
+	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_base_jfc *base_jfc;
+	struct cdma_queue *queue;
+	struct cdma_uobj *uobj;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len != (u32)sizeof(arg))
+		return -EINVAL;
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret) {
+		dev_err(cdev->dev, "get user data failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	uobj = cdma_uobj_get(cfile, arg.in.queue_id, UOBJ_TYPE_QUEUE);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev,
+			"delete jfc, get queue uobj failed, queue id = %u.\n",
+			arg.in.queue_id);
+		return -EINVAL;
+	}
+	queue = (struct cdma_queue *)uobj->object;
+
+	uobj = cdma_uobj_get(cfile, arg.in.handle, UOBJ_TYPE_JFC);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev, "get jfc uobj failed.\n");
+		return -EINVAL;
+	}
+
+	base_jfc = (struct cdma_base_jfc *)uobj->object;
+	ret = cdma_delete_jfc(cdev, base_jfc->id, &arg);
+	if (ret) {
+		dev_err(cdev->dev, "cdma delete jfc failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	cdma_set_queue_res(cdev, queue, QUEUE_RES_JFC, NULL);
+	cdma_uobj_delete(uobj);
+
+	ret = (int)copy_to_user((void *)hdr->args_addr, &arg, (u32)sizeof(arg));
+	if (ret) {
+		dev_err(cdev->dev,
+			"delete jfc copy to user data failed, ret = %d.\n",
+			ret);
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_QUERY_DEV_INFO] = cdma_query_dev,
 	[CDMA_CMD_CREATE_CTX] = cdma_create_ucontext,
 	[CDMA_CMD_DELETE_CTX] = cdma_delete_ucontext,
 	[CDMA_CMD_CREATE_QUEUE] = cdma_cmd_create_queue,
 	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,
+	[CDMA_CMD_DELETE_JFC] = cdma_cmd_delete_jfc,
 };
 
 int cdma_cmd_parse(struct cdma_file *cfile, struct cdma_ioctl_hdr *hdr)

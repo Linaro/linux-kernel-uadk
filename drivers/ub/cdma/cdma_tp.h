@@ -8,6 +8,7 @@
 
 #define CDMA_CTRLQ_FLAG_ON 1
 #define CDMA_CTRLQ_FLAG_OFF 0
+#define CDMA_TPN_MASK 0xffffff
 #define CDMA_EID_DW_SIZE 4
 
 struct cdma_tp {
@@ -37,6 +38,18 @@ enum cdma_tp_trans_type {
 	CDMA_TRANS_TYPE_MAX
 };
 
+struct cdma_ctrlq_tp_create_cfg {
+	u32 seid_flag; /* 0: 128bits eid, 1: 20bits eid */
+	u32 seid[CDMA_EID_DW_SIZE];
+	u32 scna;
+	u32 deid_flag;
+	u32 deid[CDMA_EID_DW_SIZE];
+	u32 dcna;
+	u32 route_type : 4; /* 0-IPv4, 1-IPv6, 2-CNA */
+	u32 trans_type : 4;
+	u32 rsv : 24;
+};
+
 struct cdma_ctrlq_tp_ret {
 	int ret;
 };
@@ -53,6 +66,9 @@ struct cdma_ctrlq_tp_delete_cfg {
 	u32 rsv : 24;
 	u32 tpn;
 };
+
+struct cdma_base_tp *cdma_create_ctp(struct cdma_dev *cdev,
+				     struct cdma_tp_cfg *cfg);
 
 void cdma_delete_ctp(struct cdma_dev *cdev, uint32_t tp_id);
 

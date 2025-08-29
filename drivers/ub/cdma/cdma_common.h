@@ -7,6 +7,8 @@
 #include <linux/types.h>
 #include "cdma.h"
 
+#define CDMA_RANGE_INDEX_ENTRY_CNT 0x100000
+
 #define CDMA_DB_SIZE 64
 
 struct cdma_umem_param {

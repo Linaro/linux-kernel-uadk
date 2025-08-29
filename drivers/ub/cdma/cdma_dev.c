@@ -110,6 +110,7 @@ static void cdma_init_tables(struct cdma_dev *cdev)
 		      queue->start_idx);
 	cdma_tbl_init(&cdev->jfc_table, jfc->start_idx + jfc->max_cnt - 1,
 		      jfc->start_idx);
+	cdma_tbl_init(&cdev->ctp_table, CDMA_RANGE_INDEX_ENTRY_CNT, 0);
 }
 
 static void cdma_destroy_tables(struct cdma_dev *cdev)

@@ -20,6 +20,53 @@ static inline int cdma_ctrlq_msg_send(struct cdma_dev *cdev,
 	return ret;
 }
 
+static int cdma_ctrlq_create_ctp(struct cdma_dev *cdev,
+				 struct cdma_tp_cfg *cfg, u32 *tpn)
+{
+	struct cdma_ctrlq_tp_create_cfg ctrlq_tp;
+	struct cdma_ctrlq_tp_ret tp_out = { 0 };
+	struct ubase_ctrlq_msg msg = { 0 };
+	int ret;
+
+	ctrlq_tp = (struct cdma_ctrlq_tp_create_cfg) {
+		.seid_flag = CDMA_CTRLQ_FLAG_ON,
+		.deid_flag = CDMA_CTRLQ_FLAG_ON,
+		.scna = cfg->scna,
+		.dcna = cfg->dcna,
+		.seid[0] = cfg->seid,
+		.deid[0] = cfg->deid,
+		.route_type = CDMA_ROUTE_TYPE_CNA,
+		.trans_type = CDMA_TRANS_TYPE_CDMA_CTP
+	};
+
+	msg = (struct ubase_ctrlq_msg) {
+		.service_ver = UBASE_CTRLQ_SER_VER_01,
+		.service_type = UBASE_CTRLQ_SER_TYPE_TP_ACL,
+		.opcode = CDMA_CTRLQ_CREATE_CTP,
+		.need_resp = CDMA_CTRLQ_FLAG_ON,
+		.is_resp = CDMA_CTRLQ_FLAG_OFF,
+		.in_size = sizeof(ctrlq_tp),
+		.in = &ctrlq_tp,
+		.out_size = sizeof(tp_out),
+		.out = &tp_out
+	};
+
+	ret = cdma_ctrlq_msg_send(cdev, &msg);
+	if (ret)
+		return ret;
+
+	ret = tp_out.ret;
+	if (ret <= 0) {
+		dev_err(cdev->dev,
+			"create ctp failed, scna = %u, dcna = %u, ret = %d.\n",
+			ctrlq_tp.scna, ctrlq_tp.dcna, ret);
+		return -EFAULT;
+	}
+	*tpn = ret & CDMA_TPN_MASK;
+
+	return 0;
+}
+
 static void cdma_ctrlq_delete_ctp(struct cdma_dev *cdev, u32 tpn,
 				  struct cdma_tp_cfg *cfg)
 {
@@ -67,6 +114,88 @@ static struct cdma_tp *cdma_id_find_ctp(struct cdma_dev *cdev, u32 id)
 	spin_unlock(&cdev->ctp_table.lock);
 
 	return tp;
+}
+
+static struct cdma_tp *cdma_tpn_find_ctp(struct cdma_dev *cdev, u32 tpn)
+{
+	struct cdma_tp *tmp;
+	int id;
+
+	spin_lock(&cdev->ctp_table.lock);
+	idr_for_each_entry(&cdev->ctp_table.idr_tbl.idr, tmp, id) {
+		if (tmp && tmp->base.tpn == tpn) {
+			spin_unlock(&cdev->ctp_table.lock);
+			return tmp;
+		}
+	}
+
+	spin_unlock(&cdev->ctp_table.lock);
+	return NULL;
+}
+
+static int cdma_alloc_tp_id(struct cdma_dev *cdev, struct cdma_tp *tp)
+{
+	struct cdma_table *tp_tbl = &cdev->ctp_table;
+	int id;
+
+	idr_preload(GFP_KERNEL);
+	spin_lock(&tp_tbl->lock);
+	id = idr_alloc(&tp_tbl->idr_tbl.idr, tp, tp_tbl->idr_tbl.min,
+		       tp_tbl->idr_tbl.max, GFP_NOWAIT);
+	if (id < 0)
+		dev_err(cdev->dev, "cdma tp id alloc failed.\n");
+	spin_unlock(&tp_tbl->lock);
+	idr_preload_end();
+
+	return id;
+}
+
+struct cdma_base_tp *cdma_create_ctp(struct cdma_dev *cdev,
+				     struct cdma_tp_cfg *cfg)
+{
+	struct cdma_tp *tp;
+	u32 tpn;
+	int ret;
+
+	ret = cdma_ctrlq_create_ctp(cdev, cfg, &tpn);
+	if (ret) {
+		dev_err(cdev->dev, "get tp failed, ret = %d.\n", ret);
+		return NULL;
+	}
+
+	tp = (struct cdma_tp *)cdma_tpn_find_ctp(cdev, tpn);
+	if (tp) {
+		refcount_inc(&tp->refcount);
+		return &tp->base;
+	}
+
+	tp = kzalloc(sizeof(*tp), GFP_KERNEL);
+	if (!tp)
+		goto err_alloc_tp;
+
+	refcount_set(&tp->refcount, 1);
+	tp->base.cfg = *cfg;
+	tp->base.tpn = tpn;
+	tp->dev = cdev;
+
+	ret = cdma_alloc_tp_id(cdev, tp);
+	if (ret < 0)
+		goto err_alloc_tpid;
+
+	tp->base.tp_id = ret;
+	refcount_inc(&tp->refcount);
+
+	dev_dbg(cdev->dev, "create ctp id = %u, tpn = %u, seid = %u, dcna = %u\n",
+			tp->base.tp_id, tpn, cfg->seid, cfg->dcna);
+
+	return &tp->base;
+
+err_alloc_tpid:
+	kfree(tp);
+err_alloc_tp:
+	cdma_ctrlq_delete_ctp(cdev, tpn, cfg);
+
+	return NULL;
 }
 
 void cdma_delete_ctp(struct cdma_dev *cdev, u32 tp_id)

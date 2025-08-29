@@ -10,11 +10,32 @@
 
 struct cdma_dev;
 
+struct cdma_ucontext {
+	struct cdma_dev *dev;
+	u32 eid;
+	u32 eid_index;
+};
+
 struct cdma_udrv_priv {
 	u64 in_addr;
 	u32 in_len;
 	u64 out_addr;
 	u32 out_len;
+};
+
+struct cdma_tp_cfg {
+	u32 scna;
+	u32 dcna;
+	u32 seid;
+	u32 deid;
+};
+
+struct cdma_base_tp {
+	struct cdma_ucontext *uctx;
+	struct cdma_tp_cfg cfg;
+	u64 usr_tp;
+	u32 tpn;
+	u32 tp_id;
 };
 
 struct cdma_udata {

@@ -21,6 +21,7 @@ enum cdma_cmd {
 	CDMA_CMD_QUERY_DEV_INFO,
 	CDMA_CMD_CREATE_CTX,
 	CDMA_CMD_DELETE_CTX,
+	CDMA_CMD_DELETE_CTP,
 	CDMA_CMD_CREATE_QUEUE,
 	CDMA_CMD_DELETE_QUEUE,
 	CDMA_CMD_CREATE_JFC,
@@ -39,6 +40,16 @@ struct cdma_cmd_udrv_priv {
 	__u32 in_len;
 	__u64 out_addr;
 	__u32 out_len;
+};
+
+struct cdma_cmd_delete_ctp_args {
+	struct {
+		__u32 tpn;
+		__u64 handle;
+		__u32 queue_id;
+	} in;
+	struct {
+	} out;
 };
 
 struct cdma_cmd_create_jfc_args {

@@ -9,6 +9,7 @@
 #include "cdma.h"
 #include "cdma_context.h"
 #include "cdma_types.h"
+#include "cdma_tp.h"
 #include "cdma_queue.h"
 #include "cdma_jfc.h"
 #include "cdma_uobj.h"
@@ -128,6 +129,51 @@ static int cdma_delete_ucontext(struct cdma_ioctl_hdr *hdr,
 	return 0;
 }
 
+static int cdma_cmd_delete_ctp(struct cdma_ioctl_hdr *hdr,
+			       struct cdma_file *cfile)
+{
+	struct cdma_cmd_delete_ctp_args arg = { 0 };
+	struct cdma_dev *cdev = cfile->cdev;
+	struct cdma_base_tp *ctp;
+	struct cdma_queue *queue;
+	struct cdma_uobj *uobj;
+	int ret;
+
+	if (!hdr->args_addr || hdr->args_len < sizeof(arg))
+		return -EINVAL;
+
+	ret = (int)copy_from_user(&arg, (void *)hdr->args_addr,
+				  (u32)sizeof(arg));
+	if (ret) {
+		dev_err(&cdev->adev->dev,
+			"delete tp get user data failed, ret = %d.\n", ret);
+		return -EFAULT;
+	}
+
+	uobj = cdma_uobj_get(cfile, arg.in.queue_id, UOBJ_TYPE_QUEUE);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev,
+			"delete ctp, get queue uobj failed, queue id = %u.\n",
+			arg.in.queue_id);
+		return -EINVAL;
+	}
+	queue = uobj->object;
+
+	uobj = cdma_uobj_get(cfile, arg.in.handle, UOBJ_TYPE_CTP);
+	if (IS_ERR(uobj)) {
+		dev_err(cdev->dev, "get ctp uobj failed, handle = %llu.\n",
+			arg.in.handle);
+		return -EINVAL;
+	}
+	ctp = uobj->object;
+
+	cdma_delete_ctp(cdev, ctp->tp_id);
+	cdma_uobj_delete(uobj);
+	cdma_set_queue_res(cdev, queue, QUEUE_RES_TP, NULL);
+
+	return ret;
+}
+
 static int cdma_cmd_create_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *cfile)
 {
 	struct cdma_cmd_create_queue_args arg = { 0 };
@@ -214,8 +260,8 @@ static int cdma_cmd_delete_queue(struct cdma_ioctl_hdr *hdr, struct cdma_file *c
 	}
 
 	queue = (struct cdma_queue *)uobj->object;
-	if (queue->jfc) {
-		dev_err(cdev->dev, "jfc is still in use.");
+	if (queue->jfc || queue->tp) {
+		dev_err(cdev->dev, "jfc/tp is still in use.");
 		return -EBUSY;
 	}
 
@@ -360,6 +406,7 @@ static cdma_cmd_handler g_cdma_cmd_handler[CDMA_CMD_MAX] = {
 	[CDMA_CMD_QUERY_DEV_INFO] = cdma_query_dev,
 	[CDMA_CMD_CREATE_CTX] = cdma_create_ucontext,
 	[CDMA_CMD_DELETE_CTX] = cdma_delete_ucontext,
+	[CDMA_CMD_DELETE_CTP] = cdma_cmd_delete_ctp,
 	[CDMA_CMD_CREATE_QUEUE] = cdma_cmd_create_queue,
 	[CDMA_CMD_DELETE_QUEUE] = cdma_cmd_delete_queue,
 	[CDMA_CMD_CREATE_JFC] = cdma_cmd_create_jfc,

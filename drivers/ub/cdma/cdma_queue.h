@@ -9,11 +9,13 @@ struct cdma_context;
 struct queue_cfg;
 
 enum cdma_queue_res_type {
+	QUEUE_RES_TP,
 	QUEUE_RES_JFC
 };
 
 struct cdma_queue {
 	struct cdma_base_jfc *jfc;
+	struct cdma_base_tp *tp;
 	struct cdma_context *ctx;
 	u32 id;
 	struct queue_cfg cfg;

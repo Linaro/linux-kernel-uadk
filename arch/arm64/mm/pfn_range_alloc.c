@@ -17,6 +17,7 @@
 #include <linux/seq_file.h>
 #include <linux/numa_remote.h>
 #include "internal.h"
+#include "../../../mm/internal.h"
 
 struct pmd_lm_range {
 	unsigned long start_pfn;
@@ -31,6 +32,7 @@ EXPORT_SYMBOL_GPL(contig_mem_pool_percent);
 static unsigned long nr_reserved_pages[MAX_NUMNODES] __initdata;
 static struct pmd_lm_range reserved_range[MAX_NUMNODES];
 DEFINE_STATIC_KEY_FALSE(pmd_mapping_initialized);
+static atomic_long_t num_poisoned_pfn __read_mostly = ATOMIC_LONG_INIT(0);
 
 static inline bool pmd_linear_mapping_enabled(void)
 {
@@ -304,6 +306,50 @@ out:
 }
 EXPORT_SYMBOL_GPL(pfn_range_alloc);
 
+static void pfn_range_folio_dissolve(struct folio *folio)
+{
+	int nr_pages = folio_nr_pages(folio);
+	struct page *page;
+	int i;
+
+	VM_WARN_ON_FOLIO(folio_ref_count(folio) != 1, folio);
+
+	for (i = 1; i < nr_pages; i++) {
+		page = folio_page(folio, i);
+		page->flags &= ~PAGE_FLAGS_CHECK_AT_FREE;
+		page->mapping = NULL;
+		clear_compound_head(page);
+		set_page_refcounted(page);
+	}
+
+	__folio_clear_head(folio);
+
+	page = &folio->page;
+	for (i = 0; i < nr_pages; i++, page++) {
+		if (PageHWPoison(page)) {
+			atomic_long_inc(&num_poisoned_pfn);
+			continue;
+		}
+
+		__free_page(page);
+	}
+}
+
+static inline bool pfn_range_free_prepare(struct folio *folio)
+{
+	int nr_pages = folio_nr_pages(folio);
+	struct page *page = &folio->page;
+	int i;
+
+	for (i = 0; i < nr_pages; i++, page++)
+		if (PageHWPoison(page)) {
+			pfn_range_folio_dissolve(folio);
+			return false;
+		}
+
+	return true;
+}
+
 int pfn_range_free(struct folio *folio)
 {
 	struct pmd_lm_range *mem_range;
@@ -317,6 +363,9 @@ int pfn_range_free(struct folio *folio)
 		ret = -EINVAL;
 		goto out;
 	}
+
+	if (!pfn_range_free_prepare(folio))
+		goto out;
 
 	if (can_set_direct_map() || should_pmd_linear_mapping()) {
 		folio_put(folio);
@@ -551,6 +600,9 @@ static int reserved_range_show(struct seq_file *m, void *v)
 				PFN_PHYS(reserved_range[nid].start_pfn),
 				PFN_PHYS(reserved_range[nid].end_pfn));
 	}
+
+	seq_printf(m, "\nHardwareCorrupted: %lu kB\n",
+		   atomic_long_read(&num_poisoned_pfn) << (PAGE_SHIFT - 10));
 
 	return 0;
 }

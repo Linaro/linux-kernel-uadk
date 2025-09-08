@@ -57,7 +57,7 @@
 
 static int sysctl_panic_on_oom;
 static int sysctl_oom_kill_allocating_task;
-static int sysctl_oom_kill_cpuless_numa_allocating_task;
+int sysctl_oom_kill_cpuless_numa_allocating_task;
 static int sysctl_oom_dump_tasks = 1;
 static int sysctl_enable_oom_killer = 1;
 

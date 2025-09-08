@@ -638,6 +638,11 @@ static int __init numa_remote_init(void)
 {
 	int ret;
 
+	if (!numa_remote_enabled)
+		return 0;
+
+	sysctl_oom_kill_cpuless_numa_allocating_task = 1;
+
 	if (!numa_remote_preonline_mode)
 		return 0;
 

@@ -6,3 +6,5 @@ obj-$(CONFIG_HISI_PMU) += hisi_uncore_pmu.o hisi_uncore_l3c_pmu.o \
 
 obj-$(CONFIG_HISI_PCIE_PMU) += hisi_pcie_pmu.o
 obj-$(CONFIG_HNS3_PMU) += hns3_pmu.o
+obj-$(CONFIG_UB_UMMU_PMU) += ummu-pmu.o
+ummu-pmu-y := ummu_pmu.o

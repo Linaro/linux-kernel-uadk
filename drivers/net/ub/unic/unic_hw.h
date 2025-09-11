@@ -72,5 +72,6 @@ int unic_set_promisc_mode(struct unic_dev *unic_dev,
 
 int unic_cfg_vport_buf(struct unic_dev *unic_dev, bool init);
 int unic_set_fec_mode(struct unic_dev *unic_dev, u32 fec_mode);
+int unic_update_fec_stats(struct unic_dev *unic_dev);
 
 #endif

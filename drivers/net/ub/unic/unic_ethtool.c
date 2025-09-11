@@ -11,6 +11,7 @@
 #include "unic_dev.h"
 #include "unic_hw.h"
 #include "unic_netdev.h"
+#include "unic_stats.h"
 #include "unic_ethtool.h"
 
 static u32 unic_get_link_status(struct net_device *netdev)
@@ -60,6 +61,7 @@ static const struct ethtool_ops unic_ethtool_ops = {
 	.supported_coalesce_params = UNIC_ETHTOOL_COALESCE,
 	.get_link = unic_get_link_status,
 	.get_drvinfo = unic_get_driver_info,
+	.get_fec_stats = unic_get_fec_stats,
 };
 
 void unic_set_ethtool_ops(struct net_device *netdev)

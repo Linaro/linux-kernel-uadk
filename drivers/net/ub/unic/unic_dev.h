@@ -170,6 +170,22 @@ struct unic_caps {
 	u16	max_int_gl; /* max value of interrupt coalesce based on INT_GL */
 };
 
+struct unic_fec_stats_item {
+	u64	corr_blocks;
+	u64	uncorr_blocks;
+	u64	corr_bits;
+};
+
+struct unic_fec_stats {
+	u8				lane_num;
+	struct unic_fec_stats_item	total;
+	struct unic_fec_stats_item	lane[UNIC_FEC_STATS_MAX_LANE];
+};
+
+struct unic_stats {
+	struct unic_fec_stats			fec_stats;
+};
+
 struct unic_addr_tbl {
 	spinlock_t		ip_list_lock; /* protect ip address need to add/detele */
 	struct list_head	ip_list; /* Store ip table */
@@ -209,6 +225,7 @@ struct unic_dev {
 	unsigned long		state;
 	struct delayed_work	service_task;
 	struct ubase_event_nb	ae_nbs[UNIC_AE_LEVEL_NUM];
+	struct unic_stats	stats;
 	u8			netdev_flags;
 	u8			loopback_flags;
 	struct unic_vport	vport;
@@ -264,6 +281,11 @@ static inline bool unic_dev_tx_csum_offload_supported(struct unic_dev *unic_dev)
 static inline bool unic_dev_rx_csum_offload_supported(struct unic_dev *unic_dev)
 {
 	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_RX_CSUM_OFFLOAD_B);
+}
+
+static inline bool unic_dev_fec_stats_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_FEC_STATS_B);
 }
 
 static inline bool __unic_removing(struct unic_dev *unic_dev)

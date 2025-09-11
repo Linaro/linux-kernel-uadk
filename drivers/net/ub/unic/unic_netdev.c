@@ -164,6 +164,14 @@ static int unic_net_up(struct net_device *netdev)
 	return 0;
 }
 
+static void unic_clear_fec_stats(struct unic_dev *unic_dev)
+{
+	struct unic_fec_stats *fec_stats = &unic_dev->stats.fec_stats;
+
+	if (!unic_dev_ubl_supported(unic_dev))
+		memset(fec_stats, 0, sizeof(*fec_stats));
+}
+
 void unic_link_status_change(struct net_device *netdev, bool linkup)
 {
 	struct unic_dev *unic_dev = netdev_priv(netdev);
@@ -176,6 +184,7 @@ void unic_link_status_change(struct net_device *netdev, bool linkup)
 		if (!test_bit(UNIC_STATE_TESTING, &unic_dev->state)) {
 			netif_tx_wake_all_queues(netdev);
 			netif_carrier_on(netdev);
+			unic_clear_fec_stats(unic_dev);
 		}
 	} else {
 		netif_carrier_off(netdev);
@@ -298,6 +307,7 @@ int unic_net_open_no_link_change(struct net_device *netdev)
 	if (unic_dev->sw_link_status == UNIC_LINK_STATUS_UP) {
 		netif_tx_wake_all_queues(netdev);
 		netif_carrier_on(netdev);
+		unic_clear_fec_stats(unic_dev);
 	}
 
 	return 0;

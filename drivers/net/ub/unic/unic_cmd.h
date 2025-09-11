@@ -111,6 +111,23 @@ struct unic_cfg_fec_cmd {
 	u8	rsv[20];
 };
 
+struct unic_query_fec_stats_item {
+	__le32 corr_blocks_l;
+	__le32 corr_blocks_h;
+	__le32 uncorr_blocks_l;
+	__le32 uncorr_blocks_h;
+	__le32 corr_bits_l;
+	__le32 corr_bits_h;
+};
+
+#define UNIC_FEC_STATS_MAX_LANE	8
+struct unic_query_fec_stats_resp {
+	struct unic_query_fec_stats_item total;
+	struct unic_query_fec_stats_item lane[UNIC_FEC_STATS_MAX_LANE];
+	u8 lane_num;
+	u8 rsv[31];
+};
+
 struct unic_query_flush_status_resp {
 	u8 status;
 	u8 rsv[23];

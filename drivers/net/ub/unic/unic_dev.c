@@ -556,6 +556,14 @@ static int unic_init_mac(struct unic_dev *unic_dev)
 	return 0;
 }
 
+static void unic_update_stats_for_all(struct unic_dev *unic_dev)
+{
+	if (!unic_dev_ubl_supported(unic_dev) &&
+	    unic_dev_fec_stats_supported(unic_dev) &&
+	    unic_dev->hw.mac.fec_mode != ETHTOOL_FEC_OFF)
+		unic_update_fec_stats(unic_dev);
+}
+
 static void unic_task_schedule(struct unic_dev *unic_dev,
 			       unsigned long delay_time)
 {
@@ -565,12 +573,16 @@ static void unic_task_schedule(struct unic_dev *unic_dev,
 
 static void unic_periodic_service_task(struct unic_dev *unic_dev)
 {
+#define UNIC_UPDATE_STATS_TIMER_INTERVAL	300UL
 	unsigned long delta = round_jiffies_relative(HZ);
 
 	unic_link_status_update(unic_dev);
 	unic_update_port_info(unic_dev);
 	unic_sync_rack_ip_table(unic_dev);
 	unic_sync_promisc_mode(unic_dev);
+
+	if (!(unic_dev->serv_processed_cnt % UNIC_UPDATE_STATS_TIMER_INTERVAL))
+		unic_update_stats_for_all(unic_dev);
 
 	unic_dev->serv_processed_cnt++;
 	unic_task_schedule(unic_dev, delta);

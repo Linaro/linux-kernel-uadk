@@ -35,6 +35,7 @@ static const struct unic_dbg_cap_bit_info {
 	{"\tsupport_tc_speed_limit: %u\n", &unic_dev_tc_speed_limit_supported},
 	{"\tsupport_tx_csum_offload: %u\n", &unic_dev_tx_csum_offload_supported},
 	{"\tsupport_rx_csum_offload: %u\n", &unic_dev_rx_csum_offload_supported},
+	{"\tsupport_fec_stats: %u\n", &unic_dev_fec_stats_supported},
 };
 
 static void unic_dbg_dump_caps_bits(struct unic_dev *unic_dev,

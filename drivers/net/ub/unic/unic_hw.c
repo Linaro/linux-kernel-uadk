@@ -652,3 +652,68 @@ int unic_set_fec_mode(struct unic_dev *unic_dev, u32 fec_mode)
 
 	return ret;
 }
+
+static void unic_fetch_fec_stats(struct unic_dev *unic_dev,
+				 struct unic_fec_stats_item *unic_stats_item,
+				 struct unic_query_fec_stats_item *resp_item)
+{
+#define FETCH_FEC_STATS(high, low) (((u64)le32_to_cpu(high) << 32) | \
+				    (u64)le32_to_cpu(low))
+
+	if (unic_dev_ubl_supported(unic_dev)) {
+		unic_stats_item->corr_blocks =
+			FETCH_FEC_STATS(resp_item->corr_blocks_h,
+					resp_item->corr_blocks_l);
+		unic_stats_item->uncorr_blocks =
+			FETCH_FEC_STATS(resp_item->uncorr_blocks_h,
+					resp_item->uncorr_blocks_l);
+		unic_stats_item->corr_bits =
+			FETCH_FEC_STATS(resp_item->corr_bits_h,
+					resp_item->corr_bits_l);
+	} else {
+		unic_stats_item->corr_blocks +=
+			FETCH_FEC_STATS(resp_item->corr_blocks_h,
+					resp_item->corr_blocks_l);
+		unic_stats_item->uncorr_blocks +=
+			FETCH_FEC_STATS(resp_item->uncorr_blocks_h,
+					resp_item->uncorr_blocks_l);
+		unic_stats_item->corr_bits +=
+			FETCH_FEC_STATS(resp_item->corr_bits_h,
+					resp_item->corr_bits_l);
+	}
+}
+
+int unic_update_fec_stats(struct unic_dev *unic_dev)
+{
+	struct unic_query_fec_stats_resp resp = {0};
+	struct unic_fec_stats *fec_stats;
+	struct ubase_cmd_buf in, out;
+	u8 i, lane_num;
+	int ret;
+
+	if (test_and_set_bit(UNIC_STATE_FEC_STATS_UPDATING, &unic_dev->state))
+		return -EBUSY;
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_FEC_STATS, true, 0, NULL);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_FEC_STATS, false,
+			     sizeof(resp), &resp);
+
+	ret = ubase_cmd_send_inout(unic_dev->comdev.adev, &in, &out);
+	if (ret) {
+		unic_err(unic_dev,
+			 "failed to query fec stats, ret = %d.\n", ret);
+		goto err_send_cmd;
+	}
+
+	fec_stats = &unic_dev->stats.fec_stats;
+	fec_stats->lane_num = resp.lane_num;
+	unic_fetch_fec_stats(unic_dev, &fec_stats->total, &resp.total);
+	lane_num = min_t(u8, fec_stats->lane_num, UNIC_FEC_STATS_MAX_LANE);
+	for (i = 0; i < lane_num; i++)
+		unic_fetch_fec_stats(unic_dev, &fec_stats->lane[i],
+				     &resp.lane[i]);
+
+err_send_cmd:
+	clear_bit(UNIC_STATE_FEC_STATS_UPDATING, &unic_dev->state);
+	return ret;
+}

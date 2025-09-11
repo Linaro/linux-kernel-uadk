@@ -46,6 +46,11 @@ struct unic_promisc_en {
 	u8 en_mc;
 };
 
+static inline bool unic_is_port_down(struct unic_dev *unic_dev)
+{
+	return unic_dev->hw.mac.link_status == UNIC_LINK_STATUS_DOWN;
+}
+
 int unic_update_port_info(struct unic_dev *unic_dev);
 
 int unic_set_mac_speed_duplex(struct unic_dev *unic_dev, u32 speed, u8 duplex,

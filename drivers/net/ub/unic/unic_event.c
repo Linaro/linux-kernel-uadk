@@ -13,6 +13,7 @@
 #include <ub/ubase/ubase_comm_eq.h>
 #include <ub/ubase/ubase_comm_hw.h>
 #include <ub/ubase/ubase_comm_qos.h>
+#include <ub/ubase/ubase_comm_ctrlq.h>
 
 #include "unic_cmd.h"
 #include "unic_crq.h"
@@ -22,6 +23,33 @@
 #include "unic_netdev.h"
 #include "unic_qos_hw.h"
 #include "unic_event.h"
+
+int unic_comp_handler(struct notifier_block *nb, unsigned long jfcn, void *data)
+{
+	struct auxiliary_device *adev = (struct auxiliary_device *)data;
+	struct unic_dev *unic_dev = dev_get_drvdata(&adev->dev);
+	struct unic_channels *channels = &unic_dev->channels;
+	struct unic_cq *cq;
+	u32 index;
+
+	if (test_bit(UNIC_STATE_CHANNEL_INVALID, &unic_dev->state))
+		return -EBUSY;
+
+	index = jfcn < channels->num ? jfcn : jfcn - channels->num;
+	if (index >= channels->num)
+		return -EINVAL;
+
+	if (jfcn > channels->num)
+		cq = channels->c[index].rq->cq;
+	else
+		cq = channels->c[index].sq->cq;
+
+	cq->event_cnt++;
+
+	napi_schedule(&channels->c[index].napi);
+
+	return 0;
+}
 
 static struct ubase_crq_event_nb unic_crq_events[] = {
 	{

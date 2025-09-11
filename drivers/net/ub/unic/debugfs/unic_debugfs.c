@@ -81,6 +81,49 @@ static int unic_dbg_dump_caps_info(struct seq_file *s, void *data)
 	return 0;
 }
 
+static void unic_dump_page_pool_info(struct page_pool *page_pool,
+				     struct seq_file *s, u32 index)
+{
+#define UNIC_SIZE_1K	1024
+
+	seq_printf(s, "%-10u", index);
+	seq_printf(s, "%-14u", READ_ONCE(page_pool->pages_state_hold_cnt));
+	seq_printf(s, "%-14d", atomic_read(&page_pool->pages_state_release_cnt));
+	seq_printf(s, "%-21u", page_pool->p.pool_size);
+	seq_printf(s, "%-7u", page_pool->p.order);
+	seq_printf(s, "%-9d", page_pool->p.nid);
+	seq_printf(s, "%uK\n", page_pool->p.max_len / UNIC_SIZE_1K);
+}
+
+static int unic_dbg_dump_page_pool_info(struct seq_file *s, void *data)
+{
+	struct unic_dev *unic_dev = dev_get_drvdata(s->private);
+	struct unic_rq *rq;
+	int ret = 0;
+	u32 i;
+
+	seq_puts(s, "QUEUE_ID  ALLOCATE_CNT  FREE_CNT      POOL_SIZE(PAGE_NUM)  ");
+	seq_puts(s, "ORDER  NUMA_ID  MAX_LEN\n");
+
+	if (!mutex_trylock(&unic_dev->channels.mutex))
+		return -EBUSY;
+
+	if (__unic_resetting(unic_dev) ||
+	    !unic_dev->channels.c) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	for (i = 0; i < unic_dev->channels.num; i++) {
+		rq = unic_dev->channels.c[i].rq;
+		unic_dump_page_pool_info(rq->page_pool, s, i);
+	}
+
+out:
+	mutex_unlock(&unic_dev->channels.mutex);
+	return ret;
+}
+
 static bool unic_dbg_dentry_support(struct device *dev, u32 property)
 {
 	struct unic_dev *unic_dev = dev_get_drvdata(dev);
@@ -112,7 +155,14 @@ static struct ubase_dbg_cmd_info unic_dbg_cmd[] = {
 		.support = unic_dbg_dentry_support,
 		.init = ubase_dbg_seq_file_init,
 		.read_func = unic_dbg_dump_caps_info,
-	},
+	}, {
+		.name = "page_pool_info",
+		.dentry_index = UNIC_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_page_pool_info,
+	}
 };
 
 int unic_dbg_init(struct auxiliary_device *adev)

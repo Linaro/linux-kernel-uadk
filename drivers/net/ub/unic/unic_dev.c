@@ -61,6 +61,13 @@ u32 unic_channels_max_num(struct auxiliary_device *adev)
 	return min(min(jfs_num, jfr_num), jfc_num >> 1);
 }
 
+u32 unic_get_max_rss_size(struct unic_dev *unic_dev)
+{
+	u8 vl_num = unic_dev->channels.rss_vl_num;
+
+	return unic_channels_max_num(unic_dev->comdev.adev) / vl_num;
+}
+
 void unic_update_queue_info(struct unic_dev *unic_dev)
 {
 	struct auxiliary_device *adev = unic_dev->comdev.adev;
@@ -283,6 +290,196 @@ static void unic_uninit_channels_attr(struct unic_dev *unic_dev)
 	struct unic_channels *channels = &unic_dev->channels;
 
 	mutex_destroy(&channels->mutex);
+}
+
+int unic_init_tx(struct unic_dev *unic_dev, u32 num)
+{
+	struct unic_channel *c;
+	u32 i, j;
+	int ret;
+
+	for (i = 0; i < num; i++) {
+		ret = unic_create_cq(unic_dev, i, UNIC_CQ_SQ);
+		if (ret) {
+			dev_err(unic_dev->comdev.adev->dev.parent,
+				"failed to init tx cq(%u), ret=%d.\n", i, ret);
+			goto err_create_cq;
+		}
+	}
+
+	for (j = 0; j < num; j++) {
+		ret = unic_create_sq(unic_dev, j);
+		if (ret) {
+			dev_err(unic_dev->comdev.adev->dev.parent,
+				"failed to init tx sq(%u), ret=%d.\n", j, ret);
+			goto err_create_sq;
+		}
+		c = &unic_dev->channels.c[j];
+		c->sq->cq = c->sq_cq;
+	}
+
+	set_bit(UNIC_TX_INITED, &unic_dev->channels.state);
+
+	return 0;
+
+err_create_sq:
+	unic_destroy_sq(unic_dev, j);
+err_create_cq:
+	unic_destroy_cq(unic_dev, i, UNIC_CQ_SQ);
+	return ret;
+}
+
+int unic_init_rx(struct unic_dev *unic_dev, u32 num)
+{
+	struct unic_channel *c;
+	u32 i, j;
+	int ret;
+
+	for (i = 0; i < num; i++) {
+		ret = unic_create_cq(unic_dev, i, UNIC_CQ_RQ);
+		if (ret) {
+			dev_err(unic_dev->comdev.adev->dev.parent,
+				"failed to init rx cq(%u), ret=%d.\n", i, ret);
+				goto err_create_cq;
+		}
+	}
+
+	for (j = 0; j < num; j++) {
+		ret = unic_create_rq(unic_dev, j);
+		if (ret) {
+			dev_err(unic_dev->comdev.adev->dev.parent,
+				"failed to init rx rq(%u), ret=%d.\n", j, ret);
+			goto err_create_rq;
+		}
+		c = &unic_dev->channels.c[j];
+		c->rq->cq = c->rq_cq;
+	}
+
+	set_bit(UNIC_RX_INITED, &unic_dev->channels.state);
+
+	return 0;
+
+err_create_rq:
+	unic_destroy_rq(unic_dev, j);
+err_create_cq:
+	unic_destroy_cq(unic_dev, i, UNIC_CQ_RQ);
+	return ret;
+}
+
+static int unic_init_jetty(struct unic_dev *unic_dev, u32 num)
+{
+	int ret;
+
+	ret = unic_init_rx(unic_dev, num);
+	if (ret)
+		return ret;
+
+	ret = unic_init_tx(unic_dev, num);
+	if (ret)
+		unic_destroy_rx(unic_dev, num);
+
+	return ret;
+}
+
+void unic_destroy_tx(struct unic_dev *unic_dev, u32 num)
+{
+	if (!test_and_clear_bit(UNIC_TX_INITED, &unic_dev->channels.state))
+		return;
+
+	unic_destroy_sq(unic_dev, num);
+	unic_destroy_cq(unic_dev, num, UNIC_CQ_SQ);
+}
+
+void unic_destroy_rx(struct unic_dev *unic_dev, u32 num)
+{
+	if (!test_and_clear_bit(UNIC_RX_INITED, &unic_dev->channels.state))
+		return;
+
+	unic_destroy_rq(unic_dev, num);
+	unic_destroy_cq(unic_dev, num, UNIC_CQ_RQ);
+}
+
+static void unic_destroy_jetty(struct unic_dev *unic_dev, u32 num)
+{
+	unic_destroy_tx(unic_dev, num);
+	unic_destroy_rx(unic_dev, num);
+}
+
+static int __unic_init_channels(struct unic_dev *unic_dev, u32 channels_num)
+{
+	struct auxiliary_device *adev = unic_dev->comdev.adev;
+	struct unic_channels *channels = &unic_dev->channels;
+	int ret;
+	u32 i;
+
+	channels->num = channels_num;
+	channels->c = kcalloc(channels_num, sizeof(*channels->c), GFP_KERNEL);
+	if (ZERO_OR_NULL_PTR(channels->c))
+		return -ENOMEM;
+
+	ret = unic_init_jetty(unic_dev, channels->num);
+	if (ret) {
+		dev_err(adev->dev.parent,
+			"failed to init jetty, ret = %d.\n", ret);
+		goto err_init_jetty;
+	}
+
+	for (i = 0; i < channels->num; i++)
+		netif_napi_add(unic_dev->comdev.netdev, &channels->c[i].napi,
+			       unic_napi_poll);
+
+	return 0;
+
+err_init_jetty:
+	kfree(channels->c);
+	channels->c = NULL;
+
+	return ret;
+}
+
+int unic_init_channels(struct unic_dev *unic_dev, u32 channels_num)
+{
+	struct unic_channels *channels = &unic_dev->channels;
+	int ret;
+
+	mutex_lock(&channels->mutex);
+
+	ret = __unic_init_channels(unic_dev, channels_num);
+	if (!ret)
+		clear_bit(UNIC_STATE_CHANNEL_INVALID, &unic_dev->state);
+
+	mutex_unlock(&channels->mutex);
+	return ret;
+}
+
+static void __unic_uninit_channels(struct unic_dev *unic_dev)
+{
+	struct unic_channels *channels = &unic_dev->channels;
+	u32 i;
+
+	if (!channels->c)
+		return;
+
+	for (i = 0; i < channels->num; i++)
+		netif_napi_del(&channels->c[i].napi);
+
+	unic_destroy_jetty(unic_dev, channels->num);
+
+	kfree(channels->c);
+
+	channels->c = NULL;
+}
+
+void unic_uninit_channels(struct unic_dev *unic_dev)
+{
+	struct unic_channels *channels = &unic_dev->channels;
+
+	mutex_lock(&channels->mutex);
+
+	set_bit(UNIC_STATE_CHANNEL_INVALID, &unic_dev->state);
+	__unic_uninit_channels(unic_dev);
+
+	mutex_unlock(&channels->mutex);
 }
 
 static void unic_set_netdev_attr(struct net_device *netdev)
@@ -544,9 +741,18 @@ static int unic_init_netdev_priv(struct net_device *netdev,
 	if (ret)
 		goto err_uninit_vport;
 
+	ret = unic_init_channels(priv, priv->channels.num);
+	if (ret) {
+		dev_err(adev->dev.parent,
+			"failed to init channels, ret = %d.\n", ret);
+		goto err_uninit_channels_attr;
+	}
+
 	set_bit(UNIC_STATE_DOWN, &priv->state);
 	return 0;
 
+err_uninit_channels_attr:
+	unic_uninit_channels_attr(priv);
 err_uninit_vport:
 	unic_uninit_vport(priv);
 destroy_lock:
@@ -559,6 +765,7 @@ static void unic_uninit_netdev_priv(struct net_device *netdev)
 {
 	struct unic_dev *priv = netdev_priv(netdev);
 
+	unic_uninit_channels(priv);
 	unic_uninit_channels_attr(priv);
 	unic_uninit_vport(priv);
 	mutex_destroy(&priv->act_info.mutex);

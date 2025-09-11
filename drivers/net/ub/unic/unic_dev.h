@@ -17,6 +17,9 @@
 #include "unic.h"
 #include "unic_cmd.h"
 #include "unic_ethtool.h"
+#include "unic_rx.h"
+#include "unic_tx.h"
+#include "unic_txrx.h"
 
 #define UNIC_MOD_VERSION	"1.0"
 #define UNIC_AE_LEVEL_NUM	1
@@ -30,6 +33,9 @@ enum unic_dev_state {
 	UNIC_STATE_DISABLED,
 	UNIC_STATE_LINK_UPDATING,
 	UNIC_STATE_TESTING,
+	UNIC_STATE_FEC_STATS_UPDATING,
+	UNIC_STATE_MAC_STATS_UPDATING,
+	UNIC_STATE_CHANNEL_INVALID,
 	UNIC_STATE_DEACTIVATE,
 };
 
@@ -39,6 +45,23 @@ enum unic_vport_state {
 	UNIC_VPORT_STATE_IP_TBL_CHANGE,
 	UNIC_VPORT_STATE_IP_QUERYING,
 };
+
+enum unic_channel_state {
+	UNIC_TX_CHANGED,
+	UNIC_RX_CHANGED,
+	UNIC_TX_INITED,
+	UNIC_RX_INITED,
+};
+
+#define UNIC_CQE_PERIOD_0	0
+#define UNIC_CQE_PERIOD_4	4
+#define UNIC_CQE_PERIOD_16	16
+#define UNIC_CQE_PERIOD_64	64
+#define UNIC_CQE_PERIOD_256	256
+#define UNIC_CQE_PERIOD_1024	1024
+#define UNIC_CQE_PERIOD_4096	4096
+#define UNIC_CQE_PERIOD_16384	16384
+#define UNIC_CQE_PERIOD_ERR	16385
 
 #define UNIC_DEFAULT_CHANNEL_NUM	1
 
@@ -199,10 +222,16 @@ struct unic_dev {
 int unic_dev_init(struct auxiliary_device *adev);
 void unic_dev_uninit(struct auxiliary_device *adev);
 u32 unic_channels_max_num(struct auxiliary_device *adev);
+int unic_init_channels(struct unic_dev *unic_dev, u32 channels_num);
+void unic_uninit_channels(struct unic_dev *unic_dev);
 void unic_start_period_task(struct net_device *netdev);
 void unic_remove_period_task(struct unic_dev *unic_dev);
 int unic_init_wq(void);
 void unic_destroy_wq(void);
+int unic_init_rx(struct unic_dev *unic_dev, u32 num);
+int unic_init_tx(struct unic_dev *unic_dev, u32 num);
+void unic_destroy_rx(struct unic_dev *unic_dev, u32 num);
+void unic_destroy_tx(struct unic_dev *unic_dev, u32 num);
 int unic_set_vl_map(struct unic_dev *unic_dev, u8 *dscp_prio, u8 *prio_vl,
 		    u8 map_type);
 int unic_dbg_log(void);
@@ -265,6 +294,26 @@ static inline bool unic_initing(struct net_device *netdev)
 static inline bool unic_is_initing_or_resetting(struct unic_dev *unic_dev)
 {
 	return __unic_resetting(unic_dev) || __unic_initing(unic_dev);
+}
+
+static inline u32 unic_get_sq_cqe_mask(struct unic_dev *unic_dev)
+{
+	return unic_dev->channels.sq_cqe_depth - 1;
+}
+
+static inline u32 unic_get_rq_cqe_mask(struct unic_dev *unic_dev)
+{
+	return unic_dev->channels.rq_cqe_depth - 1;
+}
+
+static inline bool unic_tx_changed(struct unic_dev *unic_dev)
+{
+	return test_bit(UNIC_TX_CHANGED, &unic_dev->channels.state);
+}
+
+static inline bool unic_rx_changed(struct unic_dev *unic_dev)
+{
+	return test_bit(UNIC_RX_CHANGED, &unic_dev->channels.state);
 }
 
 static inline u32 unic_cmd_timeout(struct unic_dev *unic_dev)

@@ -82,6 +82,10 @@ static int __init unic_init(void)
 		return ret;
 	}
 
+	ret = unic_register_ipaddr_notifier();
+	if (ret)
+		goto err_reg_ip_notifier;
+
 	ret = auxiliary_driver_register(&unic_drv);
 	if (ret)
 		goto err_aux_reg;
@@ -89,12 +93,15 @@ static int __init unic_init(void)
 	return ret;
 
 err_aux_reg:
+	unic_unregister_ipaddr_notifier();
+err_reg_ip_notifier:
 	unic_destroy_wq();
 	return ret;
 }
 
 static void __exit unic_exit(void)
 {
+	unic_unregister_ipaddr_notifier();
 	auxiliary_driver_unregister(&unic_drv);
 	unic_destroy_wq();
 }

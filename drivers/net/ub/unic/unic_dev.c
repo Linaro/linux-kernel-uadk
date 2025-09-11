@@ -25,6 +25,7 @@
 #include "unic_hw.h"
 #include "unic_qos_hw.h"
 #include "unic_netdev.h"
+#include "unic_rack_ip.h"
 #include "unic_dev.h"
 
 #define UNIC_WATCHDOG_TIMEOUT (5 * HZ)
@@ -568,6 +569,7 @@ static void unic_periodic_service_task(struct unic_dev *unic_dev)
 
 	unic_link_status_update(unic_dev);
 	unic_update_port_info(unic_dev);
+	unic_sync_rack_ip_table(unic_dev);
 	unic_sync_promisc_mode(unic_dev);
 
 	unic_dev->serv_processed_cnt++;
@@ -679,6 +681,7 @@ static int unic_init_vport(struct unic_dev *unic_dev)
 
 static void unic_uninit_vport(struct unic_dev *unic_dev)
 {
+	unic_uninit_rack_ip_table(unic_dev);
 	unic_uninit_vport_buf(unic_dev);
 }
 
@@ -867,6 +870,7 @@ int unic_dev_init(struct auxiliary_device *adev)
 		goto err_unregister_event;
 	}
 
+	unic_query_rack_ip(adev);
 	unic_start_dev_period_task(netdev);
 
 	return 0;

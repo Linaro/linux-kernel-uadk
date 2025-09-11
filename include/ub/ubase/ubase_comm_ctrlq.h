@@ -45,6 +45,11 @@ enum ubase_ctrlq_opc_type_qos {
 	UBASE_CTRLQ_OPC_QUERY_SL	= 0x02,
 };
 
+enum ubase_ctrlq_opc_ip {
+	UBASE_CTRLQ_OPC_NOTIFY_IP = 0x01,
+	UBASE_CTRLQ_OPC_QUERY_IP = 0x02,
+};
+
 enum ubase_ctrlq_opc_type_dev_register {
 	UBASE_CTRLQ_OPC_CTRLQ_CTRL	= 0x14,
 	UBASE_CTRLQ_OPC_UE_RESET_CTRL	= 0x15,

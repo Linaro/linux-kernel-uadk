@@ -28,6 +28,7 @@
 #include "unic_tx.h"
 #include "unic_txrx.h"
 #include "unic_netdev.h"
+#include "unic_rack_ip.h"
 
 static int unic_netdev_set_tcs(struct net_device *netdev)
 {
@@ -528,6 +529,103 @@ static const struct net_device_ops unic_netdev_ops = {
 void unic_set_netdev_ops(struct net_device *netdev)
 {
 	netdev->netdev_ops = &unic_netdev_ops;
+}
+
+static bool unic_port_dev_check(const struct net_device *dev)
+{
+	return dev->netdev_ops == &unic_netdev_ops;
+}
+
+static int unic_ipaddr_event(struct notifier_block *nb, unsigned long event,
+			     struct sockaddr *sa, struct net_device *ndev,
+			     u16 ip_mask)
+{
+	struct unic_dev *unic_dev;
+	int ret;
+
+	if (ndev->type != ARPHRD_UB)
+		return NOTIFY_DONE;
+
+	if (!unic_port_dev_check(ndev))
+		return NOTIFY_DONE;
+
+	unic_dev = netdev_priv(ndev);
+
+	switch (event) {
+	case NETDEV_UP:
+		ret = unic_add_ip_addr(unic_dev, sa, ip_mask);
+		if (ret)
+			return NOTIFY_BAD;
+		break;
+	case NETDEV_DOWN:
+		ret = unic_rm_ip_addr(unic_dev, sa, ip_mask);
+		if (ret)
+			return NOTIFY_BAD;
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+
+	return NOTIFY_OK;
+}
+
+static int unic_inetaddr_event(struct notifier_block *nb, unsigned long event,
+			       void *ptr)
+{
+	struct in_ifaddr *ifa4 = (struct in_ifaddr *)ptr;
+	struct net_device *ndev = (struct net_device *)ifa4->ifa_dev->dev;
+	u16 ip4_mask = (u16)ifa4->ifa_prefixlen;
+	struct sockaddr_in in;
+
+	in.sin_family = AF_INET;
+	in.sin_addr.s_addr = ifa4->ifa_address;
+
+	return unic_ipaddr_event(nb, event, (struct sockaddr *)&in, ndev,
+				 ip4_mask);
+}
+
+static int unic_inet6addr_event(struct notifier_block *nb, unsigned long event,
+				void *ptr)
+{
+	struct inet6_ifaddr *ifa6 = (struct inet6_ifaddr *)ptr;
+	struct net_device *ndev = (struct net_device *)ifa6->idev->dev;
+	u16 ip6_mask = (u16)ifa6->prefix_len;
+	struct sockaddr_in6 in6;
+
+	in6.sin6_family = AF_INET6;
+	in6.sin6_addr = ifa6->addr;
+
+	return unic_ipaddr_event(nb, event, (struct sockaddr *)&in6, ndev,
+				 ip6_mask);
+}
+
+static struct notifier_block unic_inetaddr_notifier = {
+	.notifier_call = unic_inetaddr_event
+};
+
+static struct notifier_block unic_inet6addr_notifier = {
+	.notifier_call = unic_inet6addr_event
+};
+
+int unic_register_ipaddr_notifier(void)
+{
+	int ret;
+
+	ret = register_inetaddr_notifier(&unic_inetaddr_notifier);
+	if (ret)
+		return ret;
+
+	ret = register_inet6addr_notifier(&unic_inet6addr_notifier);
+	if (ret)
+		unregister_inetaddr_notifier(&unic_inetaddr_notifier);
+
+	return ret;
+}
+
+void unic_unregister_ipaddr_notifier(void)
+{
+	unregister_inetaddr_notifier(&unic_inetaddr_notifier);
+	unregister_inet6addr_notifier(&unic_inet6addr_notifier);
 }
 
 int unic_query_link_status(struct unic_dev *unic_dev, u8 *link_status)

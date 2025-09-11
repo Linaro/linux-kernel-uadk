@@ -17,6 +17,8 @@ int unic_net_stop(struct net_device *netdev);
 void unic_net_stop_no_link_change(struct net_device *netdev);
 void unic_set_netdev_ops(struct net_device *netdev);
 void unic_link_status_update(struct unic_dev *unic_dev);
+int unic_register_ipaddr_notifier(void);
+void unic_unregister_ipaddr_notifier(void);
 void unic_link_status_change(struct net_device *netdev, bool linkup);
 int unic_query_link_status(struct unic_dev *unic_dev, u8 *link_status);
 

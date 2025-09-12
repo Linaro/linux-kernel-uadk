@@ -4,10 +4,218 @@
  *
  */
 
+#include <linux/interrupt.h>
 #include <ub/ubase/ubase_comm_eq.h>
 
 #include "ubase_dev.h"
 #include "ubase_eq.h"
+
+void ubase_enable_misc_vector(struct ubase_dev *udev, bool enable)
+{
+	ubase_write_dev(&udev->hw, UBASE_MISC_VECTOR_REG_OFFSET,
+			enable ? 0 : 1);
+}
+
+static int ubase_reg_event_handler(struct ubase_dev *udev)
+{
+	int ret = IRQ_HANDLED;
+
+	ubase_enable_misc_vector(udev, false);
+
+	ubase_enable_misc_vector(udev, true);
+
+	return ret;
+}
+
+static irqreturn_t ubase_misc_int_handler(int irq, void *data)
+{
+	struct ubase_dev *udev = (struct ubase_dev *)data;
+
+	return IRQ_RETVAL(ubase_reg_event_handler(udev));
+}
+
+static int ubase_request_misc_irq(struct ubase_dev *udev)
+{
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	struct ubase_irq *irq;
+	int ret;
+
+	if (ubase_ubus_irq_vector(udev->dev, 0) == -EOPNOTSUPP)
+		return 0;
+
+	irq = irq_table->irqs[UBASE_MISC_IRQ_INDEX];
+	snprintf(irq->name, UBASE_INT_NAME_LEN, "ubase%d-%s-%d", udev->dev_id,
+		 "misc", 0);
+	ret = request_irq(irq->irqn, ubase_misc_int_handler, 0, irq->name, udev);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to request misc irq, ret = %d.\n", ret);
+		return ret;
+	}
+
+	ubase_enable_misc_vector(udev, true);
+
+	return ret;
+}
+
+static void ubase_free_misc_irq(struct ubase_dev *udev)
+{
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	struct ubase_irq *irq;
+
+	if (!irq_table->irqs)
+		return;
+
+	ubase_enable_misc_vector(udev, false);
+
+	irq = irq_table->irqs[UBASE_MISC_IRQ_INDEX];
+	if (ubase_ubus_irq_vector(udev->dev, 0) != -EOPNOTSUPP)
+		free_irq(irq->irqn, udev);
+}
+
+static int ubase_irq_init(struct ubase_dev *udev)
+{
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	u32 irqs_num = irq_table->irqs_num;
+	struct ubase_irq **irqs;
+	int ret;
+	u32 i;
+
+	irqs = kcalloc(irqs_num, sizeof(struct ubase_irq *), GFP_KERNEL);
+	if (!irqs) {
+		ubase_err(udev, "failed to alloc irqs.\n");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < irqs_num; i++) {
+		irqs[i] = kzalloc(sizeof(struct ubase_irq), GFP_KERNEL);
+		if (!irqs[i]) {
+			ubase_err(udev, "failed to alloc ubase irq[%u].\n", i);
+			ret = -ENOMEM;
+			goto err_alloc_ubase_irq;
+		}
+
+		if (ubase_ubus_irq_vector(udev->dev, 0) == -EOPNOTSUPP)
+			continue;
+
+		irqs[i]->irqn = ubase_ubus_irq_vector(udev->dev, i);
+		if (irqs[i]->irqn < 0) {
+			ubase_err(udev,
+				  "failed to get irq[%u] num, err irq num = %d.\n",
+				  i, irqs[i]->irqn);
+			ret = irqs[i]->irqn;
+			kfree(irqs[i]);
+			goto err_alloc_ubase_irq;
+		}
+	}
+	irq_table->irqs = irqs;
+
+	return 0;
+
+err_alloc_ubase_irq:
+	for (; i > 0; i--)
+		kfree(irqs[i - 1]);
+	kfree(irqs);
+	irq_table->irqs = NULL;
+
+	return ret;
+}
+
+static void ubase_irq_uninit(struct ubase_dev *udev)
+{
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	u32 i;
+
+	if (!irq_table->irqs)
+		return;
+
+	for (i = 0; i < irq_table->irqs_num; i++)
+		kfree(irq_table->irqs[i]);
+	kfree(irq_table->irqs);
+	irq_table->irqs = NULL;
+}
+
+static int ubase_request_irq(struct ubase_dev *udev)
+{
+	int ret;
+
+	ret = ubase_request_misc_irq(udev);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to request ubase misc irq, ret = %d.\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void ubase_free_irq(struct ubase_dev *udev)
+{
+	ubase_free_misc_irq(udev);
+}
+
+int ubase_irq_table_init(struct ubase_dev *udev)
+{
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	int i, j, ret;
+
+	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits)) {
+		for (i = 0; i < UBASE_DRV_MAX; i++) {
+			for (j = 0; j < UBASE_EVENT_TYPE_MAX; j++)
+				BLOCKING_INIT_NOTIFIER_HEAD(&irq_table->nh[i][j]);
+		}
+		mutex_init(&udev->irq_table.ceq_lock);
+	}
+
+	ret = ubase_ubus_irq_vectors_alloc(udev->dev);
+	if (ret) {
+		ubase_err(udev, "failed to alloc irq vectors, ret = %d.\n",
+			  ret);
+		goto err_irq_res_init;
+	}
+
+	ret = ubase_irq_init(udev);
+	if (ret) {
+		ubase_err(udev, "failed to init ubase irq, ret = %d.\n", ret);
+		goto err_irq_init;
+	}
+
+	ret = ubase_request_irq(udev);
+	if (ret) {
+		ubase_err(udev, "failed to request ubase irq, ret = %d.\n",
+			  ret);
+		goto err_request_irq;
+	}
+
+	clear_bit(UBASE_STATE_IRQ_INVALID_B, &udev->state_bits);
+
+	return 0;
+
+err_request_irq:
+	ubase_irq_uninit(udev);
+err_irq_init:
+	ubase_ubus_irq_vectors_free(udev->dev);
+err_irq_res_init:
+	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+		mutex_destroy(&udev->irq_table.ceq_lock);
+
+	return ret;
+}
+
+void ubase_irq_table_free(struct ubase_dev *udev)
+{
+	if (test_and_set_bit(UBASE_STATE_IRQ_INVALID_B, &udev->state_bits))
+		return;
+
+	ubase_free_irq(udev);
+	ubase_irq_uninit(udev);
+	ubase_ubus_irq_vectors_free(udev->dev);
+}
+
+void ubase_irq_table_uninit(struct ubase_dev *udev)
+{
+	ubase_irq_table_free(udev);
+}
 
 static int __ubase_event_register(struct ubase_dev *udev,
 				  struct ubase_event_nb *cb)

@@ -17,6 +17,13 @@
 
 #define UBASE_AE_LEVEL_NUM 4
 
+/* Vector0 interrupt control register */
+#define UBASE_MISC_VECTOR_REG_OFFSET	0x18020
+
+enum ubase_eqc_irqn {
+	UBASE_MISC_IRQ_INDEX,
+};
+
 struct ubase_irq {
 	char	name[UBASE_INT_NAME_LEN];
 	int	irqn;
@@ -69,7 +76,12 @@ struct ubase_irq_table {
 	u32				irqs_num;
 };
 
+int ubase_irq_table_init(struct ubase_dev *udev);
+void ubase_irq_table_uninit(struct ubase_dev *udev);
+
 int ubase_register_ae_event(struct ubase_dev *udev);
 void ubase_unregister_ae_event(struct ubase_dev *udev);
+
+void ubase_enable_misc_vector(struct ubase_dev *udev, bool enable);
 
 #endif

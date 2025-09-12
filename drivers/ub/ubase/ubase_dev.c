@@ -461,7 +461,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"init irq table", UBASE_SUP_NO_PMU, 1,
-		NULL, NULL
+		ubase_irq_table_init, ubase_irq_table_uninit
 	},
 	{
 		"init ctrl queue", UBASE_SUP_NO_PMU, 1,

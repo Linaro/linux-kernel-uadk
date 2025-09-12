@@ -509,7 +509,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"enable ce irq", UBASE_SUP_NO_PMU, 1,
-		NULL, NULL
+		ubase_enable_ce_irqs, ubase_disable_ce_irqs
 	},
 };
 

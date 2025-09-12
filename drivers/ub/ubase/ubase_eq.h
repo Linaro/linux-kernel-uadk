@@ -27,6 +27,9 @@
 #define UBASE_EQE_BA_H_OFFSET		32
 #define UBASE_EQE_BA_H_VALID_BIT	GENMASK(31, 0)
 
+#define UBASE_CEQ_CEQE_OWNER_BIT	BIT(31)
+#define UBASE_CEQE_COMP_CQN_M		GENMASK(19, 0)
+#define UBASE_EQ_DB_CMD_CEQ		0x2
 #define EQC_EQ_MAX_PERIOD_INDX	4U
 
 #define UBASE_INT_NAME_LEN 32
@@ -47,6 +50,7 @@ enum ubase_async_event_cause_bit {
 enum ubase_eqc_irqn {
 	UBASE_MISC_IRQ_INDEX,
 	UBASE_AEQ_IRQ_INDEX,
+	UBASE_CEQ_IRQ_INDEX,
 };
 
 struct ubase_irq {
@@ -62,6 +66,11 @@ struct ubase_eq_db {
 
 	__le32 ci : 24;
 	__le32 rsv2 : 8;
+};
+
+struct ubase_ceqe {
+	u32 comp;
+	u32 rsv[15];
 };
 
 struct ubase_eq_addr {
@@ -180,5 +189,7 @@ int ubase_register_ae_event(struct ubase_dev *udev);
 void ubase_unregister_ae_event(struct ubase_dev *udev);
 
 void ubase_enable_misc_vector(struct ubase_dev *udev, bool enable);
+void ubase_disable_ce_irqs(struct ubase_dev *udev);
+int ubase_enable_ce_irqs(struct ubase_dev *udev);
 
 #endif

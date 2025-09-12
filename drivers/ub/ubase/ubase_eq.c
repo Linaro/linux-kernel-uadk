@@ -14,7 +14,41 @@
 
 enum ubase_eq_type {
 	UBASE_EQ_TYPE_AEQ,
+	UBASE_EQ_TYPE_CEQ,
 };
+
+static struct ubase_ceqe *ubase_next_ceqe(struct ubase_ceq *ceq)
+{
+	struct ubase_eq *eq = &ceq->eq;
+	struct ubase_ceqe *ceqe;
+
+	ceqe = (struct ubase_ceqe *)(ceq->eq.addr.addr +
+				     (eq->cons_index & (eq->entries_num - 1)) *
+				     eq->eqe_size);
+
+	return !!u32_get_bits(ceqe->comp, UBASE_CEQ_CEQE_OWNER_BIT) ^
+	       !!(eq->cons_index & eq->entries_num) ? ceqe : NULL;
+}
+
+static void ubase_comp_handler(struct ubase_dev *udev, u32 jfcn)
+{
+	struct ubase_res_caps *unic_jfc_caps = &udev->caps.unic_caps.jfc;
+	u32 jfcn_end = unic_jfc_caps->start_idx + unic_jfc_caps->max_cnt;
+	u32 jfcn_begin = unic_jfc_caps->start_idx;
+	struct ubase_adev *uadev;
+	u8 idx;
+
+	if (jfcn_begin <= jfcn && jfcn < jfcn_end)
+		idx = UBASE_DRV_UNIC;
+	else
+		idx = UBASE_DRV_UDMA;
+
+	uadev = udev->priv.uadev[idx];
+	if (unlikely(!uadev))
+		return;
+
+	atomic_notifier_call_chain(&uadev->comp_nh, jfcn, (void *)&uadev->adev);
+}
 
 static void ubase_update_eq_db(struct ubase_eq *eq, enum ubase_eq_type eq_type)
 {
@@ -23,7 +57,42 @@ static void ubase_update_eq_db(struct ubase_eq *eq, enum ubase_eq_type eq_type)
 	eq_db.eqn = eq->eqn;
 	eq_db.ci = eq->cons_index;
 
+	if (eq_type == UBASE_EQ_TYPE_CEQ)
+		eq_db.type = UBASE_EQ_DB_CMD_CEQ;
+
 	writeq(*(__le64 *)&eq_db, eq->db_reg);
+}
+
+static irqreturn_t ubase_ceq_int_handler(int irq, void *data)
+{
+#define UBASE_CEQ_POLLING_BUDGET 128
+
+	struct ubase_ceq *ceq = (struct ubase_ceq *)data;
+	struct ubase_ceqe *ceqe = ubase_next_ceqe(ceq);
+	struct ubase_dev *udev = ceq->udev;
+	bool ceqe_found = false;
+	u8 cnt = 0;
+	u32 jfcn;
+
+	while (cnt++ < UBASE_CEQ_POLLING_BUDGET && ceqe) {
+		/* Make sure we read CEQ entry after we have checked the
+		 * ownership bit
+		 */
+		dma_rmb();
+
+		jfcn = u32_get_bits(ceqe->comp, UBASE_CEQE_COMP_CQN_M);
+
+		ubase_comp_handler(udev, jfcn);
+
+		++ceq->eq.cons_index;
+		ceqe_found = true;
+		ceqe = ubase_next_ceqe(ceq);
+	}
+
+	if (ceqe_found)
+		ubase_update_eq_db(&ceq->eq, UBASE_EQ_TYPE_CEQ);
+
+	return IRQ_RETVAL(ceqe_found);
 }
 
 static struct ubase_aeqe *ubase_next_aeqe(struct ubase_dev *udev,
@@ -259,6 +328,12 @@ static int ubase_fill_eq_attribute(struct ubase_dev *udev, struct ubase_eq *eq,
 		eq->entries_num = udev->caps.dev_caps.aeqe_depth;
 		eq->eq_period = EQC_EQ_MAX_PERIOD_INDX;
 		eq->eqc_irqn = eqn + udev->caps.dev_caps.num_misc_vectors;
+	} else {
+		eq->eqe_size = udev->caps.dev_caps.ceqe_size;
+		eq->entries_num = udev->caps.dev_caps.ceqe_depth;
+		eq->eqc_irqn = eqn + udev->caps.dev_caps.num_misc_vectors +
+			       udev->caps.dev_caps.num_aeq_vectors;
+		eq->eq_period = EQC_EQ_MAX_PERIOD_INDX;
 	}
 
 	eq->cons_index = 0;
@@ -427,12 +502,41 @@ static void ubase_free_misc_irq(struct ubase_dev *udev)
 		free_irq(irq->irqn, udev);
 }
 
+static void ubase_free_ceq_irqs(struct ubase_dev *udev)
+{
+	struct ubase_ceqs *ceqs = &udev->irq_table.ceqs;
+	u32 i;
+
+	for (i = 0; i < ceqs->num; i++) {
+		if (ubase_ubus_irq_vector(udev->dev, 0) != -EOPNOTSUPP)
+			free_irq(ceqs->ceq[i].eq.irqn, &ceqs->ceq[i]);
+	}
+}
+
 static void ubase_free_aeq_irq(struct ubase_dev *udev)
 {
 	struct ubase_aeq *aeq = &udev->irq_table.aeq;
 
 	if (ubase_ubus_irq_vector(udev->dev, 0) != -EOPNOTSUPP)
 		free_irq(aeq->eq.irqn, udev);
+}
+
+static void ubase_destroy_ceqs(struct ubase_dev *udev)
+{
+	struct ubase_ceqs *ceqs = &udev->irq_table.ceqs;
+	u32 i;
+
+	if (!ceqs->ceq)
+		return;
+
+	for (i = 0; i < ceqs->num; i++) {
+		if (ubase_destroy_eq(udev, &ceqs->ceq[i].eq, UBASE_EQ_TYPE_CEQ))
+			ubase_err(udev, "failed to destroy ceq[%u].\n", i);
+	}
+	mutex_lock(&udev->irq_table.ceq_lock);
+	devm_kfree(udev->dev, ceqs->ceq);
+	ceqs->ceq = NULL;
+	mutex_unlock(&udev->irq_table.ceq_lock);
 }
 
 static void ubase_destroy_aeq(struct ubase_dev *udev)
@@ -444,6 +548,78 @@ static void ubase_destroy_aeq(struct ubase_dev *udev)
 
 	if (ubase_destroy_eq(udev, &aeq->eq, UBASE_EQ_TYPE_AEQ))
 		ubase_err(udev, "failed to destroy aeq.\n");
+}
+
+static int ubase_request_ceq_irq(struct ubase_dev *udev, struct ubase_ceq *ceq,
+				 u32 index)
+{
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	struct ubase_irq *irq;
+	int ret;
+
+	irq = irq_table->irqs[index + UBASE_CEQ_IRQ_INDEX];
+	snprintf(irq->name, UBASE_INT_NAME_LEN, "ubase%d-%s-%u", udev->dev_id,
+		 "ceq", index);
+	ceq->udev = udev;
+	ret = ubase_create_eq(udev, &ceq->eq, index, irq, UBASE_EQ_TYPE_CEQ);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to create ceq[%u], ret = %d.\n", index, ret);
+		return ret;
+	}
+
+	if (ubase_ubus_irq_vector(udev->dev, 0) == -EOPNOTSUPP)
+		return 0;
+
+	irq_set_status_flags(irq->irqn, IRQ_NOAUTOEN);
+	ret = request_irq(irq->irqn, ubase_ceq_int_handler, 0, irq->name, ceq);
+	if (ret) {
+		ubase_err(udev, "failed to request ceq[%u], ret = %d.\n",
+			  index, ret);
+		if (ubase_destroy_eq(udev, &ceq->eq, UBASE_EQ_TYPE_CEQ))
+			ubase_err(udev, "failed to destroy ceq.\n");
+	}
+
+	return ret;
+}
+
+static int ubase_request_ceq_irqs(struct ubase_dev *udev)
+{
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	struct ubase_ceqs *ceqs = &irq_table->ceqs;
+	u32 ceq_irq_num, i;
+	int ret;
+
+	mutex_lock(&udev->irq_table.ceq_lock);
+	ceq_irq_num = udev->caps.dev_caps.num_ceq_vectors;
+	ceqs->ceq = devm_kcalloc(udev->dev, ceq_irq_num,
+				 sizeof(struct ubase_ceq), GFP_KERNEL);
+	if (!ceqs->ceq) {
+		mutex_unlock(&udev->irq_table.ceq_lock);
+		return -ENOMEM;
+	}
+	mutex_unlock(&udev->irq_table.ceq_lock);
+
+	ceqs->num = ceq_irq_num;
+
+	for (i = 0; i < ceq_irq_num; i++) {
+		ret = ubase_request_ceq_irq(udev, &ceqs->ceq[i], i);
+		if (ret) {
+			ubase_err(udev,
+				  "failed to request ceq[%u] irq, ret = %d.\n",
+				  i, ret);
+			ceqs->num = i;
+			goto err_alloc_ceq;
+		}
+	}
+
+	return 0;
+
+err_alloc_ceq:
+	ubase_free_ceq_irqs(udev);
+	ubase_destroy_ceqs(udev);
+
+	return ret;
 }
 
 static int ubase_irq_init(struct ubase_dev *udev)
@@ -526,7 +702,18 @@ static int ubase_request_irq(struct ubase_dev *udev)
 		goto err_aeq_init;
 	}
 
+	ret = ubase_request_ceq_irqs(udev);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to request ubase ceq irqs, ret = %d.\n", ret);
+		goto err_ceq_init;
+	}
+
 	return 0;
+
+err_ceq_init:
+	ubase_free_aeq_irq(udev);
+	ubase_destroy_aeq(udev);
 err_aeq_init:
 	ubase_free_misc_irq(udev);
 err_misc_init:
@@ -535,6 +722,7 @@ err_misc_init:
 
 static void ubase_free_irq(struct ubase_dev *udev)
 {
+	ubase_free_ceq_irqs(udev);
 	ubase_free_aeq_irq(udev);
 	ubase_free_misc_irq(udev);
 }
@@ -602,7 +790,37 @@ void ubase_irq_table_free(struct ubase_dev *udev)
 void ubase_irq_table_uninit(struct ubase_dev *udev)
 {
 	ubase_irq_table_free(udev);
+	ubase_destroy_ceqs(udev);
 	ubase_destroy_aeq(udev);
+
+	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+		mutex_destroy(&udev->irq_table.ceq_lock);
+}
+
+void ubase_disable_ce_irqs(struct ubase_dev *udev)
+{
+	struct ubase_ceqs *ceqs = &udev->irq_table.ceqs;
+	u32 i;
+
+	if (test_bit(UBASE_STATE_IRQ_INVALID_B, &udev->state_bits))
+		return;
+
+	for (i = 0; i < ceqs->num; i++)
+		disable_irq(ceqs->ceq[i].eq.irqn);
+}
+
+int ubase_enable_ce_irqs(struct ubase_dev *udev)
+{
+	struct ubase_ceqs *ceqs = &udev->irq_table.ceqs;
+	u32 i;
+
+	if (test_bit(UBASE_STATE_IRQ_INVALID_B, &udev->state_bits))
+		return 0;
+
+	for (i = 0; i < ceqs->num; i++)
+		enable_irq(ceqs->ceq[i].eq.irqn);
+
+	return 0;
 }
 
 static int __ubase_event_register(struct ubase_dev *udev,

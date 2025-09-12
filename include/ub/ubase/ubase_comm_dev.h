@@ -18,6 +18,7 @@ struct iova_slot;
 #define UBASE_IOVA_COMM_PFN_CNT 1
 #define UBASE_MAX_DSCP		(64)
 #define UBASE_MAX_SL_NUM	(16U)
+#define UBASE_MAX_REQ_VL_NUM	(8U)
 #define UBASE_MAX_VL_NUM	(16U)
 #if UBASE_MAX_VL_NUM < IEEE_8021QAZ_MAX_TCS
 #error "UBASE_MAX_VL_NUM can't less than IEEE_8021QAZ_MAX_TCS"

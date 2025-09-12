@@ -9,6 +9,7 @@
 
 #include "debugfs/ubase_debugfs.h"
 #include "ubase_cmd.h"
+#include "ubase_hw.h"
 #include "ubase_mailbox.h"
 #include "ubase_dev.h"
 
@@ -440,7 +441,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"query dev res", UBASE_SUP_ALL, 0,
-		NULL, NULL
+		ubase_query_dev_res, NULL
 	},
 	{
 		"init mailbox", UBASE_SUP_NO_PMU, 0,
@@ -448,11 +449,11 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"query chip info", UBASE_SUP_ALL, 0,
-		NULL, NULL
+		ubase_query_chip_info, NULL
 	},
 	{
 		"query controller_info", UBASE_SUP_NO_PMU, 0,
-		NULL, NULL
+		ubase_query_controller_info, NULL
 	},
 	{
 		"query hw oor caps", UBASE_SUP_NO_PMU, 0,

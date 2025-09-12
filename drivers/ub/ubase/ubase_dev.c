@@ -9,6 +9,7 @@
 
 #include "debugfs/ubase_debugfs.h"
 #include "ubase_cmd.h"
+#include "ubase_mailbox.h"
 #include "ubase_dev.h"
 
 #define UBASE_PERIOD_100MS 100
@@ -435,7 +436,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"init cmd queue", UBASE_SUP_ALL, 1,
-		NULL, NULL
+		ubase_cmd_init, ubase_cmd_uninit
 	},
 	{
 		"query dev res", UBASE_SUP_ALL, 0,
@@ -443,7 +444,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"init mailbox", UBASE_SUP_NO_PMU, 0,
-		NULL, NULL
+		ubase_mbox_cmd_init, ubase_mbox_cmd_uninit
 	},
 	{
 		"query chip info", UBASE_SUP_ALL, 0,

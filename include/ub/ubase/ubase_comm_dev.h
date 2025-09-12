@@ -15,6 +15,7 @@ struct iova_slot;
 
 #define UBASE_ADEV_NAME	"ubase"
 
+#define UBASE_IOVA_COMM_PFN_CNT 1
 #define UBASE_MAX_DSCP		(64)
 #define UBASE_MAX_SL_NUM	(16U)
 #define UBASE_MAX_VL_NUM	(16U)

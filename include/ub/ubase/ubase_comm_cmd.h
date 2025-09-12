@@ -10,11 +10,96 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/types.h>
 
+#define UBASE_FW_VERSION_BYTE3_MASK	GENMASK(31, 24)
+#define UBASE_FW_VERSION_BYTE2_MASK	GENMASK(23, 16)
+#define UBASE_FW_VERSION_BYTE1_MASK	GENMASK(15, 8)
+#define UBASE_FW_VERSION_BYTE0_MASK	GENMASK(7, 0)
+
+#define UBASE_CSQ_BASEADDR_L_REG	0x18400
+#define UBASE_CSQ_BASEADDR_H_REG	0x18404
+#define UBASE_CSQ_DEPTH_REG		0x18408
+#define UBASE_CSQ_TAIL_REG		0x18410
+#define UBASE_CSQ_HEAD_REG		0x18414
+#define UBASE_CRQ_BASEADDR_L_REG	0x18418
+#define UBASE_CRQ_BASEADDR_H_REG	0x1841c
+#define UBASE_CRQ_DEPTH_REG		0x18420
+#define UBASE_CRQ_TAIL_REG		0x18424
+#define UBASE_CRQ_HEAD_REG		0x18428
+
+enum ubase_opcode_type {
+	/* Generic commands */
+	UBASE_OPC_QUERY_FW_VER		= 0x0001,
+
+	/* Mailbox commands */
+	UBASE_OPC_POST_MB		= 0x7000,
+	UBASE_OPC_QUERY_MB_ST		= 0X7001,
+
+	/* Software commands */
+	UBASE_OPC_MUE_TO_UE		= 0xF001,
+	UBASE_OPC_UE_TO_MUE		= 0xF002,
+};
+
+union ubase_mbox {
+	struct {
+		/* MB 0 */
+		__le32 in_param_l;
+		/* MB 1 */
+		__le32 in_param_h;
+		/* MB 2 */
+		__le32 cmd : 8;
+		__le32 tag : 24;
+		/* MB 3 */
+		__le32 seq_num : 16;
+		__le32 event_en : 1;
+		__le32 mbx_ue_id : 8;
+		__le32 rsv : 7;
+		/* MB 4 */
+		__le32 status : 1;
+		__le32 hw_run : 1;
+		__le32 rsv1 : 30;
+	};
+
+	struct {
+		__le32 query_status : 1;
+		__le32 query_hw_run : 1;
+		__le32 query_rsv : 30;
+	};
+};
+
+struct ubase_cmd_buf {
+	u16	opcode;
+	bool	is_read;
+	u32	data_size;
+	void	*data;
+};
+
 struct ubase_crq_event_nb {
 	u16 opcode;
 	void *back;
 	int (*crq_handler)(void *dev, void *data, u32 len);
 };
+
+static inline void ubase_fill_inout_buf(struct ubase_cmd_buf *buf, u16 opcode,
+					bool is_read, u32 data_size, void *data)
+{
+	buf->opcode = opcode;
+	buf->is_read = is_read;
+	buf->data_size = data_size;
+	buf->data = data;
+}
+
+int ubase_cmd_send_inout(struct auxiliary_device *aux_dev,
+			 struct ubase_cmd_buf *in, struct ubase_cmd_buf *out);
+int ubase_cmd_send_in(struct auxiliary_device *aux_dev,
+		      struct ubase_cmd_buf *in);
+int ubase_cmd_send_inout_ex(struct auxiliary_device *aux_dev,
+			    struct ubase_cmd_buf *in, struct ubase_cmd_buf *out,
+			    u32 time_out);
+int ubase_cmd_send_in_ex(struct auxiliary_device *aux_dev,
+			 struct ubase_cmd_buf *in, u32 time_out);
+
+int ubase_cmd_get_data_size(struct auxiliary_device *aux_dev, u16 opcode,
+			    u16 *data_size);
 
 int ubase_register_crq_event(struct auxiliary_device *aux_dev,
 			     struct ubase_crq_event_nb *nb);

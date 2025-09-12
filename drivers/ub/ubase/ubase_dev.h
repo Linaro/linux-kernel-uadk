@@ -83,6 +83,12 @@ struct ubase_dma_buf {
 	size_t		size;
 };
 
+struct ubase_ctx_page {
+	dma_addr_t		iova;
+	u32			npage;
+	refcount_t		refcount;
+};
+
 struct ubase_ta_layer_ctx {
 	struct ubase_dma_buf	extdb_buf;
 	struct ubase_dma_buf	timer_buf;
@@ -242,7 +248,6 @@ static inline
 struct ubase_dev *__ubase_get_udev_by_adev(struct auxiliary_device *adev)
 {
 	struct ubase_adev *uadev = container_of(adev, struct ubase_adev, adev);
-
 	return uadev->udev;
 }
 

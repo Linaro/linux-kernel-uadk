@@ -13,6 +13,11 @@
 #define UBASE_CAP_LEN			3
 #define UBASE_MAX_TCG_NUM		(4)
 
+enum ubase_service_state {
+	UBASE_STATE_CRQ_SERVICE_SCHED,
+	UBASE_STATE_CRQ_HANDLING,
+};
+
 struct ubase_delay_work {
 	struct delayed_work	service_task;
 	unsigned long		state;
@@ -41,5 +46,22 @@ enum {
 
 #define ubase_get_cap_bit(udev, nr) \
 	test_bit(nr, (unsigned long *)((udev)->cap_bits))
+
+static inline void ubase_write_reg(void __iomem *base, u32 reg, u32 value)
+{
+	writel(value, base + reg);
+}
+
+static inline u32 ubase_read_reg(u8 __iomem *base, u32 reg)
+{
+	u8 __iomem *reg_addr = READ_ONCE(base);
+
+	return readl(reg_addr + reg);
+}
+
+#define ubase_write_dev(a, reg, value) \
+	ubase_write_reg((a)->io_base.addr, reg, value)
+#define ubase_read_dev(a, reg) \
+	ubase_read_reg((a)->io_base.addr, reg)
 
 #endif

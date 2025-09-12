@@ -29,6 +29,7 @@
 enum ubase_opcode_type {
 	/* Generic commands */
 	UBASE_OPC_QUERY_FW_VER		= 0x0001,
+	UBASE_OPC_QUERY_BUS_EID		= 0x0047,
 
 	/* Mailbox commands */
 	UBASE_OPC_POST_MB		= 0x7000,

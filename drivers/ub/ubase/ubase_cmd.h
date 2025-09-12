@@ -49,6 +49,11 @@ struct ubase_query_version_cmd {
 	__le32 caps[UBASE_CAP_LEN];
 };
 
+struct ubase_query_ueid_cmd {
+	__le32 ueid[UBASE_BUS_EID_LEN];
+	u32 rsv[2];
+};
+
 static inline void __ubase_fill_inout_buf(struct ubase_cmd_buf *buf, u16 opcode,
 					  bool is_read, u32 data_size, void *data)
 {

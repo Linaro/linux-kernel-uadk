@@ -222,4 +222,6 @@ struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_udma_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_cdma_caps(struct auxiliary_device *adev);
 
+int ubase_get_bus_eid(struct auxiliary_device *adev, struct ubase_bus_eid *eid);
+
 #endif

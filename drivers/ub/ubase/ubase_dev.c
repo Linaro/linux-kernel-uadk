@@ -655,3 +655,43 @@ bool ubase_dbg_default(void)
 {
 	return ubase_debug;
 }
+
+static int ubase_query_bus_eid(struct ubase_dev *udev, struct ubase_bus_eid *eid)
+{
+	struct ubase_query_ueid_cmd resp = {0};
+	struct ubase_cmd_buf in, out;
+	int i, ret;
+
+	__ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_BUS_EID, true, 0, NULL);
+	__ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_BUS_EID, false,
+			       sizeof(resp), &resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret) {
+		ubase_err(udev, "failed to query bus eid, ret = %d.\n", ret);
+		return ret;
+	}
+
+	for (i = 0; i < UBASE_BUS_EID_LEN; ++i)
+		eid->eid[i] = le32_to_cpu(resp.ueid[i]);
+
+	return 0;
+}
+
+static int __ubase_get_bus_eid(struct ubase_dev *udev, struct ubase_bus_eid *eid)
+{
+	return ubase_query_bus_eid(udev, eid);
+}
+
+int ubase_get_bus_eid(struct auxiliary_device *adev, struct ubase_bus_eid *eid)
+{
+	struct ubase_dev *udev;
+
+	if (!adev || !eid)
+		return -EINVAL;
+
+	udev = __ubase_get_udev_by_adev(adev);
+
+	return __ubase_get_bus_eid(udev, eid);
+}
+EXPORT_SYMBOL(ubase_get_bus_eid);

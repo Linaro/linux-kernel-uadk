@@ -29,6 +29,44 @@ static bool __ubase_dbg_dentry_support(struct device *dev, u32 property)
 	return false;
 }
 
+bool ubase_dbg_dentry_support(struct auxiliary_device *adev, u32 property)
+{
+	if (!adev)
+		return false;
+
+	return __ubase_dbg_dentry_support(__ubase_get_udev_by_adev(adev)->dev,
+					  property);
+}
+EXPORT_SYMBOL(ubase_dbg_dentry_support);
+
+static int __ubase_dbg_seq_file_init(struct device *dev,
+				     struct ubase_dbg_dentry_info *dirs,
+				     struct ubase_dbgfs *dbgfs, u32 idx)
+{
+	struct ubase_dbg_cmd_info *cmd_info = &dbgfs->cmd_info[idx];
+	struct dentry *cur_dir;
+
+	cur_dir = dirs[cmd_info->dentry_index].dentry;
+	if (!cmd_info->read_func)
+		return -EFAULT;
+
+	debugfs_create_devm_seqfile(dev, cmd_info->name, cur_dir,
+				    cmd_info->read_func);
+
+	return 0;
+}
+
+int ubase_dbg_seq_file_init(struct device *dev,
+			    struct ubase_dbg_dentry_info *dirs,
+			    struct ubase_dbgfs *dbgfs, u32 idx)
+{
+	if (!dev || !dirs || !dbgfs || !dbgfs->cmd_info)
+		return -EINVAL;
+
+	return __ubase_dbg_seq_file_init(dev, dirs, dbgfs, idx);
+}
+EXPORT_SYMBOL(ubase_dbg_seq_file_init);
+
 static struct ubase_dbg_dentry_info ubase_dbg_dentry[] = {
 	/* ue debugfs top-level directory,
 	 * "dev_name" refers to the ue name
@@ -112,6 +150,7 @@ EXPORT_SYMBOL(ubase_dbg_create_dentry);
 
 int ubase_dbg_init(struct ubase_dev *udev)
 {
+	struct ubase_dbg_dentry_info dentry[UBASE_DBG_DENTRY_ROOT + 1] = {0};
 	const char *name = dev_name(udev->dev);
 	struct device *dev = udev->dev;
 	int ret;
@@ -122,12 +161,13 @@ int ubase_dbg_init(struct ubase_dev *udev)
 		return PTR_ERR(udev->dbgfs.dentry);
 	}
 
-	ubase_dbg_dentry[UBASE_DBG_DENTRY_ROOT].dentry = udev->dbgfs.dentry;
+	memcpy(dentry, ubase_dbg_dentry, sizeof(dentry));
+	dentry[UBASE_DBG_DENTRY_ROOT].dentry = udev->dbgfs.dentry;
 	udev->dbgfs.cmd_info = ubase_dbg_cmd;
 	udev->dbgfs.cmd_info_size = ARRAY_SIZE(ubase_dbg_cmd);
 
-	ret = ubase_dbg_create_dentry(dev, &udev->dbgfs, ubase_dbg_dentry,
-				      ARRAY_SIZE(ubase_dbg_dentry) - 1);
+	ret = ubase_dbg_create_dentry(dev, &udev->dbgfs, dentry,
+				      ARRAY_SIZE(dentry) - 1);
 	if (ret) {
 		ubase_err(udev,
 			  "failed to create ubase debugfs dentry, ret = %d.\n",
@@ -163,3 +203,32 @@ void ubase_dbg_unregister_debugfs(void)
 {
 	debugfs_remove_recursive(ubase_dbgfs_root);
 }
+
+struct dentry *ubase_diag_debugfs_root(struct auxiliary_device *adev)
+{
+	if (!adev)
+		return NULL;
+
+	return __ubase_get_udev_by_adev(adev)->dbgfs.dentry;
+}
+EXPORT_SYMBOL(ubase_diag_debugfs_root);
+
+int ubase_dbg_format_time(time64_t time, struct seq_file *s)
+{
+#define YEAR_OFFSET 1900
+	const char week[7][4] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+	const char mouth[12][4] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+				   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+	struct tm t;
+
+	if (!s)
+		return -EINVAL;
+
+	time64_to_tm(time, 0, &t);
+
+	seq_printf(s, "%s %s %02d %02d:%02d:%02d %ld", week[t.tm_wday],
+		   mouth[t.tm_mon], t.tm_mday, t.tm_hour, t.tm_min,
+		   t.tm_sec, t.tm_year + YEAR_OFFSET);
+	return 0;
+}
+EXPORT_SYMBOL(ubase_dbg_format_time);

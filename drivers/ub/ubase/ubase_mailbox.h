@@ -7,7 +7,8 @@
 #ifndef __UBASE_MAILBOX_H__
 #define __UBASE_MAILBOX_H__
 
-#include "ubase_comm_mbx.h"
+#include <ub/ubase/ubase_comm_mbx.h>
+
 #include "ubase_dev.h"
 
 #define CMD_MBX_POLL_VALUE 0xffff

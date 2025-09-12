@@ -34,7 +34,14 @@ struct ubase_dbgfs {
 	int				cmd_info_size;
 };
 
+int ubase_dbg_seq_file_init(struct device *dev,
+			    struct ubase_dbg_dentry_info *dirs,
+			    struct ubase_dbgfs *dbgfs, u32 idx);
 int ubase_dbg_create_dentry(struct device *dev, struct ubase_dbgfs *dbgfs,
 			    struct ubase_dbg_dentry_info *dirs, u32 root_idx);
+struct dentry *ubase_diag_debugfs_root(struct auxiliary_device *adev);
+void ubase_print_context_hw(struct seq_file *s, void *ctx_addr, u32 ctx_len);
+bool ubase_dbg_dentry_support(struct auxiliary_device *adev, u32 property);
+int ubase_dbg_format_time(time64_t time, struct seq_file *s);
 
 #endif

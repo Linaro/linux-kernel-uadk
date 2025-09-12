@@ -23,6 +23,7 @@ static bool numa_remote_enabled __ro_after_init;
 static bool numa_remote_nofallback_mode __ro_after_init;
 static bool numa_remote_preonline_mode __ro_after_init;
 static bool numa_remote_hugetlb_nowatermark_mode __ro_after_init;
+static int numa_remote_max_nodes __ro_after_init = MAX_NUMNODES;
 
 static nodemask_t numa_nodes_remote;
 
@@ -81,14 +82,18 @@ static void numa_remote_reset_distance(int nid)
 
 void __init numa_register_remote_nodes(void)
 {
-	int i;
+	int i, count = 0;
 
 	if (!numa_remote_enabled)
 		return;
 
 	for (i = 0; i < MAX_NUMNODES; i++) {
-		if (!node_test_and_set(i, numa_nodes_parsed))
+		if (!node_test_and_set(i, numa_nodes_parsed)) {
 			node_set(i, numa_nodes_remote);
+			count++;
+			if (count >= numa_remote_max_nodes)
+				break;
+		}
 	}
 
 	for (i = 0; i < MAX_NUMNODES; i++) {
@@ -107,24 +112,33 @@ void __init numa_register_remote_nodes(void)
  */
 static int __init numa_parse_remote_nodes(char *buf)
 {
+	char *sep;
+	int val;
+
 	numa_remote_enabled = true;
 
 	if (!buf)
 		return 0;
 
 	while (*buf) {
-		if (!strncmp(buf, "nofallback", 10))
+		sep = strchr(buf, ',');
+		if (sep)
+			*sep = 0;
+		if (!strcmp(buf, "nofallback"))
 			numa_remote_nofallback_mode = true;
-		else if (!strncmp(buf, "preonline", 9))
+		else if (!strcmp(buf, "preonline"))
 			numa_remote_preonline_mode = true;
 #ifdef CONFIG_HUGETLB_PAGE
-		else if (!strncmp(buf, "hugetlb_nowatermark", 19))
+		else if (!strcmp(buf, "hugetlb_nowatermark"))
 			numa_remote_hugetlb_nowatermark_mode = true;
 #endif
-
-		buf += strcspn(buf, ",");
-		while (*buf == ',')
-			buf++;
+		else if (!kstrtoint(buf, 0, &val)) {
+			if (val > 0)
+				numa_remote_max_nodes = val;
+		}
+		if (!sep)
+			break;
+		buf = sep + 1;
 	}
 
 	return 0;

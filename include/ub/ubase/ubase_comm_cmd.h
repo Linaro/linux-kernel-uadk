@@ -51,6 +51,7 @@ enum ubase_opcode_type {
 	/* Software commands */
 	UBASE_OPC_MUE_TO_UE		= 0xF001,
 	UBASE_OPC_UE_TO_MUE		= 0xF002,
+	UBASE_OPC_CFG_VPORT_BUF		= 0xF003,
 	UBASE_OPC_DESTROY_CTX_RESOURCE	= 0xF00D,
 };
 

@@ -100,4 +100,6 @@ void __ubase_unregister_crq_event(struct ubase_dev *udev, u16 opcode);
 
 void ubase_crq_service_task(struct ubase_delay_work *ubase_work);
 
+void ubase_mask_key_words(struct ubase_cmdq_desc *desc, u16 opc, int idx);
+
 #endif

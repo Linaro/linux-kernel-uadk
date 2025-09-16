@@ -10,6 +10,7 @@
 #include "ubase_cmd.h"
 #include "ubase_dev.h"
 #include "ubase_mailbox.h"
+#include "ubase_trace.h"
 #include "ubase_eq.h"
 
 enum ubase_eq_type {
@@ -84,6 +85,8 @@ static irqreturn_t ubase_ceq_int_handler(int irq, void *data)
 		dma_rmb();
 
 		jfcn = u32_get_bits(ceqe->comp, UBASE_CEQE_COMP_CQN_M);
+
+		trace_ubase_ceqe(udev->dev, jfcn, &ceq->eq);
 
 		ubase_comp_handler(udev, jfcn);
 
@@ -266,6 +269,8 @@ static int ubase_async_event_handler(struct ubase_dev *udev)
 	aeqe = ubase_next_aeqe(udev, aeq);
 	while (aeqe) {
 		dma_rmb();
+
+		trace_ubase_aeqe(udev->dev, aeqe, eq);
 
 		ubase_dbg(udev,
 			  "event_type = 0x%x, sub_type = 0x%x, owner = %u, seq_num = %u, cons_index = %u.\n",

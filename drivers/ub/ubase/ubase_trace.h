@@ -95,6 +95,70 @@ TRACE_EVENT(ubase_crq,
 	)
 );
 
+TRACE_EVENT(ubase_aeqe,
+	TP_PROTO(struct device *dev, struct ubase_aeqe *aeqe,
+		 struct ubase_eq *eq),
+	TP_ARGS(dev, aeqe, eq),
+
+	TP_STRUCT__entry(
+		__field(u32, event_type)
+		__field(u32, sub_type)
+		__field(u32, owner)
+		__field(u32, ci)
+		__field(u32, queue_event_num)
+		__field(u64, cmd_out_param)
+		__field(u16, cmd_seq_num)
+		__field(u8, cmd_status)
+		__dynamic_array(char, devname, TRACE_DEV_NAME_MAX_LEN)
+	),
+
+	TP_fast_assign(
+		__entry->event_type = aeqe->event_type;
+		__entry->sub_type = aeqe->sub_type;
+		__entry->owner = aeqe->owner;
+		__entry->ci = eq->cons_index;
+		__entry->queue_event_num = aeqe->event.queue_event.num;
+		__entry->cmd_out_param = aeqe->event.cmd.out_param;
+		__entry->cmd_seq_num = aeqe->event.cmd.seq_num;
+		__entry->cmd_status = aeqe->event.cmd.status;
+		if (dev) {
+			snprintf(__get_str(devname), TRACE_DEV_NAME_MAX_LEN,
+				 "%s %s", dev_driver_string(dev), dev_name(dev));
+		}
+	),
+
+	TP_printk(
+		"%s %u-%u-%u-%u-%u-%llu-%u-%u", __get_str(devname),
+		__entry->event_type, __entry->sub_type, __entry->owner,
+		__entry->ci, __entry->queue_event_num, __entry->cmd_out_param,
+		__entry->cmd_seq_num, __entry->cmd_status
+	)
+);
+
+TRACE_EVENT(ubase_ceqe,
+	TP_PROTO(struct device *dev, u32 jfcn, struct ubase_eq *eq),
+	TP_ARGS(dev, jfcn, eq),
+
+	TP_STRUCT__entry(
+		__field(u32, jfcn)
+		__field(u32, ci)
+		__dynamic_array(char, devname, TRACE_DEV_NAME_MAX_LEN)
+	),
+
+	TP_fast_assign(
+		__entry->jfcn = jfcn;
+		__entry->ci = eq->cons_index;
+		if (dev) {
+			snprintf(__get_str(devname), TRACE_DEV_NAME_MAX_LEN,
+				 "%s %s", dev_driver_string(dev), dev_name(dev));
+		}
+	),
+
+	TP_printk(
+		"%s %u-%u", __get_str(devname), __entry->jfcn, __entry->ci
+	)
+);
+
 #endif /* __UBASE_TRACE_H__ */
 
 /* This must be outside ifdef __UBASE_TRACE_H__ */

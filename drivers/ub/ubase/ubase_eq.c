@@ -38,7 +38,10 @@ static void ubase_comp_handler(struct ubase_dev *udev, u32 jfcn)
 	struct ubase_adev *uadev;
 	u8 idx;
 
-	if (jfcn_begin <= jfcn && jfcn < jfcn_end)
+	/* CDMA exists independently, UNIC/UDMA are distinguished by jfcn. */
+	if (udev->priv.uadev[UBASE_DRV_CDMA])
+		idx = UBASE_DRV_CDMA;
+	else if (jfcn_begin <= jfcn && jfcn < jfcn_end)
 		idx = UBASE_DRV_UNIC;
 	else
 		idx = UBASE_DRV_UDMA;
@@ -210,6 +213,8 @@ static void ubase_aeq_event_handler(struct ubase_dev *udev,
 
 	if (ubase_is_comm_event(udev, aeqe))
 		idx = UBASE_DRV_UNIC;
+	else if (ubase_dev_cdma_supported(udev))
+		idx = UBASE_DRV_CDMA;
 	else if (ubase_is_udma_event(udev, event_type, sub_type, aeqe))
 		idx = UBASE_DRV_UDMA;
 	else

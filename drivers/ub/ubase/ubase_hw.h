@@ -121,6 +121,13 @@ struct ubase_query_controller_info_resp {
 	u8	rsvd2[15];
 };
 
+struct ubase_cfg_dma_buf_req {
+	__le32 addr_l;
+	__le32 addr_h;
+	__le32 tp_num; /* only used when cfg TP extdb buf */
+	__le32 resv[3];
+};
+
 struct ubase_query_chip_die_cmd {
 	__le16	nl_port_id;
 	__le16	chip_id;

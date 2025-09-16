@@ -10,6 +10,7 @@
 #include <ub/ubase/ubase_comm_mbx.h>
 
 #include "ubase_cmd.h"
+#include "ubase_dev.h"
 #include "ubase_mailbox.h"
 #include "ubase_hw.h"
 
@@ -23,6 +24,10 @@ struct ubase_dma_buf_desc {
 
 #define UBASE_DEFINE_DMA_BUFS(udev) \
 	struct ubase_dma_buf_desc bufs[] = { \
+		{ &(udev)->ta_ctx.extdb_buf, UBASE_OPC_TA_EXTDB_VA_CONFIG, \
+		  &ubase_dev_ta_extdb_buf_supported }, \
+		{ &(udev)->ta_ctx.timer_buf, UBASE_OPC_TA_TIMER_VA_CONFIG, \
+		  &ubase_dev_ta_timer_buf_supported } \
 	}
 
 static void ubase_assign_addr_val(void *addr, u32 val, u8 size)
@@ -489,6 +494,88 @@ static int ubase_ctx_buf_alloc(struct ubase_dev *udev)
 	return ubase_ctx_alloc(udev, ctx_buf);
 }
 
+static int ubase_config_dma_buf(struct ubase_dev *udev, u16 opc, u64 dma_addr)
+{
+	struct ubase_cfg_dma_buf_req req = {0};
+	struct ubase_cmd_buf in;
+	int ret;
+
+	req.addr_l = cpu_to_le32(lower_32_bits(dma_addr));
+	req.addr_h = cpu_to_le32(upper_32_bits(dma_addr));
+
+	__ubase_fill_inout_buf(&in, opc, false, sizeof(req), &req);
+
+	ret = __ubase_cmd_send_in(udev, &in);
+	if (ret)
+		ubase_err(udev,
+			  "failed to send cmd in cfg dma buf, ret = %d.\n", ret);
+
+	return ret;
+}
+
+static int ubase_init_dma_buf(struct ubase_dev *udev, struct ubase_dma_buf *buf,
+			      u16 opc)
+{
+	int ret;
+
+	buf->addr = dma_alloc_coherent(udev->dev, buf->size, &buf->dma_addr,
+				       GFP_KERNEL);
+	if (!buf->addr)
+		return -ENOMEM;
+
+	ret = ubase_config_dma_buf(udev, opc, buf->dma_addr);
+	if (ret)
+		dma_free_coherent(udev->dev, buf->size, buf->addr,
+				  buf->dma_addr);
+
+	return ret;
+}
+
+static void ubase_uninit_dma_buf(struct ubase_dev *udev,
+				 struct ubase_dma_buf *buf)
+{
+	if (!buf->addr)
+		return;
+
+	dma_free_coherent(udev->dev, buf->size, buf->addr, buf->dma_addr);
+	buf->addr = NULL;
+}
+
+static int ubase_init_ta_tp_ext_buf(struct ubase_dev *udev)
+{
+	UBASE_DEFINE_DMA_BUFS(udev);
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(bufs); i++) {
+		ret = bufs[i].is_supported(udev) ?
+		      ubase_init_dma_buf(udev, bufs[i].buf, bufs[i].opc) : 0;
+		if (ret) {
+			ubase_err(udev,
+				  "failed to init buf[%d], ret = %d.\n", i, ret);
+			goto err_out;
+		}
+	}
+
+	return 0;
+err_out:
+	for (i -= 1; i >= 0; i--) {
+		if (bufs[i].is_supported(udev))
+			ubase_uninit_dma_buf(udev, bufs[i].buf);
+	}
+	return ret;
+}
+
+static void ubase_uninit_ta_tp_ext_buf(struct ubase_dev *udev)
+{
+	UBASE_DEFINE_DMA_BUFS(udev);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(bufs); i++) {
+		if (bufs[i].is_supported(udev))
+			ubase_uninit_dma_buf(udev, bufs[i].buf);
+	}
+}
+
 int ubase_query_controller_info(struct ubase_dev *udev)
 {
 	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
@@ -596,14 +683,25 @@ int ubase_hw_init(struct ubase_dev *udev)
 		return ret;
 	}
 
+	ret = ubase_init_ta_tp_ext_buf(udev);
+	if (ret)
+		goto err_init_ta_tp_ext_buf;
+
 	set_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
 
 	return 0;
+
+err_init_ta_tp_ext_buf:
+	ubase_uninit_ctx_buf(udev);
+
+	return ret;
 }
 
 void ubase_hw_uninit(struct ubase_dev *udev)
 {
 	clear_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
+
+	ubase_uninit_ta_tp_ext_buf(udev);
 
 	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
 		ubase_destroy_ctx_res(udev);

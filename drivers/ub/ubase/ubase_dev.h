@@ -281,6 +281,16 @@ static inline bool ubase_dev_ubl_supported(struct ubase_dev *udev)
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_UBL_B);
 }
 
+static inline bool ubase_dev_ta_extdb_buf_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_TA_EXTDB_BUF_B);
+}
+
+static inline bool ubase_dev_ta_timer_buf_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_TA_TIMER_BUF_B);
+}
+
 static inline bool ubase_dev_eth_mac_supported(struct ubase_dev *udev)
 {
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ETH_MAC_B);

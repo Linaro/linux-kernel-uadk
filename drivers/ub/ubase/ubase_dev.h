@@ -77,6 +77,11 @@ struct ubase_mbox_cmd {
 	struct ubase_mbx_event_context ctx;
 };
 
+struct ubase_destroy_res_cmd {
+	u8 destroy_done;
+	u8 rsv[23];
+};
+
 struct ubase_dma_buf {
 	void		*addr;
 	dma_addr_t	dma_addr;
@@ -279,6 +284,16 @@ static inline bool ubase_dev_ubl_supported(struct ubase_dev *udev)
 static inline bool ubase_dev_eth_mac_supported(struct ubase_dev *udev)
 {
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ETH_MAC_B);
+}
+
+static inline u32 ubase_jfs_num(struct ubase_dev *udev)
+{
+	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;
+	struct ubase_adev_caps *udma_caps = &udev->caps.udma_caps;
+	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
+
+	return unic_caps->jfs.max_cnt + udma_caps->jfs.max_cnt +
+	       dev_caps->public_jetty_cnt + dev_caps->rsvd_jetty_cnt;
 }
 
 int ubase_adev_idx_alloc(void);

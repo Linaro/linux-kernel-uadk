@@ -10,6 +10,14 @@
 #include <linux/types.h>
 #include <ub/ubase/ubase_comm_dev.h>
 
+#define UBASE_AEQ_CTX_SIZE		64
+#define UBASE_CEQ_CTX_SIZE		64
+#define UBASE_JFS_CTX_SIZE		256
+#define UBASE_JFR_CTX_SIZE		64
+#define UBASE_JFC_CTX_SIZE		128
+#define UBASE_RC_CTX_SIZE		256
+#define UBASE_JTG_CTX_SIZE		8
+
 #define UBASE_DESC_DATA_LEN		6
 struct ubase_cmdq_desc {
 	__le16 opcode;

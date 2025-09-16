@@ -4,8 +4,16 @@
  *
  */
 
+#include <linux/delay.h>
+#include <linux/ummu_core.h>
+#include <ub/ubase/ubase_comm_hw.h>
+#include <ub/ubase/ubase_comm_mbx.h>
+
 #include "ubase_cmd.h"
+#include "ubase_mailbox.h"
 #include "ubase_hw.h"
+
+#define UBASE_CTX_REMOVE_ALL		(-2)
 
 struct ubase_dma_buf_desc {
 	struct ubase_dma_buf	*buf;
@@ -215,6 +223,272 @@ int ubase_query_dev_res(struct ubase_dev *udev)
 	return ubase_parse_dev_res(udev, &resp);
 }
 
+static int ubase_config_ctx_buf_to_hw(struct ubase_dev *udev,
+				      struct ubase_ctx_buf_cap *ctx_buf,
+				      struct ubase_mbx_attr *attr)
+{
+	struct ubase_cmd_mailbox mailbox;
+	int ret;
+
+	mailbox.dma = ctx_buf->dma_ctx_buf_ba;
+	ret = __ubase_hw_upgrade_ctx(udev, attr, &mailbox);
+	if (ret)
+		ubase_err(udev,
+			  "failed to config ctx_buf to hw, cmd = 0x%x, ret = %d.\n",
+			  attr->op, ret);
+	return ret;
+}
+
+static void ubase_free_and_clear_ctx_buf(struct ubase_dev *udev,
+					 struct ubase_ctx_buf_cap *ctx_buf)
+{
+	struct ubase_ctx_page *ctx_page;
+	size_t npage;
+
+	if (!xa_empty(&ctx_buf->ctx_xa)) {
+		xa_for_each(&ctx_buf->ctx_xa, npage, ctx_page)
+			ubase_destroy_ctx_page(udev, ctx_page, ctx_buf);
+	}
+	dma_free_iova(ctx_buf->slot);
+
+	ctx_buf->slot = NULL;
+	ctx_buf->dma_ctx_buf_ba = 0;
+}
+
+static void ubase_cmd_ctx_buf_free(struct ubase_dev *udev,
+			    struct ubase_ctx_buf_cap *ctx_buf)
+{
+	size_t size;
+
+	if (!ctx_buf || !ctx_buf->slot)
+		return;
+
+	size = ctx_buf->entry_cnt * ctx_buf->entry_size;
+	if (!size)
+		return;
+
+	ubase_free_and_clear_ctx_buf(udev, ctx_buf);
+	xa_destroy(&ctx_buf->ctx_xa);
+}
+
+static void ubase_ctx_free(struct ubase_dev *udev,
+			   struct ubase_ctx_buf *ctx_buf, int idx)
+{
+	struct ubase_ctx_buf_map map[] = {
+		{ &ctx_buf->jfs, UBASE_MB_WRITE_JFS_CONTEXT_VA },
+		{ &ctx_buf->jfr, UBASE_MB_WRITE_JFR_CONTEXT_VA },
+		{ &ctx_buf->jfc, UBASE_MB_WRITE_JFC_CONTEXT_VA },
+		{ &ctx_buf->jtg, UBASE_MB_WRITE_JETTY_GROUP_CONTEXT_VA },
+		{ &ctx_buf->rc, UBASE_MB_WRITE_RC_CONTEXT_VA },
+	};
+	int i, end_idx = ARRAY_SIZE(map) - 1;
+
+	i = (idx == UBASE_CTX_REMOVE_ALL) ? end_idx : idx;
+	for (; i >= 0; i--)
+		ubase_cmd_ctx_buf_free(udev, map[i].ctx);
+}
+
+static int ubase_fill_common_ctx_buf(struct ubase_dev *udev,
+				     struct ubase_ctx_buf_cap *ctx_buf,
+				     u32 start_pos, u32 size)
+{
+	struct ubase_ctx_page *ctx_page;
+	size_t npage;
+	int ret;
+	u32 i;
+
+	mutex_lock(&ctx_buf->ctx_mutex);
+
+	for (i = start_pos; i < start_pos + size; i++) {
+		ctx_page = (struct ubase_ctx_page *)xa_load(&ctx_buf->ctx_xa, i);
+		if (ctx_page)
+			continue;
+
+		ret = ubase_create_ctx_page(udev, ctx_buf, &ctx_page, i);
+		if (ret) {
+			ubase_err(udev, "failed to create context page, ret = %d.\n",
+				  ret);
+			goto err_fill_ctx_page;
+		}
+
+		ret = xa_err(xa_store(&ctx_buf->ctx_xa, i, ctx_page,
+				      GFP_KERNEL));
+		if (ret) {
+			ubase_err(udev, "failed to store page, ret = %d.\n",
+				  ret);
+			goto err_fill_ctx_page;
+		}
+	}
+
+	mutex_unlock(&ctx_buf->ctx_mutex);
+
+	return 0;
+
+err_fill_ctx_page:
+	xa_for_each(&ctx_buf->ctx_xa, npage, ctx_page)
+		ubase_destroy_ctx_page(udev, ctx_page, ctx_buf);
+	mutex_unlock(&ctx_buf->ctx_mutex);
+
+	return ret;
+}
+
+static int ubase_fill_ctx_inherent_buf(struct ubase_dev *udev,
+				       struct ubase_ctx_buf_cap *ctx_buf,
+				       struct ubase_mbx_attr *attr)
+{
+	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;
+	u32 buf_size, page_cnt;
+	u32 start_pos = 0;
+
+	switch (attr->op) {
+	case UBASE_MB_WRITE_JFS_CONTEXT_VA:
+		start_pos = udev->caps.unic_caps.jfs.start_idx >>
+			    ctx_buf->cnt_per_page_shift;
+		buf_size = unic_caps->jfs.max_cnt * ctx_buf->entry_size;
+		break;
+	case UBASE_MB_WRITE_JFR_CONTEXT_VA:
+		buf_size = unic_caps->jfr.max_cnt * ctx_buf->entry_size;
+		break;
+	case UBASE_MB_WRITE_JFC_CONTEXT_VA:
+		buf_size = unic_caps->jfc.max_cnt * ctx_buf->entry_size;
+		break;
+	default:
+		return 0;
+	}
+
+	page_cnt = DIV_ROUND_UP(buf_size, PAGE_SIZE);
+	return ubase_fill_common_ctx_buf(udev, ctx_buf, start_pos, page_cnt);
+}
+
+static int ubase_alloc_and_fill_ctx_buf(struct ubase_dev *udev,
+					struct ubase_ctx_buf_cap *ctx_buf,
+					struct ubase_mbx_attr *attr,
+					size_t size)
+{
+	size_t sizep;
+	int ret;
+
+	ctx_buf->cnt_per_page_shift =
+		ilog2(roundup_pow_of_two(PAGE_SIZE / ctx_buf->entry_size));
+	ctx_buf->slot = dma_alloc_iova(udev->dev, size, 0,
+				       &ctx_buf->dma_ctx_buf_ba, &sizep);
+	if (IS_ERR(ctx_buf->slot)) {
+		ubase_err(udev,
+			  "failed to alloc iova slot, cmd = 0x%x, size = %lu.\n",
+			  attr->op, size);
+		return -ENOMEM;
+	}
+
+	ret = ubase_fill_ctx_inherent_buf(udev, ctx_buf, attr);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to fill inherent ctx buf, cmd = 0x%x, ret = %d.\n",
+			  attr->op, ret);
+		dma_free_iova(ctx_buf->slot);
+	}
+
+	return ret;
+}
+
+static int ubase_cmd_ctx_buf_alloc(struct ubase_dev *udev,
+			    struct ubase_ctx_buf_cap *ctx_buf,
+			    struct ubase_mbx_attr *attr)
+{
+	size_t size = ctx_buf->entry_cnt * ctx_buf->entry_size;
+	int ret;
+
+	if (!size)
+		return 0;
+
+	xa_init(&ctx_buf->ctx_xa);
+	ret = ubase_alloc_and_fill_ctx_buf(udev, ctx_buf, attr, size);
+	if (ret)
+		goto err_ctx_alloc;
+
+	ret = ubase_config_ctx_buf_to_hw(udev, ctx_buf, attr);
+	if (ret)
+		goto err_ctx_to_hw;
+
+	return 0;
+
+err_ctx_to_hw:
+	ubase_free_and_clear_ctx_buf(udev, ctx_buf);
+
+err_ctx_alloc:
+	xa_destroy(&ctx_buf->ctx_xa);
+
+	return ret;
+}
+
+static int ubase_ctx_alloc(struct ubase_dev *udev,
+			   struct ubase_ctx_buf *ctx_buf)
+{
+	struct ubase_ctx_buf_map map[] = {
+		{ &ctx_buf->jfs, UBASE_MB_WRITE_JFS_CONTEXT_VA },
+		{ &ctx_buf->jfr, UBASE_MB_WRITE_JFR_CONTEXT_VA },
+		{ &ctx_buf->jfc, UBASE_MB_WRITE_JFC_CONTEXT_VA },
+		{ &ctx_buf->jtg, UBASE_MB_WRITE_JETTY_GROUP_CONTEXT_VA },
+		{ &ctx_buf->rc, UBASE_MB_WRITE_RC_CONTEXT_VA },
+	};
+	struct ubase_mbx_attr attr = {0};
+	int ret, i;
+
+	for (i = 0; i < ARRAY_SIZE(map); i++) {
+		memset(&attr, 0, sizeof(attr));
+		attr.op = map[i].mb_cmd;
+		ret = ubase_cmd_ctx_buf_alloc(udev, map[i].ctx, &attr);
+		if (ret) {
+			ubase_err(udev,
+				  "failed to alloc ctx buf, mb_cmd = 0x%x, ret = %d.\n",
+				  map[i].mb_cmd, ret);
+			goto err_alloc_ctx_buf;
+		}
+	}
+
+	return 0;
+
+err_alloc_ctx_buf:
+	ubase_ctx_free(udev, ctx_buf, --i);
+	return ret;
+}
+
+static void ubase_get_ctx_entry_cnt(struct ubase_dev *udev)
+{
+	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;
+	struct ubase_adev_caps *udma_caps = &udev->caps.udma_caps;
+	struct ubase_ctx_buf *ubase_ctx_buf = &udev->ctx_buf;
+
+	ubase_ctx_buf->jfs.entry_cnt = ubase_jfs_num(udev);
+	ubase_ctx_buf->jfr.entry_cnt = unic_caps->jfr.max_cnt;
+	ubase_ctx_buf->jfc.entry_cnt = unic_caps->jfc.max_cnt;
+	ubase_ctx_buf->jtg.entry_cnt = udma_caps->jtg_max_cnt;
+	ubase_ctx_buf->rc.entry_cnt = udma_caps->rc_max_cnt;
+
+	ubase_ctx_buf->jfr.entry_cnt += udma_caps->jfr.max_cnt;
+	ubase_ctx_buf->jfc.entry_cnt += udma_caps->jfc.max_cnt;
+}
+
+static void ubase_get_ctx_entry_size(struct ubase_dev *udev)
+{
+	struct ubase_ctx_buf *ubase_ctx_buf = &udev->ctx_buf;
+
+	ubase_ctx_buf->jfs.entry_size = UBASE_JFS_CTX_SIZE;
+	ubase_ctx_buf->jfr.entry_size = UBASE_JFR_CTX_SIZE;
+	ubase_ctx_buf->jfc.entry_size = UBASE_JFC_CTX_SIZE;
+	ubase_ctx_buf->jtg.entry_size = UBASE_JTG_CTX_SIZE;
+	ubase_ctx_buf->rc.entry_size = UBASE_RC_CTX_SIZE;
+}
+
+static int ubase_ctx_buf_alloc(struct ubase_dev *udev)
+{
+	struct ubase_ctx_buf *ctx_buf = &udev->ctx_buf;
+
+	ubase_get_ctx_entry_cnt(udev);
+	ubase_get_ctx_entry_size(udev);
+
+	return ubase_ctx_alloc(udev, ctx_buf);
+}
+
 int ubase_query_controller_info(struct ubase_dev *udev)
 {
 	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
@@ -266,4 +540,73 @@ int ubase_query_chip_info(struct ubase_dev *udev)
 	dev_caps->nl_id = le16_to_cpu(resp.nl_id);
 
 	return 0;
+}
+
+static void ubase_destroy_ctx_res(struct ubase_dev *udev)
+{
+#define UBASE_DESTROY_RES_WAIT_TIME	20
+#define UBASE_DESTROY_RES_WAIT_COUNT	5
+
+	struct ubase_destroy_res_cmd resp;
+	struct ubase_cmd_buf in, out;
+	int try_cnt = 0;
+	int ret;
+
+	__ubase_fill_inout_buf(&in, UBASE_OPC_DESTROY_CTX_RESOURCE, false, 0, NULL);
+	ret = __ubase_cmd_send_in(udev, &in);
+	if (ret) {
+		ubase_err(udev, "failed to send destroy resource, ret = %d.\n",
+			  ret);
+		return;
+	}
+
+	__ubase_fill_inout_buf(&in, UBASE_OPC_DESTROY_CTX_RESOURCE, true, 0, NULL);
+	__ubase_fill_inout_buf(&out, UBASE_OPC_DESTROY_CTX_RESOURCE, false,
+			       sizeof(resp), &resp);
+	do {
+		memset(&resp, 0, sizeof(resp));
+		msleep(UBASE_DESTROY_RES_WAIT_TIME);
+		ret = __ubase_cmd_send_inout(udev, &in, &out);
+		if (ret) {
+			ubase_err(udev,
+				  "failed to query destroy resource, ret = %d.\n",
+				  ret);
+			return;
+		}
+
+		try_cnt++;
+	} while (!resp.destroy_done && try_cnt < UBASE_DESTROY_RES_WAIT_COUNT);
+
+	if (!resp.destroy_done)
+		ubase_warn(udev, "wait ue destroy res timeout!\n");
+}
+
+static inline void ubase_uninit_ctx_buf(struct ubase_dev *udev)
+{
+	ubase_ctx_free(udev, &udev->ctx_buf, UBASE_CTX_REMOVE_ALL);
+}
+
+int ubase_hw_init(struct ubase_dev *udev)
+{
+	int ret;
+
+	ret = ubase_ctx_buf_alloc(udev);
+	if (ret) {
+		ubase_err(udev, "failed to init ctx buf, ret = %d.\n", ret);
+		return ret;
+	}
+
+	set_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
+
+	return 0;
+}
+
+void ubase_hw_uninit(struct ubase_dev *udev)
+{
+	clear_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
+
+	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+		ubase_destroy_ctx_res(udev);
+
+	ubase_uninit_ctx_buf(udev);
 }

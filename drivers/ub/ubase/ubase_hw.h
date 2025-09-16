@@ -9,6 +9,8 @@
 
 #include <ub/ubase/ubase_comm_hw.h>
 
+#define UBASE_CTX_REMOVE_ALL		(-2)
+
 #define UBASE_DEF_CEQ_VECTOR_NUM	1
 #define UBASE_DEF_AEQ_VECTOR_NUM	1
 #define UBASE_DEF_MISC_VERCTOR_NUM	1
@@ -130,6 +132,13 @@ struct ubase_query_chip_die_cmd {
 	__le16	io_port_logic_id;
 };
 
+struct ubase_ctx_buf_map {
+	struct ubase_ctx_buf_cap *ctx;
+	u16 mb_cmd;
+};
+
+int ubase_hw_init(struct ubase_dev *udev);
+void ubase_hw_uninit(struct ubase_dev *udev);
 int ubase_query_dev_res(struct ubase_dev *udev);
 int ubase_query_chip_info(struct ubase_dev *udev);
 int ubase_query_controller_info(struct ubase_dev *udev);

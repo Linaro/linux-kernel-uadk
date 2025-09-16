@@ -493,7 +493,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"init hw", UBASE_SUP_NO_PMU, 1,
-		NULL, NULL
+		ubase_hw_init, ubase_hw_uninit
 	},
 	{
 		"init debugfs", UBASE_SUP_ALL, 0,

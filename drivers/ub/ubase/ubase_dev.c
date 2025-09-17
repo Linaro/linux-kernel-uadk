@@ -639,6 +639,39 @@ struct ubase_adev_caps *ubase_get_cdma_caps(struct auxiliary_device *adev)
 }
 EXPORT_SYMBOL(ubase_get_cdma_caps);
 
+void ubase_virt_register(struct auxiliary_device *adev,
+			 void (*virt_handler)(struct auxiliary_device *adev,
+					      u16 bus_ue_id, bool is_en))
+{
+	struct ubase_adev *uadev;
+
+	if (!adev || !virt_handler)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->virt_lock);
+	if (!uadev->virt_handler)
+		uadev->virt_handler = virt_handler;
+	mutex_unlock(&uadev->virt_lock);
+}
+EXPORT_SYMBOL(ubase_virt_register);
+
+void ubase_virt_unregister(struct auxiliary_device *adev)
+{
+	struct ubase_adev *uadev;
+
+	if (!adev)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->virt_lock);
+	uadev->virt_handler = NULL;
+	mutex_unlock(&uadev->virt_lock);
+}
+EXPORT_SYMBOL(ubase_virt_unregister);
+
 struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev)
 {
 	struct ubase_dev *udev;
@@ -651,6 +684,25 @@ struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev)
 	return &udev->caps.unic_caps;
 }
 EXPORT_SYMBOL(ubase_get_unic_caps);
+
+void ubase_virt_handler(struct ubase_dev *udev, u16 bus_ue_id, bool is_en)
+{
+	struct ubase_adev *uadev;
+	int i;
+
+	mutex_lock(&udev->priv.uadev_lock);
+	for (i = 0; i < UBASE_DRV_MAX; i++) {
+		uadev = udev->priv.uadev[i];
+		if (!uadev)
+			continue;
+
+		mutex_lock(&uadev->virt_lock);
+		if (uadev->virt_handler)
+			uadev->virt_handler(&uadev->adev, bus_ue_id, is_en);
+		mutex_unlock(&uadev->virt_lock);
+	}
+	mutex_unlock(&udev->priv.uadev_lock);
+}
 
 bool ubase_dbg_default(void)
 {

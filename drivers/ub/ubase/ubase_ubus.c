@@ -330,12 +330,46 @@ int ubase_ubus_irq_vector(struct device *dev, u32 idx)
 	return ub_irq_vector(ue, idx);
 }
 
+static int ubase_ubus_virt_configure(struct ub_entity *ue, int bus_ue_id, bool is_en)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+	int ret;
+
+	/*
+	 * The ubus framework have ensure that only mue can come
+	 * here, so we not need to check is this a mue again.
+	 */
+	ubase_info(udev, "ubase virt configure set idx = %d en = %d.\n",
+		   bus_ue_id, is_en);
+
+	if (!is_en)
+		ret = ub_disable_ue(ue, bus_ue_id);
+	else
+		ret = ub_enable_ue(ue, bus_ue_id);
+
+	return ret;
+}
+
+static int ubase_ubus_virt_notify(struct ub_entity *ue, int bus_ue_id, bool is_en)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "ubase virt notify, ue id = %d, en = %d.\n",
+		   bus_ue_id, is_en);
+
+	ubase_virt_handler(udev, (u16)bus_ue_id, is_en);
+
+	return 0;
+}
+
 static struct ub_driver ubase_ubus_driver = {
 	.name		= ubase_ubus_driver_name,
 	.id_table	= ubase_ubus_tbl,
 	.probe		= ubase_ubus_probe,
 	.remove		= ubase_ubus_remove,
 	.shutdown	= ubase_ubus_shutdown,
+	.virt_configure	= ubase_ubus_virt_configure,
+	.virt_notify	= ubase_ubus_virt_notify,
 	.driver		= {},
 };
 

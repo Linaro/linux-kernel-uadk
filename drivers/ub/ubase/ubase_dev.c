@@ -457,7 +457,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"query hw oor caps", UBASE_SUP_NO_PMU, 0,
-		NULL, NULL
+		ubase_query_hw_oor_caps, NULL
 	},
 	{
 		"init irq table", UBASE_SUP_NO_PMU, 1,

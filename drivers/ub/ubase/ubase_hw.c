@@ -576,6 +576,34 @@ static void ubase_uninit_ta_tp_ext_buf(struct ubase_dev *udev)
 	}
 }
 
+int ubase_query_hw_oor_caps(struct ubase_dev *udev)
+{
+	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
+	struct ubase_query_oor_resp resp = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_OOR_CAPS, true, 0, NULL);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_OOR_CAPS, true,
+			     sizeof(resp), &resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to query hw oor caps, ret = %d.\n", ret);
+		return ret;
+	}
+
+	dev_caps->oor_en = resp.oor_en;
+	dev_caps->reorder_queue_en = resp.reorder_cq_buffer_en;
+	dev_caps->reorder_cap = resp.reorder_cap;
+	dev_caps->reorder_queue_shift = resp.reorder_cq_shift;
+	dev_caps->on_flight_size = le32_to_cpu(resp.on_flight_size);
+	dev_caps->at_times = resp.dynamic_ack_timeout;
+
+	return 0;
+}
+
 int ubase_query_controller_info(struct ubase_dev *udev)
 {
 	struct ubase_caps *dev_caps = &udev->caps.dev_caps;

@@ -40,6 +40,7 @@ enum ubase_opcode_type {
 	/* TA commands */
 	UBASE_OPC_TA_EXTDB_VA_CONFIG	= 0x4000,
 	UBASE_OPC_TA_TIMER_VA_CONFIG	= 0x4001,
+	UBASE_OPC_QUERY_OOR_CAPS	= 0x4200,
 
 	/* PHY commands */
 	UBASE_OPC_QUERY_CHIP_INFO	= 0x6201,

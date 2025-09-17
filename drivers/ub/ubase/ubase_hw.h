@@ -113,6 +113,16 @@ struct ubase_res_cmd_resp {
 	__le32	ccc_max_cnt;
 };
 
+struct ubase_query_oor_resp {
+	u8	oor_en;
+	u8	reorder_cq_buffer_en;
+	u8	reorder_cap;
+	u8	reorder_cq_shift;
+	__le32	on_flight_size;
+	u8	dynamic_ack_timeout;
+	u8	rsvd0[15];
+};
+
 struct ubase_query_controller_info_resp {
 	__le32	rsvd0[2];
 	u8	packet_pattern_mode : 1;
@@ -149,5 +159,6 @@ void ubase_hw_uninit(struct ubase_dev *udev);
 int ubase_query_dev_res(struct ubase_dev *udev);
 int ubase_query_chip_info(struct ubase_dev *udev);
 int ubase_query_controller_info(struct ubase_dev *udev);
+int ubase_query_hw_oor_caps(struct ubase_dev *udev);
 
 #endif

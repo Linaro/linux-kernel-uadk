@@ -9,7 +9,7 @@ ccflags-y += -I$(srctree)/drivers/ub/ubase/debugfs
 
 MODULE_NAME := ubase
 
-UBASE_OBJS := ubase_main.o ubase_dev.o ubase_hw.o ubase_cmd.o \
+UBASE_OBJS := ubase_main.o ubase_dev.o ubase_hw.o ubase_cmd.o ubase_ctrlq.o \
 	debugfs/ubase_debugfs.o ubase_eq.o ubase_mailbox.o ubase_ubus.o \
 	debugfs/ubase_ctx_debugfs.o
 

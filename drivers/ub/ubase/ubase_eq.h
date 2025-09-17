@@ -38,13 +38,18 @@
 
 /* Vector0 interrupt CMDQ event source register(RW) */
 #define UBASE_VECTOR0_CMDQ_SRC_REG	0x18004
+/* Vector0 interrupt CTRLQ event source register(RW) */
+#define UBASE_VECTOR0_CTRLQ_SRC_REG	0x18014
 /* Vector0 interrupt control register */
 #define UBASE_MISC_VECTOR_REG_OFFSET	0x18020
 /* CMDQ register bits for RX event */
 #define UBASE_VECTOR0_RX_CMDQ_INT_B	1
+/* CTRLQ register bits for RX event */
+#define UBASE_VECTOR0_RX_CTRLQ_INT_B	0
 
 enum ubase_async_event_cause_bit {
 	UBASE_ASYNC_EVENT_CRQ_B,
+	UBASE_ASYNC_EVENT_CTRLQ_B,
 };
 
 enum ubase_eqc_irqn {

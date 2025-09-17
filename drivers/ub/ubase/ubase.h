@@ -16,6 +16,8 @@
 enum ubase_service_state {
 	UBASE_STATE_CRQ_SERVICE_SCHED,
 	UBASE_STATE_CRQ_HANDLING,
+	UBASE_STATE_CTRLQ_SERVICE_SCHED,
+	UBASE_STATE_CTRLQ_HANDLING,
 };
 
 struct ubase_delay_work {
@@ -63,5 +65,7 @@ static inline u32 ubase_read_reg(u8 __iomem *base, u32 reg)
 	ubase_write_reg((a)->io_base.addr, reg, value)
 #define ubase_read_dev(a, reg) \
 	ubase_read_reg((a)->io_base.addr, reg)
+
+#define ubase_addr_gen(addr_h, addr_l) ((u64)(addr_h) << 32 | (addr_l))
 
 #endif

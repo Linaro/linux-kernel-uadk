@@ -49,6 +49,27 @@ struct ubase_query_version_cmd {
 	__le32 caps[UBASE_CAP_LEN];
 };
 
+enum ubase_ue2ue_sub_cmd {
+	UBASE_UE2UE_CTRLQ_MSG = 3,
+};
+
+struct ubase_ue2ue_common_head {
+	__le16 bus_ue_id;
+	__le16 mbx_ue_id;
+	u16 sub_cmd;
+	u16 status;
+};
+
+struct ubase_ue2ue_ctrlq_head {
+	struct ubase_ue2ue_common_head head;
+	u16 seq;
+	u16 in_size;
+	u16 out_size;
+	u8 need_resp : 1;
+	u8 is_resp : 1;
+	u8 rsv : 6;
+};
+
 struct ubase_query_ueid_cmd {
 	__le32 ueid[UBASE_BUS_EID_LEN];
 	u32 rsv[2];

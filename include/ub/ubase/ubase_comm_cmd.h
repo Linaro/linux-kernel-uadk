@@ -54,6 +54,7 @@ enum ubase_opcode_type {
 	UBASE_OPC_UE_TO_MUE		= 0xF002,
 	UBASE_OPC_CFG_VPORT_BUF		= 0xF003,
 	UBASE_OPC_DESTROY_CTX_RESOURCE	= 0xF00D,
+	UBASE_OPC_UE2UE_UBASE		= 0xF00E,
 };
 
 union ubase_mbox {

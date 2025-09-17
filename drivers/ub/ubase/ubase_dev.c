@@ -9,6 +9,7 @@
 
 #include "debugfs/ubase_debugfs.h"
 #include "ubase_cmd.h"
+#include "ubase_ctrlq.h"
 #include "ubase_hw.h"
 #include "ubase_mailbox.h"
 #include "ubase_dev.h"
@@ -331,8 +332,19 @@ static void ubase_period_service_task(struct work_struct *work)
 	ubase_enable_period_service_task(udev);
 }
 
+void ubase_service_task(struct work_struct *work)
+{
+	struct ubase_delay_work *ubase_work =
+		container_of(work, struct ubase_delay_work, service_task.work);
+
+	ubase_crq_service_task(ubase_work);
+	ubase_ctrlq_service_task(ubase_work);
+	ubase_ctrlq_clean_service_task(ubase_work);
+}
+
 static void ubase_init_delayed_work(struct ubase_dev *udev)
 {
+	INIT_DELAYED_WORK(&udev->service_task.service_task, ubase_service_task);
 	INIT_DELAYED_WORK(&udev->period_service_task.service_task,
 			  ubase_period_service_task);
 }
@@ -395,7 +407,108 @@ static void ubase_wq_uninit(struct ubase_dev *udev)
 	destroy_workqueue(udev->ubase_wq);
 }
 
+static int ubase_handle_ue2ue_ctrlq_req(struct ubase_dev *udev,
+					struct ubase_ue2ue_ctrlq_head *cmd,
+					u32 len)
+{
+	struct ubase_ctrlq_base_block *head = (struct ubase_ctrlq_base_block *)(cmd + 1);
+	u16 mbx_ue_id = le16_to_cpu(cmd->head.mbx_ue_id);
+	struct ubase_ctrlq_ue_info ue_info;
+	struct ubase_ctrlq_msg msg = {0};
+	int ret;
+
+	if (!ubase_mbx_ue_id_is_valid(mbx_ue_id, udev)) {
+		ubase_err(udev, "ubase ue2ue ctrlq req mbx ue id = %u error.\n",
+			  mbx_ue_id);
+		return -EINVAL;
+	}
+
+	if (cmd->in_size > (len - (sizeof(*cmd) + UBASE_CTRLQ_HDR_LEN))) {
+		ubase_err(udev, "ubase ue2ue cmd len = %u error.\n", cmd->in_size);
+		return -EINVAL;
+	}
+
+	if (cmd->in_size > (len - (sizeof(*cmd) + UBASE_CTRLQ_HDR_LEN))) {
+		ubase_err(udev, "ubase e2e cmd len = %u error.\n", cmd->in_size);
+		return -EINVAL;
+	}
+
+	msg.service_ver = head->service_ver;
+	msg.service_type = head->service_type;
+	msg.opcode = head->opcode;
+	msg.need_resp = cmd->need_resp;
+	msg.is_resp = cmd->is_resp;
+	msg.resp_seq = cmd->seq;
+	msg.in = (u8 *)head + UBASE_CTRLQ_HDR_LEN;
+	msg.in_size = cmd->in_size;
+	msg.out = NULL;
+	msg.out_size = 0;
+
+	ue_info.bus_ue_id = le16_to_cpu(cmd->head.bus_ue_id);
+	ue_info.seq = cmd->seq;
+	ue_info.mbx_ue_id = mbx_ue_id;
+
+	ret = __ubase_ctrlq_send(udev, &msg, &ue_info);
+	if (ret)
+		ubase_err(udev, "failed to send opc(0x%x) ctrlq, ret = %d.\n",
+			  head->opcode, ret);
+
+	return ret;
+}
+
+static int ubase_handle_ue2ue_ctrlq_event(struct ubase_dev *udev, void *data,
+					  u32 len)
+{
+	struct ubase_ue2ue_ctrlq_head *cmd = data;
+	struct ubase_ctrlq_base_block *head;
+	u16 data_len;
+
+	if (len < (sizeof(*cmd) + UBASE_CTRLQ_HDR_LEN)) {
+		ubase_err(udev, "invalid ue2ue ctrlq event len(%u).\n", len);
+		return -EINVAL;
+	}
+
+	if (ubase_dev_ctrlq_supported(udev))
+		return ubase_handle_ue2ue_ctrlq_req(udev, cmd, len);
+
+	head = (struct ubase_ctrlq_base_block *)(cmd + 1);
+	data_len = len - sizeof(*cmd) - UBASE_CTRLQ_HDR_LEN;
+	ubase_ctrlq_handle_crq_msg(udev, head, cmd->seq,
+				   (u8 *)head + UBASE_CTRLQ_HDR_LEN, data_len);
+
+	return 0;
+}
+
+struct ubase_ue2ue_event_handler {
+	u16 sub_cmd;
+	int (*event_handler)(struct ubase_dev *udev, void *data, u32 len);
+} ubase_ue2ue_events[] = {
+	{ UBASE_UE2UE_CTRLQ_MSG, ubase_handle_ue2ue_ctrlq_event },
+};
+
+static int ubase_handle_ue2ue_event(void *dev, void *data, u32 len)
+{
+	struct ubase_ue2ue_common_head *head = data;
+	struct ubase_dev *udev = dev;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ubase_ue2ue_events); i++) {
+		if (ubase_ue2ue_events[i].sub_cmd == head->sub_cmd)
+			return ubase_ue2ue_events[i].event_handler(udev, data,
+								   len);
+	}
+
+	ubase_warn(udev, "unknown ubase ue2ue event, sub_cmd = %u.\n",
+		   head->sub_cmd);
+
+	return 0;
+}
+
 static struct ubase_crq_event_nb ubase_crq_events[] = {
+	{
+		.opcode = UBASE_OPC_UE2UE_UBASE,
+		.crq_handler = ubase_handle_ue2ue_event,
+	},
 };
 
 static void ubase_unregister_cmdq_crq_event(struct ubase_dev *udev)
@@ -465,7 +578,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"init ctrl queue", UBASE_SUP_NO_PMU, 1,
-		NULL, NULL
+		ubase_ctrlq_init, ubase_ctrlq_uninit
 	},
 	{
 		"register aeq event", UBASE_SUP_NO_PMU, 0,
@@ -583,6 +696,15 @@ bool ubase_adev_ubl_supported(struct auxiliary_device *adev)
 	return ubase_dev_ubl_supported(__ubase_get_udev_by_adev(adev));
 }
 EXPORT_SYMBOL(ubase_adev_ubl_supported);
+
+bool ubase_adev_ctrlq_supported(struct auxiliary_device *adev)
+{
+	if (!adev)
+		return false;
+
+	return ubase_dev_ctrlq_supported(__ubase_get_udev_by_adev(adev));
+}
+EXPORT_SYMBOL(ubase_adev_ctrlq_supported);
 
 bool ubase_adev_eth_mac_supported(struct auxiliary_device *adev)
 {

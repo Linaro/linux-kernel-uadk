@@ -123,11 +123,16 @@ void ubase_enable_misc_vector(struct ubase_dev *udev, bool enable)
 static unsigned long ubase_check_event_cause(struct ubase_dev *udev)
 {
 	unsigned long event_cause = 0;
+	u32 ctrlq_src_reg;
 	u32 cmdq_src_reg;
 
 	cmdq_src_reg = ubase_read_dev(&udev->hw, UBASE_VECTOR0_CMDQ_SRC_REG);
 	if (cmdq_src_reg & BIT(UBASE_VECTOR0_RX_CMDQ_INT_B))
 		event_cause |= BIT(UBASE_ASYNC_EVENT_CRQ_B);
+
+	ctrlq_src_reg = ubase_read_dev(&udev->hw, UBASE_VECTOR0_CTRLQ_SRC_REG);
+	if (ctrlq_src_reg & BIT(UBASE_VECTOR0_RX_CTRLQ_INT_B))
+		event_cause |= BIT(UBASE_ASYNC_EVENT_CTRLQ_B);
 
 	return event_cause;
 }
@@ -138,11 +143,16 @@ static void ubase_clear_event_cause(struct ubase_dev *udev,
 	if (test_bit(UBASE_ASYNC_EVENT_CRQ_B, &event_cause))
 		ubase_write_dev(&udev->hw, UBASE_VECTOR0_CMDQ_SRC_REG,
 				BIT(UBASE_VECTOR0_RX_CMDQ_INT_B));
+	if (test_bit(UBASE_ASYNC_EVENT_CTRLQ_B, &event_cause))
+		ubase_write_dev(&udev->hw, UBASE_VECTOR0_CTRLQ_SRC_REG,
+				BIT(UBASE_VECTOR0_RX_CTRLQ_INT_B));
 }
 
 static void ubase_clear_all_event_cause(struct ubase_dev *udev)
 {
-	ubase_clear_event_cause(udev, BIT(UBASE_ASYNC_EVENT_CRQ_B));
+	ubase_clear_event_cause(udev,
+				BIT(UBASE_ASYNC_EVENT_CRQ_B) |
+				BIT(UBASE_ASYNC_EVENT_CTRLQ_B));
 }
 
 static void ubase_crq_task_schedule(struct ubase_dev *udev)
@@ -150,6 +160,16 @@ static void ubase_crq_task_schedule(struct ubase_dev *udev)
 	if (!test_and_set_bit(UBASE_STATE_CRQ_SERVICE_SCHED,
 			      &udev->service_task.state)) {
 		udev->crq_table.last_crq_scheduled = jiffies;
+		mod_delayed_work(udev->ubase_wq,
+				 &udev->service_task.service_task, 0);
+	}
+}
+
+static void ubase_ctrlq_task_schedule(struct ubase_dev *udev)
+{
+	if (!test_and_set_bit(UBASE_STATE_CTRLQ_SERVICE_SCHED,
+			      &udev->service_task.state)) {
+		udev->ctrlq.crq_table.last_crq_scheduled = jiffies;
 		mod_delayed_work(udev->ubase_wq,
 				 &udev->service_task.service_task, 0);
 	}
@@ -165,6 +185,8 @@ static int ubase_reg_event_handler(struct ubase_dev *udev)
 	if (test_bit(UBASE_ASYNC_EVENT_CRQ_B, &event_cause))
 		ubase_crq_task_schedule(udev);
 
+	if (test_bit(UBASE_ASYNC_EVENT_CTRLQ_B, &event_cause))
+		ubase_ctrlq_task_schedule(udev);
 	ubase_clear_event_cause(udev, event_cause);
 	ubase_enable_misc_vector(udev, true);
 

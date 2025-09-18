@@ -237,5 +237,9 @@ int post_mailbox_update_ctx(struct udma_dev *udma_dev, void *ctx, uint32_t size,
 			    struct ubase_mbx_attr *attr);
 struct ubase_cmd_mailbox *udma_mailbox_query_ctx(struct udma_dev *udma_dev,
 						 struct ubase_mbx_attr *attr);
+int udma_close_ue_rx(struct udma_dev *dev, bool check_feature_enable, bool check_ta_flush,
+		     bool is_reset, uint32_t tp_num);
+int udma_open_ue_rx(struct udma_dev *dev, bool check_feature_enable, bool check_ta_flush,
+		    bool is_reset, uint32_t tp_num);
 
 #endif /* __UDMA_CMD_H__ */

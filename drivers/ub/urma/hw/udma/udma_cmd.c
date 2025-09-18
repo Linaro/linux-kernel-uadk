@@ -204,5 +204,60 @@ struct ubase_cmd_mailbox *udma_mailbox_query_ctx(struct udma_dev *udma_dev,
 	return mailbox;
 }
 
+int udma_close_ue_rx(struct udma_dev *dev, bool check_feature_enable, bool check_ta_flush,
+		     bool is_reset, uint32_t tp_num)
+{
+	int ret = 0;
+
+	if (check_ta_flush)
+		return ret;
+
+	if (check_feature_enable && !(dev->caps.feature & UDMA_CAP_FEATURE_UE_RX_CLOSE))
+		return ret;
+
+	mutex_lock(&dev->disable_ue_rx_mutex);
+	if (dev->disable_ue_rx_count == 0 && !is_reset) {
+		ret = ubase_deactivate_dev(dev->comdev.adev);
+		if (ret) {
+			dev_err(dev->dev, "failed to close ue rx, ret = %d.\n", ret);
+			goto out;
+		}
+	}
+	if (tp_num)
+		dev->disable_ue_rx_count += tp_num;
+	else
+		dev->disable_ue_rx_count++;
+out:
+	mutex_unlock(&dev->disable_ue_rx_mutex);
+
+	return ret;
+}
+
+int udma_open_ue_rx(struct udma_dev *dev, bool check_feature_enable, bool check_ta_flush,
+		    bool is_reset, uint32_t tp_num)
+{
+	int ret = 0;
+
+	if (check_ta_flush)
+		return ret;
+
+	if (check_feature_enable && !(dev->caps.feature & UDMA_CAP_FEATURE_UE_RX_CLOSE))
+		return ret;
+
+	mutex_lock(&dev->disable_ue_rx_mutex);
+	if (tp_num)
+		dev->disable_ue_rx_count -= tp_num;
+	else
+		dev->disable_ue_rx_count--;
+	if (dev->disable_ue_rx_count == 0 && !is_reset) {
+		ret = ubase_activate_dev(dev->comdev.adev);
+		if (ret)
+			dev_err(dev->dev, "failed to open ue rx, ret = %d.\n", ret);
+	}
+	mutex_unlock(&dev->disable_ue_rx_mutex);
+
+	return ret;
+}
+
 module_param(debug_switch, bool, 0444);
 MODULE_PARM_DESC(debug_switch, "set debug print ON, default: true");

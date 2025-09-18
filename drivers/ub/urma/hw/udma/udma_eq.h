@@ -6,5 +6,20 @@
 
 int udma_register_ae_event(struct auxiliary_device *adev);
 void udma_unregister_ae_event(struct auxiliary_device *adev);
+int udma_register_ce_event(struct auxiliary_device *adev);
+void udma_unregister_crq_event(struct auxiliary_device *adev);
+int udma_register_crq_event(struct auxiliary_device *adev);
+int udma_register_activate_workqueue(struct udma_dev *udma_dev);
+void udma_unregister_activate_workqueue(struct udma_dev *udma_dev);
+
+static inline void udma_unregister_ce_event(struct auxiliary_device *adev)
+{
+	ubase_comp_unregister(adev);
+}
+
+struct udma_flush_work {
+	struct udma_dev	*udev;
+	struct work_struct	work;
+};
 
 #endif /* __UDMA_EQ_H__ */

@@ -735,11 +735,28 @@ static int udma_register_event(struct auxiliary_device *adev)
 	if (ret)
 		return ret;
 
+	ret = udma_register_ce_event(adev);
+	if (ret)
+		goto err_ce_register;
+
+	ret = udma_register_crq_event(adev);
+	if (ret)
+		goto err_crq_register;
+
 	return 0;
+
+err_crq_register:
+	udma_unregister_ce_event(adev);
+err_ce_register:
+	udma_unregister_ae_event(adev);
+
+	return ret;
 }
 
 static void udma_unregister_event(struct auxiliary_device *adev)
 {
+	udma_unregister_crq_event(adev);
+	udma_unregister_ce_event(adev);
 	udma_unregister_ae_event(adev);
 }
 
@@ -763,6 +780,26 @@ static bool udma_is_need_probe(struct auxiliary_device *adev)
 	}
 
 	return true;
+}
+
+static void udma_report_reset_event(enum ubcore_event_type event_type,
+				    struct udma_dev *udma_dev)
+{
+	struct ubcore_event ae = {};
+
+	ae.ub_dev = &udma_dev->ub_dev;
+	ae.event_type = event_type;
+
+	if (event_type == UBCORE_EVENT_ELR_ERR)
+		dev_info(udma_dev->dev,
+			"udma report reset event elr_err, matched udma dev(%s).\n",
+			udma_dev->dev_name);
+	else if (event_type == UBCORE_EVENT_ELR_DONE)
+		dev_info(udma_dev->dev,
+			"udma report reset event elr_done, matched udma dev(%s).\n",
+			udma_dev->dev_name);
+
+	ubcore_dispatch_async_event(&ae);
 }
 
 static void udma_reset_handler(struct auxiliary_device *adev,
@@ -804,6 +841,12 @@ static int udma_init_dev(struct auxiliary_device *adev)
 	if (ret)
 		goto err_event_register;
 
+	ret = udma_register_activate_workqueue(udma_dev);
+	if (ret) {
+		dev_err(udma_dev->dev, "UDMA activate workqueue failed.\n");
+		goto err_register_act_init;
+	}
+
 	ret = udma_set_ubcore_dev(udma_dev);
 	if (ret) {
 		dev_err(udma_dev->dev, "failed to set ubcore dev, ret is %d.\n", ret);
@@ -818,6 +861,8 @@ static int udma_init_dev(struct auxiliary_device *adev)
 	return 0;
 
 err_set_ubcore_dev:
+	udma_unregister_activate_workqueue(udma_dev);
+err_register_act_init:
 	udma_unregister_event(adev);
 err_event_register:
 	udma_destroy_dev(udma_dev);
@@ -825,6 +870,24 @@ err_create:
 	mutex_unlock(&udma_reset_mutex);
 
 	return -EINVAL;
+}
+
+static void check_and_wait_flush_done(struct udma_dev *udma_dev)
+{
+#define WAIT_MAX_TIMES 15
+	uint32_t wait_times = 0;
+
+	while (true) {
+		if (udma_dev->disable_ue_rx_count == 1)
+			break;
+
+		if (wait_times > WAIT_MAX_TIMES) {
+			dev_warn(udma_dev->dev, "wait flush done timeout.\n");
+			break;
+		}
+		msleep(1 << wait_times);
+		wait_times++;
+	}
 }
 
 void udma_reset_down(struct auxiliary_device *adev)
@@ -845,11 +908,15 @@ void udma_reset_down(struct auxiliary_device *adev)
 		return;
 	}
 
-	udma_dev->status = UDMA_SUSPEND;
+	ubcore_stop_requests(&udma_dev->ub_dev);
+	if (udma_close_ue_rx(udma_dev, false, false, true, 0)) {
+		mutex_unlock(&udma_reset_mutex);
+		dev_err(&adev->dev, "udma close ue rx failed in reset down process.\n");
+		return;
+	}
 
-	udma_unregister_debugfs(udma_dev);
-	udma_unset_ubcore_dev(udma_dev);
-	udma_unregister_event(adev);
+	udma_report_reset_event(UBCORE_EVENT_ELR_ERR, udma_dev);
+	udma_dev->status = UDMA_SUSPEND;
 	mutex_unlock(&udma_reset_mutex);
 }
 
@@ -871,6 +938,11 @@ void udma_reset_uninit(struct auxiliary_device *adev)
 		return;
 	}
 
+	udma_unset_ubcore_dev(udma_dev);
+	udma_unregister_debugfs(udma_dev);
+	udma_unregister_activate_workqueue(udma_dev);
+	udma_open_ue_rx(udma_dev, false, false, true, 0);
+	udma_unregister_event(adev);
 	udma_destroy_dev(udma_dev);
 	mutex_unlock(&udma_reset_mutex);
 }
@@ -894,17 +966,33 @@ void udma_remove(struct auxiliary_device *adev)
 {
 	struct udma_dev *udma_dev;
 
+	mutex_lock(&udma_reset_mutex);
+	ubase_reset_unregister(adev);
 	udma_dev = get_udma_dev(adev);
 	if (!udma_dev) {
+		mutex_unlock(&udma_reset_mutex);
 		dev_info(&adev->dev, "udma device is not exist.\n");
-		ubase_reset_unregister(adev);
 		return;
 	}
 
-	udma_reset_down(adev);
-	udma_reset_uninit(adev);
+	ubcore_stop_requests(&udma_dev->ub_dev);
+	if (udma_close_ue_rx(udma_dev, false, false, false, 0)) {
+		mutex_unlock(&udma_reset_mutex);
+		dev_err(&adev->dev, "udma close ue rx failed in remove process.\n");
+		return;
+	}
 
-	ubase_reset_unregister(adev);
+	udma_dev->status = UDMA_SUSPEND;
+	udma_report_reset_event(UBCORE_EVENT_ELR_ERR, udma_dev);
+
+	udma_unset_ubcore_dev(udma_dev);
+	udma_unregister_debugfs(udma_dev);
+	udma_unregister_activate_workqueue(udma_dev);
+	check_and_wait_flush_done(udma_dev);
+	(void)ubase_activate_dev(adev);
+	udma_unregister_event(adev);
+	udma_destroy_dev(udma_dev);
+	mutex_unlock(&udma_reset_mutex);
 }
 
 static struct auxiliary_driver udma_drv = {

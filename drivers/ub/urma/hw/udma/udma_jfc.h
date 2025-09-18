@@ -32,4 +32,7 @@ static inline struct udma_jfc *to_udma_jfc(struct ubcore_jfc *jfc)
 	return container_of(jfc, struct udma_jfc, base);
 }
 
+int udma_jfc_completion(struct notifier_block *nb, unsigned long jfcn,
+			void *data);
+
 #endif /* __UDMA_JFC_H__ */

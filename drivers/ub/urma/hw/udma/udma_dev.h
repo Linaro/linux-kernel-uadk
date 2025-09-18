@@ -99,6 +99,7 @@ struct udma_dev {
 	struct ubase_event_nb *ae_event_addr[UBASE_EVENT_TYPE_MAX];
 	resource_size_t db_base;
 	void __iomem *k_db_base;
+	struct workqueue_struct *act_workq;
 	struct xarray ksva_table;
 	struct mutex ksva_mutex;
 	struct xarray eid_table;

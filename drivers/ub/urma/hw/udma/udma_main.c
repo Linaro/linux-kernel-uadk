@@ -18,12 +18,16 @@
 #include <ub/ubase/ubase_comm_stats.h>
 #include "udma_dev.h"
 #include "udma_cmd.h"
+#include "udma_ctx.h"
 #include "udma_rct.h"
+#include "udma_tid.h"
 #include "udma_common.h"
 #include "udma_ctrlq_tp.h"
 
 bool is_rmmod;
 static DEFINE_MUTEX(udma_reset_mutex);
+uint32_t jfc_arm_mode;
+bool dump_aux_info;
 
 static const struct auxiliary_device_id udma_id_table[] = {
 	{
@@ -154,6 +158,11 @@ static struct ubcore_ops g_dev_ops = {
 	.query_device_attr = udma_query_device_attr,
 	.query_device_status = udma_query_device_status,
 	.config_device = udma_config_device,
+	.alloc_ucontext = udma_alloc_ucontext,
+	.free_ucontext = udma_free_ucontext,
+	.mmap = udma_mmap,
+	.alloc_token_id = udma_alloc_tid,
+	.free_token_id = udma_free_tid,
 };
 
 static void udma_uninit_group_table(struct udma_dev *dev, struct udma_group_table *table)
@@ -554,11 +563,16 @@ static int udma_init_dev_param(struct udma_dev *udma_dev)
 
 	dev_set_drvdata(&adev->dev, udma_dev);
 
+	mutex_init(&udma_dev->db_mutex);
+	for (i = 0; i < UDMA_DB_TYPE_NUM; i++)
+		INIT_LIST_HEAD(&udma_dev->db_list[i]);
+
 	return 0;
 }
 
 static void udma_uninit_dev_param(struct udma_dev *udma_dev)
 {
+	mutex_destroy(&udma_dev->db_mutex);
 	dev_set_drvdata(&udma_dev->comdev.adev->dev, NULL);
 	udma_destroy_tables(udma_dev);
 }
@@ -891,3 +905,11 @@ static void __exit udma_exit(void)
 module_init(udma_init);
 module_exit(udma_exit);
 MODULE_LICENSE("GPL");
+
+module_param(jfc_arm_mode, uint, 0444);
+MODULE_PARM_DESC(jfc_arm_mode,
+		 "Set the ARM mode of the JFC, default: 0(0:Always ARM, other: NO ARM.");
+
+module_param(dump_aux_info, bool, 0644);
+MODULE_PARM_DESC(dump_aux_info,
+		 "Set whether dump aux info, default: false(false:not print, true:print)");

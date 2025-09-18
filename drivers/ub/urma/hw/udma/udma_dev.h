@@ -8,12 +8,19 @@
 #include <ub/ubase/ubase_comm_dev.h>
 #include <ub/ubase/ubase_comm_eq.h>
 #include "udma_def.h"
+#include <uapi/ub/urma/udma/udma_abi.h>
+#include <ub/urma/udma/udma_ctl.h>
+
+extern uint32_t jfc_arm_mode;
+extern bool dump_aux_info;
 
 #define UBCORE_MAX_DEV_NAME 64
 
 #define MAX_JETTY_IN_JETTY_GRP 32
 
 #define MAX_WQEBB_IN_SQE 4
+
+#define JETTY_DSQE_OFFSET 0x1000
 
 #define UDMA_HW_PAGE_SHIFT 12
 #define UDMA_HW_PAGE_SIZE (1 << UDMA_HW_PAGE_SHIFT)
@@ -97,6 +104,8 @@ struct udma_dev {
 	struct mutex eid_mutex;
 	uint32_t tid;
 	struct iommu_sva *ksva;
+	struct list_head db_list[UDMA_DB_TYPE_NUM];
+	struct mutex db_mutex;
 	uint32_t status;
 	uint32_t ue_num;
 	uint32_t ue_id;
@@ -136,6 +145,16 @@ static inline void udma_id_free(struct udma_ida *ida_table, int idx)
 	ida_free(&ida_table->ida, idx);
 }
 
+int udma_id_alloc_auto_grow(struct udma_dev *udma_dev, struct udma_ida *ida_table,
+			    uint32_t *idx);
+int udma_id_alloc(struct udma_dev *udma_dev, struct udma_ida *ida_table,
+		  uint32_t *idx);
+int udma_adv_id_alloc(struct udma_dev *udma_dev, struct udma_group_bitmap *bitmap_table,
+			uint32_t *start_idx, bool is_grp, uint32_t next);
+void udma_adv_id_free(struct udma_group_bitmap *bitmap_table, uint32_t start_idx,
+		      bool is_grp);
+int udma_specify_adv_id(struct udma_dev *udma_dev, struct udma_group_bitmap *bitmap_table,
+			uint32_t user_id);
 void udma_destroy_tables(struct udma_dev *udma_dev);
 int udma_init_tables(struct udma_dev *udma_dev);
 int udma_probe(struct auxiliary_device *adev, const struct auxiliary_device_id *id);

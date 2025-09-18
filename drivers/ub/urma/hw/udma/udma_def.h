@@ -69,6 +69,13 @@ struct udma_caps {
 	struct udma_tbl seid;
 };
 
+struct udma_sw_db_page {
+	struct list_head list;
+	struct ubcore_umem *umem;
+	uint64_t user_virt;
+	refcount_t refcount;
+};
+
 struct udma_buf {
 	dma_addr_t		addr;
 	union {
@@ -83,6 +90,37 @@ struct udma_buf {
 	uint32_t		cnt_per_page_shift;
 	struct xarray		id_table_xa;
 	struct mutex		id_table_mutex;
+};
+
+struct udma_k_sw_db_page {
+	struct list_head list;
+	uint32_t num_db;
+	unsigned long *bitmap;
+	struct udma_buf db_buf;
+};
+
+struct udma_sw_db {
+	struct udma_sw_db_page *page;
+	struct udma_k_sw_db_page *kpage;
+	uint32_t index;
+	uint32_t type;
+	uint64_t db_addr;
+	uint32_t *db_record;
+	void *virt_addr;
+};
+
+struct udma_req_msg {
+	uint8_t dst_ue_idx;
+	uint8_t resp_code;
+	uint16_t rsv;
+	struct ubcore_req req;
+};
+
+struct udma_resp_msg {
+	uint8_t dst_ue_idx;
+	uint8_t resp_code;
+	uint16_t rsv;
+	struct ubcore_resp resp;
 };
 
 enum num_elem_in_grp {

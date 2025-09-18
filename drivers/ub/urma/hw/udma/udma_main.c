@@ -17,6 +17,7 @@
 #include <ub/ubase/ubase_comm_dev.h>
 #include <ub/ubase/ubase_comm_stats.h>
 #include "udma_dev.h"
+#include "udma_eq.h"
 #include "udma_cmd.h"
 #include "udma_ctx.h"
 #include "udma_rct.h"
@@ -726,6 +727,22 @@ err_init:
 	return NULL;
 }
 
+static int udma_register_event(struct auxiliary_device *adev)
+{
+	int ret;
+
+	ret = udma_register_ae_event(adev);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static void udma_unregister_event(struct auxiliary_device *adev)
+{
+	udma_unregister_ae_event(adev);
+}
+
 static bool udma_is_need_probe(struct auxiliary_device *adev)
 {
 	struct udma_dev *udma_dev;
@@ -783,10 +800,14 @@ static int udma_init_dev(struct auxiliary_device *adev)
 	if (!udma_dev)
 		goto err_create;
 
+	ret = udma_register_event(adev);
+	if (ret)
+		goto err_event_register;
+
 	ret = udma_set_ubcore_dev(udma_dev);
 	if (ret) {
 		dev_err(udma_dev->dev, "failed to set ubcore dev, ret is %d.\n", ret);
-		goto err_create;
+		goto err_set_ubcore_dev;
 	}
 
 	udma_register_debugfs(udma_dev);
@@ -796,6 +817,10 @@ static int udma_init_dev(struct auxiliary_device *adev)
 
 	return 0;
 
+err_set_ubcore_dev:
+	udma_unregister_event(adev);
+err_event_register:
+	udma_destroy_dev(udma_dev);
 err_create:
 	mutex_unlock(&udma_reset_mutex);
 
@@ -824,6 +849,7 @@ void udma_reset_down(struct auxiliary_device *adev)
 
 	udma_unregister_debugfs(udma_dev);
 	udma_unset_ubcore_dev(udma_dev);
+	udma_unregister_event(adev);
 	mutex_unlock(&udma_reset_mutex);
 }
 

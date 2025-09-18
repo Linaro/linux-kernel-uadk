@@ -8,6 +8,17 @@
 #include <ub/urma/ubcore_api.h>
 #include "udma_dev.h"
 
+struct udma_jetty_grp {
+	struct ubcore_jetty_group ubcore_jetty_grp;
+	uint32_t start_jetty_id;
+	uint32_t next_jetty_id;
+	uint32_t jetty_grp_id;
+	uint32_t valid;
+	struct mutex valid_lock;
+	refcount_t ae_refcount;
+	struct completion ae_comp;
+};
+
 struct udma_jetty_queue {
 	struct udma_buf buf;
 	void *kva_curr;

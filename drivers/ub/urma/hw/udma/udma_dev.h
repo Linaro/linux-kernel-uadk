@@ -96,6 +96,7 @@ struct udma_dev {
 	struct xarray npu_nb_table;
 	struct mutex npu_nb_mutex;
 	struct xarray tpn_ue_idx_table;
+	struct ubase_event_nb *ae_event_addr[UBASE_EVENT_TYPE_MAX];
 	resource_size_t db_base;
 	void __iomem *k_db_base;
 	struct xarray ksva_table;

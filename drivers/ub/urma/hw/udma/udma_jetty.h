@@ -22,6 +22,11 @@ static inline struct udma_jetty *to_udma_jetty(struct ubcore_jetty *jetty)
 	return container_of(jetty, struct udma_jetty, ubcore_jetty);
 }
 
+static inline struct udma_jetty_grp *to_udma_jetty_grp(struct ubcore_jetty_group *jetty_grp)
+{
+	return container_of(jetty_grp, struct udma_jetty_grp, ubcore_jetty_grp);
+}
+
 static inline struct udma_jetty *to_udma_jetty_from_queue(struct udma_jetty_queue *queue)
 {
 	return container_of(queue, struct udma_jetty, sq);

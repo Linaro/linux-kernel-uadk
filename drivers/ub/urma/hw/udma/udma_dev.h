@@ -107,6 +107,7 @@ struct udma_dev {
 	struct list_head db_list[UDMA_DB_TYPE_NUM];
 	struct mutex db_mutex;
 	uint32_t status;
+	struct udma_dev_debugfs *dbgfs;
 	uint32_t ue_num;
 	uint32_t ue_id;
 	struct page *db_page;

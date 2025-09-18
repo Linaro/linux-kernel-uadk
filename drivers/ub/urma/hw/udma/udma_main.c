@@ -21,6 +21,7 @@
 #include "udma_ctx.h"
 #include "udma_rct.h"
 #include "udma_tid.h"
+#include "udma_debugfs.h"
 #include "udma_common.h"
 #include "udma_ctrlq_tp.h"
 
@@ -788,6 +789,7 @@ static int udma_init_dev(struct auxiliary_device *adev)
 		goto err_create;
 	}
 
+	udma_register_debugfs(udma_dev);
 	udma_dev->status = UDMA_NORMAL;
 	mutex_unlock(&udma_reset_mutex);
 	dev_info(udma_dev->dev, "init udma successfully.\n");
@@ -820,6 +822,7 @@ void udma_reset_down(struct auxiliary_device *adev)
 
 	udma_dev->status = UDMA_SUSPEND;
 
+	udma_unregister_debugfs(udma_dev);
 	udma_unset_ubcore_dev(udma_dev);
 	mutex_unlock(&udma_reset_mutex);
 }
@@ -889,9 +892,12 @@ static int __init udma_init(void)
 {
 	int ret;
 
+	udma_init_debugfs();
 	ret = auxiliary_driver_register(&udma_drv);
-	if (ret)
+	if (ret) {
 		pr_err("failed to register auxiliary_driver\n");
+		udma_uninit_debugfs();
+	}
 
 	return ret;
 }
@@ -900,6 +906,7 @@ static void __exit udma_exit(void)
 {
 	is_rmmod = true;
 	auxiliary_driver_unregister(&udma_drv);
+	udma_uninit_debugfs();
 }
 
 module_init(udma_init);

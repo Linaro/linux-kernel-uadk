@@ -18,6 +18,7 @@
 #include <ub/ubase/ubase_comm_stats.h>
 #include "udma_dev.h"
 #include "udma_eq.h"
+#include "udma_segment.h"
 #include "udma_cmd.h"
 #include "udma_ctx.h"
 #include "udma_rct.h"
@@ -166,6 +167,10 @@ static struct ubcore_ops g_dev_ops = {
 	.mmap = udma_mmap,
 	.alloc_token_id = udma_alloc_tid,
 	.free_token_id = udma_free_tid,
+	.register_seg = udma_register_seg,
+	.unregister_seg = udma_unregister_seg,
+	.import_seg = udma_import_seg,
+	.unimport_seg = udma_unimport_seg,
 };
 
 static void udma_uninit_group_table(struct udma_dev *dev, struct udma_group_table *table)

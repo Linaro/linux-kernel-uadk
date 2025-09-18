@@ -365,6 +365,11 @@ static inline bool ubase_dev_eth_mac_supported(struct ubase_dev *udev)
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ETH_MAC_B);
 }
 
+static inline bool ubase_utp_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_UTP_B);
+}
+
 static inline u32 ubase_jfs_num(struct ubase_dev *udev)
 {
 	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;

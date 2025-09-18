@@ -594,7 +594,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"init qos", UBASE_SUP_ALL, 0,
-		NULL, NULL
+		ubase_qos_init, NULL
 	},
 	{
 		"prealloc memory", UBASE_SUP_UDMA, 1,

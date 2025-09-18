@@ -138,6 +138,11 @@ struct ubase_cfg_dma_buf_req {
 	__le32 resv[3];
 };
 
+struct ubase_config_sl_vl_cmd {
+	u8	sl_num;
+	u8	sl_vl[23];
+};
+
 struct ubase_query_chip_die_cmd {
 	__le16	nl_port_id;
 	__le16	chip_id;
@@ -154,8 +159,19 @@ struct ubase_ctx_buf_map {
 	u16 mb_cmd;
 };
 
+struct ubase_query_vl_ageing_cmd {
+	__le16	vl_ageing_en;
+	u8	rsv[22];
+};
+
+struct ubase_query_ctp_vl_offset_cmd {
+	u8	ctp_vl_offset;
+	u8	rsv[23];
+};
+
 int ubase_hw_init(struct ubase_dev *udev);
 void ubase_hw_uninit(struct ubase_dev *udev);
+int ubase_qos_init(struct ubase_dev *udev);
 int ubase_query_dev_res(struct ubase_dev *udev);
 int ubase_query_chip_info(struct ubase_dev *udev);
 int ubase_query_controller_info(struct ubase_dev *udev);

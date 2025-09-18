@@ -34,6 +34,11 @@ enum ubase_ctrlq_ser_type {
 	UBASE_CTRLQ_SER_TYPE_QOS = 0x04,
 };
 
+enum ubase_ctrlq_opc_type_qos {
+	UBASE_CTRLQ_OPC_QUERY_VL	= 0x01,
+	UBASE_CTRLQ_OPC_QUERY_SL	= 0x02,
+};
+
 struct ubase_ctrlq_msg {
 	enum ubase_ctrlq_ser_ver	service_ver;
 	enum ubase_ctrlq_ser_type	service_type;

@@ -9,6 +9,7 @@
 #include <ub/ubase/ubase_comm_debugfs.h>
 
 #include "ubase_dev.h"
+#include "ubase_qos_debugfs.h"
 #include "ubase_debugfs.h"
 
 static struct dentry *ubase_dbgfs_root;
@@ -80,6 +81,14 @@ static struct ubase_dbg_dentry_info ubase_dbg_dentry[] = {
 };
 
 static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
+	{
+		.name = "adev_qos",
+		.dentry_index = UBASE_DBG_DENTRY_QOS,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_adev_qos_info,
+	},
 };
 
 static int ubase_dbg_create_dir(struct device *dev,

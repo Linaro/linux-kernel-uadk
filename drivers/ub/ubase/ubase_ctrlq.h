@@ -30,6 +30,25 @@ struct ubase_ctrlq_ue_info {
 	u16	bus_ue_id;
 };
 
+struct ubase_ctrlq_query_vl_resp {
+	__le16 vl_bitmap;
+	u8 rsv[18];
+};
+
+struct ubase_ctrlq_query_vl_req {
+	u8 rsv[20];
+};
+
+struct ubase_ctrlq_query_sl_resp {
+	__le16 unic_sl_bitmap;
+	__le16 udma_sl_bitmap;
+	u8 rsv[16];
+};
+
+struct ubase_ctrlq_query_sl_req {
+	u8 rsv[20];
+};
+
 int ubase_ctrlq_init(struct ubase_dev *udev);
 void ubase_ctrlq_uninit(struct ubase_dev *udev);
 void ubase_ctrlq_disable(struct ubase_dev *udev);

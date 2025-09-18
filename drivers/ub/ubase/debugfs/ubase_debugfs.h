@@ -20,6 +20,16 @@ enum ubase_dbg_dentry_type {
 	UBASE_DBG_DENTRY_ROOT,
 };
 
+static inline void ubase_dbg_dump_arr_info(struct seq_file *s, u8 *arr, u8 arr_num)
+{
+	u8 i;
+
+	for (i = 0; i < arr_num; i++)
+		seq_printf(s, " %u", arr[i]);
+
+	seq_puts(s, "\n");
+}
+
 int ubase_dbg_init(struct ubase_dev *udev);
 void ubase_dbg_uninit(struct ubase_dev *udev);
 int ubase_dbg_register_debugfs(void);

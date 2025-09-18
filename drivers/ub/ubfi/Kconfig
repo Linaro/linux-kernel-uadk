@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# UnifiedBus firmware interface driver configuration
+#
+
+if UB_UBUS
+
+config UB_UBFI
+	tristate "UnifiedBus firmware interface driver"
+	depends on UB_UBUS
+	default n
+	help
+	  This option support for UnifiedBus firmware interface driver.
+	  If you have ub function say y and it will be accessible from
+	  within Linux. To compile this driver as a module, choose M here.
+	  Say 'M' here unless you know what you are doing
+
+endif

@@ -8325,4 +8325,5 @@ CONFIG_UB_UBL=m
 CONFIG_UB_UBUS=y
 # UB Bus Core Driver
 CONFIG_UB_UBUS_BUS=m
+CONFIG_UB_UBFI=m
 # end of unified bus

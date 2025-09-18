@@ -266,4 +266,5 @@ module_init(ubus_driver_init);
 module_exit(ubus_driver_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("UB bus driver");
+MODULE_IMPORT_NS(UB_UBFI);
 MODULE_IMPORT_NS(UB_UBUS);

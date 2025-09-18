@@ -54,6 +54,14 @@ struct ub_guid {
 #define uent_base_code(uent) ((uent)->class_code & UB_BASE_CODE_MASK)
 #define uent_seq(uent) ((uent)->guid.bits.seq_num)
 
+static inline int ub_show_guid(struct ub_guid *guid, char *buf)
+{
+	return sprintf(buf, "%04x-%04x-%01x-%01x-%06x-%016llx",
+		       guid->bits.vendor, guid->bits.device,
+		       guid->bits.version, guid->bits.type,
+		       guid->bits.reserved, guid->bits.seq_num);
+}
+
 struct ub_entity {
 	/* Driver framework base info */
 	struct device dev;
@@ -66,6 +74,11 @@ struct ub_entity {
 	u16 class_code;
 	u16 mod_vendor; /* entity's module vendor and module id */
 	u16 module;
+};
+
+struct ub_dynids {
+	spinlock_t lock; /* Protects list, index */
+	struct list_head list; /* For IDs added at runtime */
 };
 
 #define to_ub_entity(n) container_of(n, struct ub_entity, dev)
@@ -97,7 +110,11 @@ struct ub_entity {
  *		context, so it can sleep.
  * @shutdown:	Hook into reboot_notifier_list (kernel/sys.c).
  *		Intended to stop any idling operations.
+ * @groups:	Sysfs attribute groups.
+ * @dev_groups: Attributes attached to the device that will be
+ *		created once it is bound to the driver.
  * @driver:	Driver model structure.
+ * @dynids:	List of dynamically added device IDs.
  */
 struct ub_driver {
 	struct list_head node;
@@ -108,7 +125,10 @@ struct ub_driver {
 	/* entity removed (NULL if not a hot-plug capable driver) */
 	void (*remove)(struct ub_entity *uent);
 	void (*shutdown)(struct ub_entity *uent);
+	const struct attribute_group **groups;
+	const struct attribute_group **dev_groups;
 	struct device_driver driver;
+	struct ub_dynids dynids;
 };
 
 static inline struct ub_driver *to_ub_driver(struct device_driver *drv)

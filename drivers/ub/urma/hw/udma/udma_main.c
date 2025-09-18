@@ -727,6 +727,26 @@ err_init:
 	return NULL;
 }
 
+static void udma_port_handler(struct auxiliary_device *adev, bool link_up)
+{
+	struct udma_dev *udma_dev = get_udma_dev(adev);
+	struct ubcore_event ae = {};
+
+	ae.ub_dev = &udma_dev->ub_dev;
+
+	if (link_up)
+		ae.event_type = UBCORE_EVENT_PORT_ACTIVE;
+	else
+		ae.event_type = UBCORE_EVENT_PORT_DOWN;
+
+	ae.element.port_id = udma_dev->port_id;
+	dev_info(udma_dev->dev,
+		 "udma report port event %s, matched udma dev(%s).\n",
+		 link_up ? "ACTIVE" : "DOWN", udma_dev->dev_name);
+
+	ubcore_dispatch_async_event(&ae);
+}
+
 static int udma_register_event(struct auxiliary_device *adev)
 {
 	int ret;
@@ -743,8 +763,16 @@ static int udma_register_event(struct auxiliary_device *adev)
 	if (ret)
 		goto err_crq_register;
 
+	ret = udma_register_ctrlq_event(adev);
+	if (ret)
+		goto err_ctrlq_register;
+
+	ubase_port_register(adev, udma_port_handler);
+
 	return 0;
 
+err_ctrlq_register:
+	udma_unregister_crq_event(adev);
 err_crq_register:
 	udma_unregister_ce_event(adev);
 err_ce_register:
@@ -755,6 +783,8 @@ err_ce_register:
 
 static void udma_unregister_event(struct auxiliary_device *adev)
 {
+	ubase_port_unregister(adev);
+	udma_unregister_ctrlq_event(adev);
 	udma_unregister_crq_event(adev);
 	udma_unregister_ce_event(adev);
 	udma_unregister_ae_event(adev);

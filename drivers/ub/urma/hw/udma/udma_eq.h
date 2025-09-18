@@ -9,6 +9,8 @@ void udma_unregister_ae_event(struct auxiliary_device *adev);
 int udma_register_ce_event(struct auxiliary_device *adev);
 void udma_unregister_crq_event(struct auxiliary_device *adev);
 int udma_register_crq_event(struct auxiliary_device *adev);
+int udma_register_ctrlq_event(struct auxiliary_device *adev);
+void udma_unregister_ctrlq_event(struct auxiliary_device *adev);
 int udma_register_activate_workqueue(struct udma_dev *udma_dev);
 void udma_unregister_activate_workqueue(struct udma_dev *udma_dev);
 

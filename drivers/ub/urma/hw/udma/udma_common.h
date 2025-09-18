@@ -46,6 +46,13 @@ struct udma_jetty_queue {
 	enum udma_jetty_type jetty_type;
 };
 
+enum tp_state {
+	TP_INVALID = 0x0,
+	TP_VALID = 0x1,
+	TP_RTS = 0x3,
+	TP_ERROR = 0x6,
+};
+
 int pin_queue_addr(struct udma_dev *dev, uint64_t addr,
 		   uint32_t len, struct udma_buf *buf);
 void unpin_queue_addr(struct ubcore_umem *umem);
@@ -74,5 +81,7 @@ static inline uint64_t udma_cal_npages(uint64_t va, uint64_t len)
 {
 	return (ALIGN(va + len, PAGE_SIZE) - ALIGN_DOWN(va, PAGE_SIZE)) / PAGE_SIZE;
 }
+
+void udma_swap_endian(uint8_t arr[], uint8_t res[], uint32_t res_size);
 
 #endif /* __UDMA_COMM_H__ */

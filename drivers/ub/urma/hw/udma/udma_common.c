@@ -578,3 +578,11 @@ void udma_free_iova(struct udma_dev *udma_dev, size_t memory_size, void *kva_or_
 
 	dma_free_iova(slot);
 }
+
+void udma_swap_endian(uint8_t arr[], uint8_t res[], uint32_t res_size)
+{
+	uint32_t i;
+
+	for (i = 0; i < res_size; i++)
+		res[i] = arr[res_size - i - 1];
+}

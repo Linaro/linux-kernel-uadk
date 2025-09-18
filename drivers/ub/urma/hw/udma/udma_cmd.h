@@ -19,11 +19,43 @@ extern bool debug_switch;
 #define SPEED_50G   50000
 #define SPEED_25G   25000
 
+#define UDMA_CTRLQ_SEID_NUM	64
+
 struct udma_ctrlq_eid_info {
 	uint32_t eid_idx;
 	union ubcore_eid eid;
 	uint32_t upi;
 } __packed;
+
+struct udma_ctrlq_eid_in_query {
+	uint32_t cmd : 8;
+	uint32_t rsv : 24;
+};
+
+struct udma_ctrlq_eid_out_query {
+	uint32_t seid_num : 8;
+	uint32_t rsv : 24;
+	struct udma_ctrlq_eid_info eids[UDMA_CTRLQ_SEID_NUM];
+} __packed;
+
+struct udma_ctrlq_eid_out_update {
+	struct udma_ctrlq_eid_info eid_info;
+	uint32_t op_type : 4;
+	uint32_t rsv : 28;
+} __packed;
+
+enum udma_ctrlq_eid_update_op {
+	UDMA_CTRLQ_EID_ADD = 0,
+	UDMA_CTRLQ_EID_DEL,
+};
+
+enum udma_ctrlq_dev_mgmt_opcode {
+	UDMA_CTRLQ_GET_SEID_INFO = 0x1,
+	UDMA_CTRLQ_UPDATE_SEID_INFO = 0x2,
+	UDMA_CTRLQ_GET_DEV_RESOURCE_COUNT = 0x11,
+	UDMA_CTRLQ_GET_DEV_RESOURCE_RATIO = 0x12,
+	UDMA_CTRLQ_NOTIFY_DEV_RESOURCE_RATIO = 0x13,
+};
 
 enum udma_cmd_opcode_type {
 	UDMA_CMD_QUERY_UE_RES = 0x0002,
@@ -211,6 +243,20 @@ struct udma_cmd_wqebb_va {
 	uint64_t va_size;
 	uint32_t die_num;
 	uint32_t ue_num;
+};
+
+struct udma_cmd_query_cqe_aux_info {
+	uint32_t status : 8;
+	uint32_t is_client : 1;
+	uint32_t rsvd : 23;
+	uint32_t cqe_aux_info[MAX_CQE_AUX_INFO_TYPE_NUM];
+};
+
+struct udma_cmd_query_ae_aux_info {
+	uint32_t event_type : 8;
+	uint32_t sub_type : 8;
+	uint32_t rsvd : 16;
+	uint32_t ae_aux_info[MAX_AE_AUX_INFO_TYPE_NUM];
 };
 
 static inline void udma_fill_buf(struct ubase_cmd_buf *buf, u16 opcode,

@@ -27,6 +27,8 @@ extern bool dump_aux_info;
 
 #define UDMA_DEV_UE_NUM 47
 
+#define SEID_TABLE_SIZE 1024
+
 #define UDMA_MAX_SL_NUM 16
 #define UDMA_DEFAULT_SL_NUM 0
 

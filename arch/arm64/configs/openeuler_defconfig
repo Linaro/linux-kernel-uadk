@@ -8319,5 +8319,10 @@ CONFIG_KWORKER_NUMA_AFFINITY=y
 #
 # unified bus
 #
+CONFIG_UB=y
 CONFIG_UB_UBL=m
+# Basic UB bus code compiled into the kernel
+CONFIG_UB_UBUS=y
+# UB Bus Core Driver
+CONFIG_UB_UBUS_BUS=m
 # end of unified bus

@@ -948,4 +948,26 @@ struct cdx_device_id {
 	__u32 override_only;
 };
 
+#define UB_ANY_ID (~0)
+
+/**
+ * struct ub_device_id - UB device identifier
+ * @vendor:		Vendor ID
+ * @device:		Device ID
+ * @mod_vendor:		Module Vendor ID
+ * @module:		Module ID
+ * @class_code:		Device class base code and sub code to match. See
+ *			include/ub/ubus/ubus_ids.h for a full list of classes.
+ * @class_mask:		Limit which sub-fields of the class code field are
+ *			compared.
+ * @override_only:	Match only when dev->driver_override is this driver.
+ */
+struct ub_device_id {
+	__u32 vendor, device;		/* Vendor and device ID or UB_ANY_ID*/
+	__u32 mod_vendor, module;	/* Module ID's or UB_ANY_ID */
+	__u16 class_code, class_mask;	/* Base code and sub code */
+	unsigned long driver_data;	/* Data private to the driver */
+	__u32 override_only;
+};
+
 #endif /* LINUX_MOD_DEVICETABLE_H */

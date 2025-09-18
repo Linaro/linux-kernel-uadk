@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# UnifiedBus configuration
+#
+
+menuconfig UB
+       bool "UB (UnifiedBus) support"
+       depends on ARM64
+       default n
+       help
+         Support for UB.
+         If you have a hardware that support UB protocol,
+         Say y here. By Default this option is closed.
+
+if UB
+source "drivers/ub/ubus/Kconfig"
+endif # UB

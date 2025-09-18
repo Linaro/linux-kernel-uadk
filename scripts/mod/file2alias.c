@@ -1475,6 +1475,49 @@ static int do_cdx_entry(const char *filename, void *symval,
 	return 1;
 }
 
+/* Looks like: ub:vNdNmvNmNcN. */
+static int do_ub_entry(const char *filename, void *symval, char *alias)
+{
+	/* Class code field can be divided into these two. */
+	unsigned char basecode_mask, subcode_mask;
+
+	DEF_FIELD(symval, ub_device_id, vendor);
+	DEF_FIELD(symval, ub_device_id, device);
+	DEF_FIELD(symval, ub_device_id, mod_vendor);
+	DEF_FIELD(symval, ub_device_id, module);
+	DEF_FIELD(symval, ub_device_id, class_code);
+	DEF_FIELD(symval, ub_device_id, class_mask);
+	DEF_FIELD(symval, ub_device_id, override_only);
+
+	switch (override_only) {
+	case 0:
+		strcpy(alias, "ub:");
+		break;
+	default:
+		warn("Unknown UB driver_override alias %08X\n",
+		     override_only);
+		return 0;
+	}
+
+	ADD(alias, "v", vendor != UB_ANY_ID, (__u16)vendor);
+	ADD(alias, "d", device != UB_ANY_ID, (__u16)device);
+	ADD(alias, "mv", mod_vendor != UB_ANY_ID, (__u16)mod_vendor);
+	ADD(alias, "m", module != UB_ANY_ID, (__u16)module);
+
+	basecode_mask = class_mask;
+	subcode_mask = (class_mask) >> 8;
+
+	if ((basecode_mask != 0 && basecode_mask != 0xFF)
+	    || (subcode_mask != 0 && subcode_mask != 0xFF)) {
+		warn("Can't handle masks in %s:%04X\n",
+		     filename, class_mask);
+		return 0;
+	}
+
+	ADD(alias, "c", subcode_mask == 0xFF && basecode_mask == 0xFF, class_code);
+	return 1;
+}
+
 /* Does namelen bytes of name exactly match the symbol? */
 static bool sym_is(const char *name, unsigned namelen, const char *symbol)
 {
@@ -1555,6 +1598,7 @@ static const struct devtable devtable[] = {
 	{"dfl", SIZE_dfl_device_id, do_dfl_entry},
 	{"ishtp", SIZE_ishtp_device_id, do_ishtp_entry},
 	{"cdx", SIZE_cdx_device_id, do_cdx_entry},
+	{"ub", SIZE_ub_device_id, do_ub_entry},
 };
 
 /* Create MODULE_ALIAS() statements.

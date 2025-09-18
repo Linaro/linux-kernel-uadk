@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# UB bus driver configuration
+#
+
+menuconfig UB_UBUS
+	default n
+	bool "UBUS support"
+	depends on UB
+	help
+	  This option enables support for UB bus device management
+	  functionality, providing fundamental capabilities such as
+	  UB bus registration, device registration, and driver registration.
+	  It configures and enables devices, offering device capabilities
+	  to the upper layers.
+	  Say 'Y' here unless you know what you are doing.
+
+if UB_UBUS
+
+config UB_UBUS_BUS
+	default n
+	tristate "UB Bus Driver Modular Section"
+	depends on UB_UBUS
+	help
+	  This option enables the modular part of the UB bus driver,
+	  which works in conjunction with the built-in part to implement
+	  the UB bus device management functionality.
+	  Say 'M' here unless you know what you are doing.
+
+endif

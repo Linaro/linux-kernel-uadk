@@ -38,6 +38,7 @@ enum ub_entity_type {
 #define UB_COMPACT_EID_MASK GENMASK(19, 0)
 
 /* ub_entity priv_flags */
+#define UB_ENTITY_DETACHED 1 /* Flag indicate uent is detached */
 #define UB_ENTITY_ROUTE_UPDATED 2 /* Flag indicate uent's route is updated */
 static inline void ub_entity_assign_priv_flag(struct ub_entity *uent, int bit,
 					      bool flag)

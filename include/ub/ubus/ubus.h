@@ -145,6 +145,7 @@ struct ub_entity {
 	u32 token_value;
 
 	/* entity topology info */
+	struct list_head node;
 	struct ub_bus_controller *ubc;
 	struct ub_entity *pue; /* ue/mue connected to their mue */
 	int topo_rank; /* The levels of Breadth-First Search */

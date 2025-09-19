@@ -5,10 +5,13 @@
 
 #define pr_fmt(fmt)	"ubus enum: " fmt
 
+#include <linux/kfifo.h>
+
 #include "ubus.h"
 #include "msg.h"
 #include "port.h"
 #include "cna.h"
+#include "route.h"
 #include "enum.h"
 
 #define ENUM_MAX_HOPS 255
@@ -801,5 +804,189 @@ cfg_dev:
 
 na_failed:
 	ub_cna_free(uent);
+	return ret;
+}
+
+
+/*
+ * Routing Algorithm: The BFS (Breadth First Search) algorithm
+ * calculates the shortest forwarding path. The steps are as follows:
+ * 1.	Obtain the "nodes" and forwarding device information in the host
+ *	scenario, and construct an interconnected network in the single host
+ *	scenario.
+ * 2.	Starting from each node in the interconnected network, sequentially
+ *	visit the adjacent nodes that are directly connected with one hop,
+ *	without considering weight/cost.
+ * 3.	Visit the adjacent nodes of the adjacent nodes, traversing layer by
+ *	layer.
+ * 4.	Continue until reaching the destination or there are no unvisited nodes
+ *	left, constructing the forwarding path with the minimum number of hops.
+ * 5.	When the weights/costs of the links are not the same, the BFS algorithm
+ *	may calculate non-shortest paths.
+ * 6.	Based on the above mechanism, the BFS algorithm does not allow cycles.
+ */
+
+struct bfs_port_path {
+	struct ub_port *s_port; /* source port for set cna_map */
+	struct ub_entity *uent; /* BFS current ub entity */
+};
+
+static struct bfs_route_info {
+	DECLARE_KFIFO_PTR(kfifo, struct bfs_port_path);
+	int *visited; /* 0: unvisited, 1: visited, 2: visiting */
+	u32 cna_used;
+	u32 *cna_map;
+} bfs_route;
+
+enum { BFS_UNVISITED, BFS_VISITED, BFS_VISITING };
+
+/* Return: Whether to join the kfifo */
+static int bfs_route_test_and_put(struct ub_port *p, struct ub_entity *uent)
+{
+	struct bfs_port_path path;
+
+	if (!is_switch(uent) && !is_ibus_controller(uent))
+		return 0;
+
+	if (uent->port_nums == 1)
+		return 0;
+
+	path.s_port = p;
+	path.uent = uent;
+
+	if (!kfifo_put(&bfs_route.kfifo, path)) {
+		pr_info("multiple paths join the kfifo, kfifo put failed\n");
+		return 0;
+	}
+
+	return 1;
+}
+
+static int cna2index(int cna)
+{
+	int i;
+
+	for (i = 0; i < bfs_route.cna_used; ++i) {
+		if (bfs_route.cna_map[i] == cna)
+			return i;
+	}
+
+	return 0;
+}
+
+static void ub_enum_bfs_layer_update(struct ub_entity *uent, int *curr, int *next,
+				     int *layer)
+{
+	int i;
+
+	*curr = *next;
+	*next = 0;
+	*layer += 1;
+
+	for (i = 0; i < bfs_route.cna_used; ++i)
+		if (bfs_route.visited[i] == BFS_VISITING)
+			bfs_route.visited[i] = BFS_VISITED;
+}
+
+static void ub_enum_bfs_route_dev(struct ub_entity *ldev)
+{
+	struct ub_entity *uent, *rdev;
+	struct ub_port *p, *rport, *s_port;
+	struct bfs_port_path path = { NULL, ldev };
+	int curr_layer_devs = 1, next_layer_devs = 0, layer = 0;
+
+	bfs_route.visited[cna2index(ldev->cna)] = BFS_VISITED;
+	kfifo_put(&bfs_route.kfifo, path);
+	while (kfifo_get(&bfs_route.kfifo, &path)) {
+		curr_layer_devs--;
+		uent = path.uent;
+		for_each_uent_port(p, uent) {
+			if (!p->cna || !p->r_uent ||
+			    bfs_route.visited[cna2index(p->r_uent->cna)] ==
+				    BFS_VISITED ||
+			    !ub_entity_test_priv_flag(p->r_uent, UB_ENTITY_DETACHED))
+				continue;
+
+			rdev = p->r_uent;
+			rport = rdev->ports + p->r_index;
+			s_port = path.s_port ? path.s_port : p;
+
+			bfs_route.visited[cna2index(rdev->cna)] = BFS_VISITING;
+			ub_route_add_entry(s_port, rdev->cna, layer + 1);
+			if (!ONE_CNA(rdev))
+				ub_route_add_entry(s_port, rport->cna, layer + 1);
+			ub_entity_assign_priv_flag(ldev, UB_ENTITY_ROUTE_UPDATED, true);
+			next_layer_devs += bfs_route_test_and_put(s_port, rdev);
+		}
+
+		if (curr_layer_devs == 0)
+			ub_enum_bfs_layer_update(uent, &curr_layer_devs,
+						 &next_layer_devs, &layer);
+	}
+}
+
+static void ub_enum_bfs_route_core(struct list_head *dev_list)
+{
+	struct ub_entity *uent;
+
+	list_for_each_entry(uent, dev_list, node) {
+		if (uent->port_nums == 1)
+			continue;
+
+		memset(bfs_route.visited, 0, sizeof(int) * bfs_route.cna_used);
+
+		ub_enum_bfs_route_dev(uent);
+	}
+}
+
+static void ub_bfs_set_cna_map(struct list_head *dev_list)
+{
+	struct ub_port *port;
+	struct ub_entity *uent;
+	int i = 0;
+
+	list_for_each_entry(uent, dev_list, node) {
+		bfs_route.cna_map[i++] = uent->cna;
+		if (ONE_CNA(uent))
+			continue;
+		for_each_uent_port(port, uent)
+			bfs_route.cna_map[i++] = port->cna;
+	}
+}
+
+int ub_enum_bfs_route_cal(struct list_head *dev_list)
+{
+	u16 max_port_num = 0;
+	struct ub_entity *uent;
+	int ret = -ENOMEM;
+
+	if (kfifo_alloc(&bfs_route.kfifo, SZ_4K, GFP_KERNEL))
+		goto kfifo_fail;
+
+	bfs_route.cna_used = 0;
+	list_for_each_entry(uent, dev_list, node) {
+		if (max_port_num < uent->port_nums)
+			max_port_num = uent->port_nums;
+		bfs_route.cna_used += ONE_CNA(uent) ? 1 : uent->port_nums + 1;
+	}
+
+	bfs_route.cna_map = kcalloc(bfs_route.cna_used, sizeof(u32), GFP_KERNEL);
+	if (!bfs_route.cna_map)
+		goto map_fail;
+	ub_bfs_set_cna_map(dev_list);
+
+	bfs_route.visited = kcalloc(bfs_route.cna_used, sizeof(int), GFP_KERNEL);
+	if (!bfs_route.visited)
+		goto visited_fail;
+
+	ub_enum_bfs_route_core(dev_list);
+	ret = 0;
+
+	kfree(bfs_route.visited);
+visited_fail:
+	kfree(bfs_route.cna_map);
+map_fail:
+	kfifo_free(&bfs_route.kfifo);
+kfifo_fail:
 	return ret;
 }

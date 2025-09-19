@@ -192,6 +192,7 @@ enum message_tx_type {
  * @remove_dev: remove ub_entity to uninit message
  * @sync_request: send message to target ub_entity and wait response
  * @send: send message to target ub_entity but not wait response
+ * @sync_enum: send enum message to target ub_entity and wait response
  * @owner: Driver module providing these ops
  */
 struct message_ops {
@@ -201,6 +202,8 @@ struct message_ops {
 			    u8 code);
 	int (*send)(struct message_device *mdev, struct msg_info *info,
 		    u8 code);
+	int (*sync_enum)(struct message_device *mdev, struct msg_info *info,
+			 u8 cmd);
 	struct module *owner;
 };
 
@@ -253,5 +256,7 @@ int message_sync_request(struct message_device *mdev, struct msg_info *info,
 			 u8 code);
 int message_send(struct message_device *mdev, struct msg_info *info,
 		 u8 code);
+int message_sync_enum(struct message_device *mdev, struct msg_info *info,
+		      u8 cmd);
 
 #endif /* __MSG_H__ */

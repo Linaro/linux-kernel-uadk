@@ -130,6 +130,7 @@ struct ub_entity {
 	unsigned long priv_flags; /* Private flags for the UB driver */
 
 	/* entity base info */
+	bool pool;
 	int ent_type;
 	struct ub_guid guid;
 	u16 class_code;

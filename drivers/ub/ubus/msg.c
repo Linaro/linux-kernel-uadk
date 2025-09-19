@@ -134,3 +134,12 @@ int message_send(struct message_device *mdev, struct msg_info *info,
 
 	return -ENOTTY;
 }
+
+int message_sync_enum(struct message_device *mdev, struct msg_info *info,
+		      u8 cmd)
+{
+	if (mdev->ops->sync_enum)
+		return mdev->ops->sync_enum(mdev, info, cmd);
+
+	return -ENOTTY;
+}

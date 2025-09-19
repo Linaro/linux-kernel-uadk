@@ -76,6 +76,7 @@ struct ub_port {
 	u16 index;
 	enum ub_port_type type;
 	u8 domain_boundary;
+	bool shareable;
 	u32 cna;
 	struct ub_entity *r_uent; /* If valid, also represent link up */
 	u16 r_index;
@@ -94,6 +95,7 @@ struct ub_entity {
 	const char *driver_override; /* Driver name to force a match */
 
 	/* entity base info */
+	int ent_type;
 	struct ub_guid guid;
 	u16 class_code;
 	u16 mod_vendor; /* entity's module vendor and module id */
@@ -105,6 +107,7 @@ struct ub_entity {
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;
+	struct ub_entity *pue; /* ue/mue connected to their mue */
 
 	/* entity port info */
 	u16 port_nums;
@@ -229,12 +232,55 @@ static inline const char *ub_name(const struct ub_entity *pue)
 	return dev_name(&pue->dev);
 }
 
+/* interfaces for shareable port */
+enum ub_port_event {
+	UB_PORT_EVENT_LINK_DOWN,
+	UB_PORT_EVENT_LINK_UP,
+	UB_PORT_EVENT_RESET_PREPARE,
+	UB_PORT_EVENT_RESET_DONE
+};
+
+struct ub_share_port_ops {
+	void (*reset_prepare)(struct ub_entity *uent, u16 port_id);
+	void (*reset_done)(struct ub_entity *uent, u16 port_id);
+	void (*event_notify)(struct ub_entity *uent, u16 port_id, int event);
+};
+
 #ifdef CONFIG_UB_UBUS
 extern struct bus_type ub_bus_type;
 #define dev_is_ub(d) ((d)->bus == &ub_bus_type)
 
 void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
 const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
+
+/**
+ * ub_register_share_port() - Register a share port.
+ * @uent: UB entity.
+ * @port_id: UB Bus Controller port id.
+ * @ops: UB share port ops.
+ *
+ * The IDEV reuses the physical port of the ub bus controller. Record the
+ * callback function.
+ *
+ * Context: Any context
+ * Return: 0 if success, or %-ENOMEM if system out of memory,
+ * or %-EINVAL if parameters invalid.
+ */
+int ub_register_share_port(struct ub_entity *uent, u16 port_id,
+			   struct ub_share_port_ops *ops);
+
+/**
+ * ub_unregister_share_port() - Unregister a share port.
+ * @uent: UB entity.
+ * @port_id: UB Bus Controller port id.
+ * @ops: UB share port ops.
+ *
+ * Clear the callback function.
+ *
+ * Context: Any context
+ */
+void ub_unregister_share_port(struct ub_entity *uent, u16 port_id,
+			      struct ub_share_port_ops *ops);
 
 /**
  * ub_cfg_read_byte() - 1 byte configuration access read.
@@ -346,6 +392,11 @@ ub_put_bus_controller(struct ub_entity *uents[], unsigned int num) {}
 static inline void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops) {}
 static inline const struct iommu_ops *ub_bus_type_iommu_ops_get(void)
 { return NULL; }
+static inline int ub_register_share_port(struct ub_entity *uent, u16 port_id,
+					 struct ub_share_port_ops *ops)
+{ return -ENODEV; }
+static inline void ub_unregister_share_port(struct ub_entity *uent, u16 port_id,
+					    struct ub_share_port_ops *ops) {}
 static inline int
 __ub_register_driver(struct ub_driver *drv, struct module *owner,
 		     const char *mod_name)

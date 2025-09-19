@@ -8,6 +8,12 @@
 #define for_each_uent_port(p, d) \
 	for ((p) = (d)->ports; ((p) - (d)->ports) < (d)->port_nums; (p)++)
 
+enum ub_share_port_notify_type {
+	RESET_PREPARE,
+	RESET_DONE,
+	NOTIFY_TYPE_MAX
+};
+
 struct ub_port;
 struct ub_entity;
 void ub_port_disconnect(struct ub_port *port);

@@ -99,6 +99,7 @@ struct ub_entity {
 	u16 module;
 	unsigned int cna;
 	unsigned int eid;
+	unsigned short entity_idx;
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;
@@ -234,6 +235,37 @@ void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
 const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
 
 /**
+ * ub_cfg_read_byte() - 1 byte configuration access read.
+ * @uent: UB entity.
+ * @pos: Config space address.
+ * @val: Output buffer.
+ *
+ * Initiate configuration access to the specified address of the entity
+ * configuration space and read 1 byte.
+ *
+ * Context: Any context, It will take spin_lock_irqsave()/spin_unlock_restore()
+ * Return: 0 if success, or negative value if failed.
+ */
+int ub_cfg_read_byte(struct ub_entity *uent, u64 pos, u8 *val);
+int ub_cfg_read_word(struct ub_entity *uent, u64 pos, u16 *val);
+int ub_cfg_read_dword(struct ub_entity *uent, u64 pos, u32 *val);
+/**
+ * ub_cfg_write_byte() - 1 byte configuration access write.
+ * @uent: UB entity.
+ * @pos: Config space address.
+ * @val: Data.
+ *
+ * Initiate configuration access to the specified address of the entity
+ * configuration space and write 1 byte.
+ *
+ * Context: Any context, It will take spin_lock_irqsave()/spin_unlock_restore()
+ * Return: 0 if success, or negative value if failed.
+ */
+int ub_cfg_write_byte(struct ub_entity *uent, u64 pos, u8 val);
+int ub_cfg_write_word(struct ub_entity *uent, u64 pos, u16 val);
+int ub_cfg_write_dword(struct ub_entity *uent, u64 pos, u32 val);
+
+/**
  * ub_entity_get() - Atomically increment the reference count for the entity.
  * @uent: UB entity pointer.
  *
@@ -291,6 +323,18 @@ void ub_unregister_driver(struct ub_driver *drv);
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}
+static inline int ub_cfg_read_byte(struct ub_entity *uent, u64 pos, u8 *val)
+{ return -ENODEV; }
+static inline int ub_cfg_read_word(struct ub_entity *uent, u64 pos, u16 *val)
+{ return -ENODEV; }
+static inline int ub_cfg_read_dword(struct ub_entity *uent, u64 pos, u32 *val)
+{ return -ENODEV; }
+static inline int ub_cfg_write_byte(struct ub_entity *uent, u64 pos, u8 val)
+{ return -ENODEV; }
+static inline int ub_cfg_write_word(struct ub_entity *uent, u64 pos, u16 val)
+{ return -ENODEV; }
+static inline int ub_cfg_write_dword(struct ub_entity *uent, u64 pos, u32 val)
+{ return -ENODEV; }
 static inline int ub_get_bus_controller(struct ub_entity *uents[],
 				    unsigned int max_num,
 				    unsigned int *real_num)

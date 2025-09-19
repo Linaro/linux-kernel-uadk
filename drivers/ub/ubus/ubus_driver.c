@@ -509,13 +509,24 @@ void ub_bus_type_uninit(void)
 
 int ub_host_probe(void)
 {
+	int ret;
+
 	ub_bus_type_init();
+	ret = ub_cfg_ops_init();
+	if (ret)
+		goto ub_cfg_ops_init_fail;
+
 	return 0;
+
+ub_cfg_ops_init_fail:
+	ub_bus_type_uninit();
+	return ret;
 }
 EXPORT_SYMBOL_GPL(ub_host_probe);
 
 void ub_host_remove(void)
 {
+	unregister_ub_cfg_ops();
 	ub_bus_type_uninit();
 }
 EXPORT_SYMBOL_GPL(ub_host_remove);

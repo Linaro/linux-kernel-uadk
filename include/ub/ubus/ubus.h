@@ -8,6 +8,7 @@
 
 #include <linux/device.h>
 #include <linux/init.h>
+#include <linux/iommu.h>
 #include <linux/ioport.h>
 #include <linux/types.h>
 #include <uapi/ub/ubus/ubus_regs.h>
@@ -121,6 +122,13 @@ struct ub_dynids {
  *		created once it is bound to the driver.
  * @driver:	Driver model structure.
  * @dynids:	List of dynamically added device IDs.
+ * @driver_managed_dma: Device driver doesn't use kernel DMA API for DMA.
+ *		For most device drivers, no need to care about this flag
+ *		as long as all DMAs are handled through the kernel DMA API.
+ *		For some special ones, for example VFIO drivers, they know
+ *		how to manage the DMA themselves and set this flag so that
+ *		the IOMMU layer will allow them to setup and manage their
+ *		own I/O address space.
  */
 struct ub_driver {
 	struct list_head node;
@@ -135,6 +143,7 @@ struct ub_driver {
 	const struct attribute_group **dev_groups;
 	struct device_driver driver;
 	struct ub_dynids dynids;
+	bool driver_managed_dma;
 };
 
 struct ubc_common_attr {
@@ -191,6 +200,9 @@ static inline const char *ub_name(const struct ub_entity *pue)
 #ifdef CONFIG_UB_UBUS
 extern struct bus_type ub_bus_type;
 #define dev_is_ub(d) ((d)->bus == &ub_bus_type)
+
+void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
+const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
 
 /**
  * ub_entity_get() - Atomically increment the reference count for the entity.
@@ -256,6 +268,9 @@ static inline int ub_get_bus_controller(struct ub_entity *uents[],
 { return -ENODEV; }
 static inline void
 ub_put_bus_controller(struct ub_entity *uents[], unsigned int num) {}
+static inline void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops) {}
+static inline const struct iommu_ops *ub_bus_type_iommu_ops_get(void)
+{ return NULL; }
 static inline int
 __ub_register_driver(struct ub_driver *drv, struct module *owner,
 		     const char *mod_name)

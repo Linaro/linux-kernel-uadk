@@ -8,6 +8,7 @@
 #include "ubus.h"
 #include "msg.h"
 #include "port.h"
+#include "cna.h"
 #include "enum.h"
 
 #define ENUM_MAX_HOPS 255
@@ -529,5 +530,276 @@ static int ub_enum_ent(struct ub_entity *uent, void *buf)
 err:
 	if (uent->ports)
 		ub_ports_unset(uent);
+	return ret;
+}
+
+static int ub_enum_na_query_rsp(void *buf, u32 *cna, u16 actual_rsp_size)
+{
+	struct enum_na_query_rsp *rsp;
+	size_t header_sz;
+
+	header_sz = ub_enum_calc_header_sz(buf, false);
+	if (header_sz == 0) {
+		pr_err("na query rsp header sz 0\n");
+		return -EINVAL;
+	}
+
+	if (header_sz + ENUM_NA_QUERY_RSP_SIZE != actual_rsp_size) {
+		pr_err("na query rsp pld sz invalid\n");
+		return -EINVAL;
+	}
+
+	rsp = (struct enum_na_query_rsp *)(buf + header_sz);
+
+	if (!rsp->common.bits.status)
+		*cna = rsp->cna;
+
+	return rsp->common.bits.status;
+}
+
+static size_t ub_enum_na_query_init(struct ub_entity *uent, void *buf, u8 opcode,
+				    u16 port_idx)
+{
+	struct enum_na_query_req *req;
+	size_t header_sz;
+
+	memset(buf, 0, UB_TOPO_BUF_SZ);
+	ub_enum_pkt_header_init(buf);
+	ub_enum_pld_header_init(uent, buf);
+
+	header_sz = ub_enum_calc_header_sz(buf, true);
+	req = (struct enum_na_query_req *)(buf + header_sz);
+
+	ub_enum_pld_common_setup(&req->common, ENUM_CMD_NA_QUERY,
+				 opcode, &uent->guid.id,
+				 ENUM_NA_QUERY_REQ_SIZE);
+
+	if (opcode == ENUM_NA_QUERY_PORT)
+		req->port_idx = port_idx;
+
+	return header_sz + ENUM_NA_QUERY_REQ_SIZE;
+}
+
+int ub_query_port_na(struct ub_entity *uent, void *buf)
+{
+	struct device *dev = &uent->ubc->dev;
+	struct msg_info info = {0};
+	size_t req_pkt_sz;
+	struct ub_port *p;
+	int ret;
+	u32 cna;
+
+	for_each_uent_port(p, uent) {
+		if (!p->domain_boundary)
+			continue;
+
+		req_pkt_sz = ub_enum_na_query_init(uent, buf,
+						   ENUM_NA_QUERY_PORT,
+						   p->index);
+
+		message_info_init(&info, uent, buf, buf,
+				  (req_pkt_sz << MSG_REQ_SIZE_OFFSET) |
+				  UB_TOPO_BUF_SZ);
+
+		ret = message_sync_enum(uent->ubc->mdev, &info,
+					ENUM_CMD_NA_QUERY);
+		if (ret)
+			goto out;
+
+		ret = ub_enum_na_query_rsp(buf, &cna, info.actual_rsp_size);
+		if (ret) {
+			dev_err(dev, "port na query rsp, status=%d\n", ret);
+			ret = -EBUSY;
+			goto out;
+		}
+
+		p->cna = cna;
+		if (p->cna)
+			dev_info(dev, "update boundary port%u cna to %#x\n",
+				 p->index, p->cna);
+	}
+
+	return 0;
+out:
+	for_each_uent_port(p, uent)
+		if (p->domain_boundary)
+			p->cna = 0;
+
+	dev_err(dev, "query fail and reset boundary port cna to 0.\n");
+
+	return ret;
+}
+
+int ub_query_ent_na(struct ub_entity *uent, void *buf)
+{
+	struct device *dev = &uent->ubc->dev;
+	struct msg_info info = {};
+	size_t req_pkt_sz;
+	int ret;
+	u32 cna;
+
+	req_pkt_sz = ub_enum_na_query_init(uent, buf, ENUM_NA_QUERY_DEVICE, 0);
+	message_info_init(&info, uent, buf, buf,
+			  (req_pkt_sz << MSG_REQ_SIZE_OFFSET) |
+			  UB_TOPO_BUF_SZ);
+
+	ret = message_sync_enum(uent->ubc->mdev, &info,
+				ENUM_CMD_NA_QUERY);
+	if (ret)
+		return ret;
+
+	ret = ub_enum_na_query_rsp(buf, &cna, info.actual_rsp_size);
+	if (ret) {
+		dev_err(dev, "dev na query rsp, status=%d\n", ret);
+		return -EBUSY;
+	}
+
+	uent->cna = cna;
+	if (uent->cna)
+		dev_info(dev, "update cluster ubc cna to %#x\n", uent->cna);
+
+	return 0;
+}
+
+static int ub_enum_cluster_query(struct ub_entity *uent, void *buf)
+{
+	int ret;
+
+	ret = ub_query_ent_na(uent, buf);
+	if (ret) {
+		dev_err(&uent->ubc->dev, "query cluster ubc dev cna err\n");
+		return ret;
+	}
+
+	ret = ub_query_port_na(uent, buf);
+	if (ret)
+		dev_err(&uent->ubc->dev, "query cluster ubc port cna err\n");
+
+	return ret;
+}
+
+static int ub_enum_na_cfg_rsp(void *buf, u16 actual_rsp_size)
+{
+	struct enum_na_cfg_rsp *rsp;
+	size_t header_sz;
+
+	header_sz = ub_enum_calc_header_sz(buf, false);
+	if (header_sz == 0) {
+		pr_err("na cfg rsp header sz 0\n");
+		return -EINVAL;
+	}
+
+	if (header_sz + ENUM_NA_CFG_RSP_SIZE != actual_rsp_size) {
+		pr_err("na cfg rsp pld sz invalid\n");
+		return -EINVAL;
+	}
+
+	rsp = (struct enum_na_cfg_rsp *)(buf + header_sz);
+
+	return rsp->common.bits.status;
+}
+
+static size_t ub_enum_na_cfg_init(struct ub_entity *uent, void *buf, u32 cna,
+				  u8 opcode, u16 port_idx)
+{
+	struct enum_na_cfg_req *req;
+	size_t header_sz;
+
+	ub_enum_refresh_and_init_buffer_header(uent, buf);
+
+	header_sz = ub_enum_calc_header_sz(buf, true);
+	req = (struct enum_na_cfg_req *)(buf + header_sz);
+
+	ub_enum_pld_common_setup(&req->common, ENUM_CMD_NA_CFG, opcode,
+				 &uent->guid.id, ENUM_NA_CFG_REQ_SIZE);
+
+	req->cna = cna;
+	if (opcode == ENUM_NA_CFG_PORT)
+		req->port_idx = port_idx;
+
+	return header_sz + ENUM_NA_CFG_REQ_SIZE;
+}
+
+/* Configuring the CNA of the ub entity Port */
+static int ub_enum_port_na_cfg(struct ub_entity *uent, void *buf)
+{
+	struct message_device *mdev = uent->message->mdev;
+	struct msg_info info = {};
+	size_t req_pkt_sz;
+	struct ub_port *p;
+	int ret;
+
+	for_each_uent_port(p, uent) {
+		if (is_ibus_controller(uent) && p->domain_boundary)
+			continue;
+
+		req_pkt_sz = ub_enum_na_cfg_init(uent, buf, p->cna,
+						 ENUM_NA_CFG_PORT, p->index);
+
+		message_info_init(&info, uent, buf, buf,
+				  (req_pkt_sz << MSG_REQ_SIZE_OFFSET) |
+				  UB_TOPO_BUF_SZ);
+
+		ret = message_sync_enum(mdev, &info, ENUM_CMD_NA_CFG);
+		if (ret)
+			return ret;
+
+		ret = ub_enum_na_cfg_rsp(buf, info.actual_rsp_size);
+		if (ret) {
+			dev_err(&uent->ubc->dev, "port na cfg rsp, status=%d\n",
+				ret);
+			return -EBUSY;
+		}
+	}
+
+	return 0;
+}
+
+static int ub_enum_na_cfg(struct ub_entity *uent, void *buf)
+{
+	struct message_device *mdev = uent->message->mdev;
+	struct device *dev = &uent->ubc->dev;
+	enum enum_na_cfg_opcode opcode;
+	struct msg_info info = {};
+	size_t req_pkt_sz;
+	int ret;
+
+	ret = ub_cna_alloc(uent);
+	if (ret) {
+		dev_err(dev, "cna alloc fail, ret=%d\n", ret);
+		goto na_failed;
+	}
+
+	if (is_switch(uent)) /* Switch hasn't port cna register */
+		goto cfg_dev;
+
+	ret = ub_enum_port_na_cfg(uent, buf);
+	if (ret) {
+		dev_err(dev, "port na cfg fail, ret=%d\n", ret);
+		goto na_failed;
+	}
+
+	if (is_ibus_controller(uent) && uent->ubc->cluster) {
+		ret = ub_enum_cluster_query(uent, buf);
+		if (ret)
+			goto na_failed;
+		return 0;
+	}
+
+cfg_dev:
+	opcode = ENUM_NA_CFG_PRIMARY;
+	req_pkt_sz = ub_enum_na_cfg_init(uent, buf, uent->cna, opcode, 0);
+
+	message_info_init(&info, uent, buf, buf,
+			  (req_pkt_sz << MSG_REQ_SIZE_OFFSET) | UB_TOPO_BUF_SZ);
+
+	ret = message_sync_enum(mdev, &info, ENUM_CMD_NA_CFG);
+	if (ret)
+		goto na_failed;
+
+	return 0;
+
+na_failed:
+	ub_cna_free(uent);
 	return ret;
 }

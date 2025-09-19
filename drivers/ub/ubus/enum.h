@@ -182,6 +182,8 @@ struct enum_tlv_cap_info {
 #define ENUM_TLV_CAP_INFO_SZ 8
 
 size_t calc_enum_pld_header_size(struct enum_pld_scan_header *header, bool req);
+int ub_query_port_na(struct ub_entity *uent, void *buf);
+int ub_query_ent_na(struct ub_entity *uent, void *buf);
 bool ub_type_valid(struct ub_entity *uent, bool is_ctl);
 void ub_entity_type_init(struct ub_entity *uent);
 

@@ -9,6 +9,8 @@
 
 #include <ub/ubase/ubase_comm_hw.h>
 
+#include "ubase_cmd.h"
+
 #define UBASE_CTX_REMOVE_ALL		(-2)
 
 #define UBASE_DEF_CEQ_VECTOR_NUM	1
@@ -171,10 +173,20 @@ struct ubase_query_ctp_vl_offset_cmd {
 
 int ubase_hw_init(struct ubase_dev *udev);
 void ubase_hw_uninit(struct ubase_dev *udev);
+int ubase_query_sl_vl_map(struct ubase_dev *udev, u8 *sl_vl);
 int ubase_qos_init(struct ubase_dev *udev);
+int ubase_query_ets_tc(struct ubase_dev *udev, u32 port_bitmap,
+		       u16 vl_bitmap, struct ubase_cfg_ets_vl_sch_cmd *resp);
+int ubase_query_ets_tcg(struct ubase_dev *udev,
+			struct ubase_query_ets_tcg_cmd *resp);
+int ubase_query_ets_port(struct ubase_dev *udev,
+			 struct ubase_query_ets_port_cmd *resp);
 int ubase_query_dev_res(struct ubase_dev *udev);
 int ubase_query_chip_info(struct ubase_dev *udev);
 int ubase_query_controller_info(struct ubase_dev *udev);
 int ubase_query_hw_oor_caps(struct ubase_dev *udev);
+int ubase_query_fst_fvt_rqmt(struct ubase_dev *udev,
+			     struct ubase_query_fst_fvt_rqmt_cmd *resp,
+			     u16 bus_ue_id);
 
 #endif

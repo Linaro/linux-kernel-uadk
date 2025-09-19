@@ -223,6 +223,7 @@ struct ubase_caps *ubase_get_dev_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_udma_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_cdma_caps(struct auxiliary_device *adev);
+struct ubase_adev_qos *ubase_get_adev_qos(struct auxiliary_device *adev);
 
 void ubase_virt_register(struct auxiliary_device *adev,
 			 void (*virt_handler)(struct auxiliary_device *adev,

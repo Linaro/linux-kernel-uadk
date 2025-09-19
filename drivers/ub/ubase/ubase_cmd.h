@@ -70,6 +70,67 @@ struct ubase_ue2ue_ctrlq_head {
 	u8 rsv : 6;
 };
 
+struct ubase_cfg_ets_vl_sch_cmd {
+	__le16 vl_bitmap;
+	u8 rsvd[2];
+	u8 vl_bw[UBASE_MAX_VL_NUM];
+	__le32 port_bitmap;
+};
+
+struct ubase_cfg_tm_vl_sch_cmd {
+	__le16 bus_ue_id;
+	__le16 vl_bitmap;
+	__le16 vl_tsa;
+	u8 rsvd[2];
+	u8 vl_bw[UBASE_MAX_VL_NUM];
+};
+
+struct ubase_ets_shaping_info {
+	u8 ir_b;
+	u8 ir_u;
+	u8 ir_s;
+	u8 bs_b;
+	u8 bs_s;
+	u8 rsvd[3];
+	__le32 rate;
+};
+
+struct ubase_query_ets_tcg_cmd {
+	u8 tcg_weight[UBASE_MAX_TCG_NUM];
+	__le16 tcg_tc_map[UBASE_MAX_TCG_NUM];
+	struct ubase_ets_shaping_info tcg_info[UBASE_MAX_TCG_NUM];
+};
+
+struct ubase_query_ets_port_cmd {
+	struct ubase_ets_shaping_info port_info;
+};
+
+struct ubase_fst_revert_tbl {
+	__le16 fst_idx;
+	u8 queue_ue_num;
+	u8 queue_que_num;
+	__le16 queue_vl_num;
+	u8 resv[2];
+};
+
+struct ubase_rqmt_tbl {
+	__le16 fst_idx;
+	__le16 start_queue_idx;
+	__le16 queue_quantity_shift;
+	u8 resv[2];
+};
+
+struct ubase_query_fst_fvt_rqmt_cmd {
+	__le16 bus_ue_id;
+	u8 rsv[2];
+	__le16 sl_queue_vl_num;
+	__le16 sl_queue_start_qid;
+	__le16 fvt_vl_size;
+	__le16 fvt_rqmt_offset;
+	struct ubase_fst_revert_tbl fstr_info[UBASE_MAX_VL_NUM];
+	struct ubase_rqmt_tbl rqmt_info[UBASE_MAX_VL_NUM];
+};
+
 struct ubase_query_ueid_cmd {
 	__le32 ueid[UBASE_BUS_EID_LEN];
 	u32 rsv[2];

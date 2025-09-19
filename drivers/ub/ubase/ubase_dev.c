@@ -831,6 +831,18 @@ bool ubase_dbg_default(void)
 	return ubase_debug;
 }
 
+struct ubase_adev_qos *ubase_get_adev_qos(struct auxiliary_device *adev)
+{
+	struct ubase_dev *udev;
+
+	if (!adev)
+		return NULL;
+
+	udev = __ubase_get_udev_by_adev(adev);
+	return &udev->qos;
+}
+EXPORT_SYMBOL(ubase_get_adev_qos);
+
 static int ubase_query_bus_eid(struct ubase_dev *udev, struct ubase_bus_eid *eid)
 {
 	struct ubase_query_ueid_cmd resp = {0};

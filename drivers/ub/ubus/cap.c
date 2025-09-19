@@ -6,6 +6,7 @@
 #define pr_fmt(fmt)	"ubus cap: " fmt
 
 #include "ubus.h"
+#include "decoder.h"
 #include "interrupt.h"
 
 #define DW_CHECK 3
@@ -232,6 +233,7 @@ void ub_init_capabilities(struct ub_entity *uent)
 
 init_cfg1_cap:
 	/* cfg1 caps */
+	ub_decoder_init(uent);
 	ub_intr_init(uent);
 
 	uent->reset_fn = 1;
@@ -240,6 +242,7 @@ init_cfg1_cap:
 void ub_uninit_capabilities(struct ub_entity *uent)
 {
 	/* cfg1 cap */
+	ub_decoder_uninit(uent);
 
 	uent->reset_fn = 0;
 }

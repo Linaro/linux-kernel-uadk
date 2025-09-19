@@ -33,6 +33,8 @@ enum ub_entity_type {
 #define is_p_idevice(uent) ((uent)->ent_type == UB_ENT_P_IDEVICE)
 #define is_idev(uent) (is_idevice(uent) || is_p_idevice(uent))
 
+#define UB_COMPACT_EID_MASK GENMASK(19, 0)
+
 int ub_host_probe(void);
 void ub_host_remove(void);
 

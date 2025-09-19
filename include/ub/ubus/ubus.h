@@ -28,7 +28,31 @@
 	.mod_vendor = (u32)UB_ANY_ID, .module = (u32)UB_ANY_ID, \
 	.class_code = (dev_class), .class_mask = (dev_class_mask)
 
+#define ub_resource_start(dev, resno)	((dev)->zone[(resno)].res.start)
+#define ub_resource_end(dev, resno)	((dev)->zone[(resno)].res.end)
+#define ub_resource_flags(dev, resno)	((dev)->zone[(resno)].res.flags)
+#define ub_resource_len(dev, resno) \
+	((ub_resource_start((dev), (resno)) == 0 &&	\
+	  ub_resource_end((dev), (resno)) ==		\
+	  ub_resource_start((dev), (resno))) ? 0 :	\
+	(ub_resource_end((dev), (resno)) -		\
+	ub_resource_start((dev), (resno)) + 1))
+
 #define UB_GUID_DW_NUM SZ_4
+
+struct ub_bus_region {
+	unsigned long start;
+	unsigned long size;
+};
+
+struct mmio_zone {
+	struct resource res;
+	struct ub_bus_region region;
+	u8 ubba_used;
+	u8 sa_used;
+	u8 init_succ;
+	u8 decoder_mapped;
+};
 
 struct ub_guid {
 	union {
@@ -70,6 +94,8 @@ static inline int ub_show_guid(struct ub_guid *guid, char *buf)
 		       guid->bits.version, guid->bits.type,
 		       guid->bits.reserved, guid->bits.seq_num);
 }
+
+#define MAX_UB_RES_NUM 3
 
 enum ub_port_type {
 	PHYSICAL,
@@ -113,6 +139,7 @@ struct ub_entity {
 	unsigned int eid;
 	unsigned short entity_idx;
 	u32 uent_num; /* ub dev number */
+	struct mmio_zone zone[MAX_UB_RES_NUM];
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;
@@ -268,6 +295,45 @@ void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
 const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
 
 /**
+ * ub_iomap() - Map the resource space of the entity.
+ * @uent: UB entity.
+ * @resno: Resource Number.
+ * @maxlen: Map size.
+ *
+ * Invoke ioremap() to map the entity resource space, if maxlen is 0, then map
+ * size is ub_resource_len(), else map size is min(maxlen, ub_resource_len()).
+ *
+ * Context: Any context.
+ * Return: The return value is the same as that of ioremap().
+ */
+void __iomem *ub_iomap(struct ub_entity *uent, int resno, unsigned long maxlen);
+
+/**
+ * ub_iomap_wc() - Map the resource space of the entity.
+ * @uent: UB entity.
+ * @resno: Resource Number.
+ * @maxlen: Map size.
+ *
+ * Invoke ioremap_wc() to map the entity resource space, if maxlen is 0,
+ * then map size is ub_resource_len(), else map size is
+ * min(maxlen, ub_resource_len()).
+ *
+ * Context: Any context.
+ * Return: The return value is the same as that of ioremap_wc().
+ */
+void __iomem *ub_iomap_wc(struct ub_entity *uent, int resno, unsigned long maxlen);
+
+/**
+ * ub_iounmap() - Unmap the resource space of the entity.
+ * @addr: Target resource address.
+ *
+ * Invoke iounmap() to unmap the entity resource space.
+ *
+ * Context: Any context.
+ */
+void ub_iounmap(void __iomem *addr);
+
+/**
  * ub_register_share_port() - Register a share port.
  * @uent: UB entity.
  * @port_id: UB Bus Controller port id.
@@ -416,6 +482,13 @@ void ub_unregister_driver(struct ub_driver *drv);
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}
+static inline void __iomem *
+ub_iomap(struct ub_entity *uent, int resno, unsigned long maxlen)
+{ return NULL; }
+static inline void __iomem *
+ub_iomap_wc(struct ub_entity *uent, int resno, unsigned long maxlen)
+{ return NULL; }
+static inline void ub_iounmap(void __iomem *addr) {}
 static inline bool ub_cc_supported(struct ub_entity *uent)
 { return false; }
 static inline int ub_cc_enable(struct ub_entity *uent)

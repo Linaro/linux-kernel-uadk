@@ -185,6 +185,8 @@ int ubase_query_dev_res(struct ubase_dev *udev);
 int ubase_query_chip_info(struct ubase_dev *udev);
 int ubase_query_controller_info(struct ubase_dev *udev);
 int ubase_query_hw_oor_caps(struct ubase_dev *udev);
+int ubase_ue_init(struct ubase_dev *udev);
+void ubase_ue_uninit(struct ubase_dev *udev);
 int ubase_query_fst_fvt_rqmt(struct ubase_dev *udev,
 			     struct ubase_query_fst_fvt_rqmt_cmd *resp,
 			     u16 bus_ue_id);

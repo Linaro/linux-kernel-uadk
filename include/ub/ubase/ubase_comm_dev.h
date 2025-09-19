@@ -192,6 +192,11 @@ struct ubase_adev_qos {
 	u8	ue_sl_vl[UBASE_MAX_SL_NUM];
 };
 
+struct ubase_ue_node {
+	struct list_head	list;
+	u16			bus_ue_id;
+};
+
 struct ubase_ue_caps {
 	u8	ceq_vector_num;
 	u8	aeq_vector_num;

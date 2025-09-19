@@ -602,7 +602,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"init ue", UBASE_SUP_NO_PMU, 0,
-		NULL, NULL
+		ubase_ue_init, ubase_ue_uninit
 	},
 	{
 		"init hw", UBASE_SUP_NO_PMU, 1,
@@ -807,10 +807,68 @@ struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev)
 }
 EXPORT_SYMBOL(ubase_get_unic_caps);
 
+static bool ubase_add_ue_list(struct ubase_dev *udev, u16 bus_ue_id)
+{
+	struct ubase_ue_node *pos_node, *tmp_node, *new_node;
+
+	new_node = kzalloc(sizeof(*new_node), GFP_KERNEL);
+	if (!new_node) {
+		ubase_err(udev, "failed to alloc ue node.\n");
+		return false;
+	}
+	new_node->bus_ue_id = bus_ue_id;
+
+	mutex_lock(&udev->ue_list_lock);
+	list_for_each_entry_safe(pos_node, tmp_node, &udev->ue_list, list) {
+		if (pos_node->bus_ue_id == bus_ue_id) {
+			kfree(new_node);
+			mutex_unlock(&udev->ue_list_lock);
+			return false;
+		} else if (bus_ue_id < pos_node->bus_ue_id) {
+			list_add(&new_node->list, pos_node->list.prev);
+			goto add_ue_end;
+		}
+	}
+	list_add_tail(&new_node->list, &udev->ue_list);
+
+add_ue_end:
+	mutex_unlock(&udev->ue_list_lock);
+	return true;
+}
+
+static bool ubase_del_ue_list(struct ubase_dev *udev, u16 bus_ue_id)
+{
+	struct ubase_ue_node *pos_node, *tmp_node;
+
+	mutex_lock(&udev->ue_list_lock);
+	list_for_each_entry_safe(pos_node, tmp_node, &udev->ue_list, list) {
+		if (pos_node->bus_ue_id == bus_ue_id) {
+			list_del(&pos_node->list);
+			kfree(pos_node);
+			mutex_unlock(&udev->ue_list_lock);
+			return true;
+		}
+	}
+	mutex_unlock(&udev->ue_list_lock);
+
+	return false;
+}
+
+static bool ubase_modify_ue_list(struct ubase_dev *udev, u16 bus_ue_id, bool is_en)
+{
+	if (is_en)
+		return ubase_add_ue_list(udev, bus_ue_id);
+	else
+		return ubase_del_ue_list(udev, bus_ue_id);
+}
+
 void ubase_virt_handler(struct ubase_dev *udev, u16 bus_ue_id, bool is_en)
 {
 	struct ubase_adev *uadev;
 	int i;
+
+	if (!ubase_modify_ue_list(udev, bus_ue_id, is_en))
+		return;
 
 	mutex_lock(&udev->priv.uadev_lock);
 	for (i = 0; i < UBASE_DRV_MAX; i++) {

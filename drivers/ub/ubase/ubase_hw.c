@@ -229,6 +229,21 @@ int ubase_query_dev_res(struct ubase_dev *udev)
 	return ubase_parse_dev_res(udev, &resp);
 }
 
+static void ubase_init_start_idx(struct ubase_dev *udev)
+{
+	struct ubase_adev_caps *udma_caps = &udev->caps.udma_caps;
+	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;
+
+	unic_caps->jfs.start_idx = udev->caps.dev_caps.public_jetty_cnt +
+				   udev->caps.dev_caps.rsvd_jetty_cnt;
+
+	udma_caps->jfs.start_idx = unic_caps->jfs.max_cnt +
+				   udev->caps.dev_caps.public_jetty_cnt +
+				   udev->caps.dev_caps.rsvd_jetty_cnt;
+	udma_caps->jfr.start_idx = unic_caps->jfr.max_cnt;
+	udma_caps->jfc.start_idx = unic_caps->jfc.max_cnt;
+}
+
 static int ubase_config_ctx_buf_to_hw(struct ubase_dev *udev,
 				      struct ubase_ctx_buf_cap *ctx_buf,
 				      struct ubase_mbx_attr *attr)
@@ -700,6 +715,57 @@ static void ubase_destroy_ctx_res(struct ubase_dev *udev)
 static inline void ubase_uninit_ctx_buf(struct ubase_dev *udev)
 {
 	ubase_ctx_free(udev, &udev->ctx_buf, UBASE_CTX_REMOVE_ALL);
+}
+
+static void ubase_init_ctx_buf_lock(struct ubase_ctx_buf *ctx_buf)
+{
+	struct mutex *ctx_mutex[] = { &ctx_buf->jfs.ctx_mutex,
+				      &ctx_buf->jfr.ctx_mutex,
+				      &ctx_buf->jfc.ctx_mutex,
+				      &ctx_buf->jtg.ctx_mutex,
+				      &ctx_buf->rc.ctx_mutex };
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ctx_mutex); i++)
+		mutex_init(ctx_mutex[i]);
+}
+
+static void ubase_uninit_ctx_buf_lock(struct ubase_ctx_buf *ctx_buf)
+{
+	struct mutex *ctx_mutex[] = { &ctx_buf->jfs.ctx_mutex,
+				      &ctx_buf->jfr.ctx_mutex,
+				      &ctx_buf->jfc.ctx_mutex,
+				      &ctx_buf->jtg.ctx_mutex,
+				      &ctx_buf->rc.ctx_mutex };
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ctx_mutex); i++)
+		mutex_destroy(ctx_mutex[i]);
+}
+
+int ubase_ue_init(struct ubase_dev *udev)
+{
+	ubase_init_start_idx(udev);
+	INIT_LIST_HEAD(&udev->ue_list);
+	mutex_init(&udev->ue_list_lock);
+	mutex_init(&udev->stats.stats_lock);
+	mutex_init(&udev->stats.activate_record.lock);
+	spin_lock_init(&udev->tp_ctx.tpg_lock);
+	mutex_init(&udev->act_ctx.lock);
+	init_completion(&udev->act_ctx.self.activate_done);
+	init_completion(&udev->act_ctx.other.activate_done);
+	ubase_init_ctx_buf_lock(&udev->ctx_buf);
+
+	return 0;
+}
+
+void ubase_ue_uninit(struct ubase_dev *udev)
+{
+	mutex_destroy(&udev->act_ctx.lock);
+	mutex_destroy(&udev->stats.activate_record.lock);
+	mutex_destroy(&udev->stats.stats_lock);
+	mutex_destroy(&udev->ue_list_lock);
+	ubase_uninit_ctx_buf_lock(&udev->ctx_buf);
 }
 
 int ubase_hw_init(struct ubase_dev *udev)

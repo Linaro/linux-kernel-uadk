@@ -7,5 +7,6 @@
 
 extern const struct attribute_group *ub_entity_groups[];
 extern const struct attribute_group *ub_bus_groups[];
+extern const struct device_type ub_dev_type;
 
 #endif /* __SYSFS_H__ */

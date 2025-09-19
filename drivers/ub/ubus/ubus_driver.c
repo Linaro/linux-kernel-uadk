@@ -19,6 +19,8 @@
 #include "ubus_controller.h"
 #include "ubus_inner.h"
 
+DECLARE_RWSEM(ub_bus_sem);
+
 static DEFINE_MUTEX(manage_subsystem_ops_mutex);
 static const struct ub_manage_subsystem_ops *manage_subsystem_ops;
 

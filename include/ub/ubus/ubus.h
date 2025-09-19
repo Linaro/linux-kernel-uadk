@@ -154,6 +154,10 @@ struct ub_entity {
 	u16 port_nums;
 	struct ub_port *ports;
 
+	/* entity DMA info */
+	u64 dma_mask;
+	struct device_dma_parameters dma_parms;
+
 	/* entity route info */
 	struct list_head cna_list; /* store distance for cna in route table */
 
@@ -481,6 +485,28 @@ int __ub_register_driver(struct ub_driver *drv, struct module *owner,
 	__ub_register_driver(driver, THIS_MODULE, KBUILD_MODNAME)
 void ub_unregister_driver(struct ub_driver *drv);
 
+/**
+ * ub_stop_ent() - Stop the entity.
+ * @uent: UB entity.
+ *
+ * Call device_release_driver(), user can't use it again, if it's a mue,
+ * will stop all ues under it, if it's entity0, will stop all entity under it.
+ *
+ * Context: Any context.
+ */
+void ub_stop_ent(struct ub_entity *uent);
+
+/**
+ * ub_stop_and_remove_ent() - Stop and remove the entity from system.
+ * @uent: UB entity.
+ *
+ * Call device_release_driver() and device_unregister(), if it's a mue,
+ * will remove all ues under it, if it's entity0, will remove all entity under it.
+ *
+ * Context: Any context.
+ */
+void ub_stop_and_remove_ent(struct ub_entity *uent);
+
 #else /* CONFIG_UB_UBUS is not enabled */
 #define dev_is_ub(d) (false)
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
@@ -532,6 +558,8 @@ __ub_register_driver(struct ub_driver *drv, struct module *owner,
 static inline int ub_register_driver(struct ub_driver *drv)
 { return 0; }
 static inline void ub_unregister_driver(struct ub_driver *drv) {}
+static inline void ub_stop_ent(struct ub_entity *uent) {}
+static inline void ub_stop_and_remove_ent(struct ub_entity *uent) {}
 #endif /* CONFIG_UB_UBUS */
 
 #endif /* _UB_UBUS_UBUS_H_ */

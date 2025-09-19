@@ -36,10 +36,14 @@ enum ub_entity_type {
 #define ONE_CNA(uent) (is_switch(uent) || (uent)->port_nums == 1)
 
 #define UB_COMPACT_EID_MASK GENMASK(19, 0)
+#define UB_UPI_MASK GENMASK(14, 0)
 
 /* ub_entity priv_flags */
+#define UB_ENTITY_START 0 /* Flag indicate uent can match with driver */
 #define UB_ENTITY_DETACHED 1 /* Flag indicate uent is detached */
 #define UB_ENTITY_ROUTE_UPDATED 2 /* Flag indicate uent's route is updated */
+#define UB_ENTITY_SETUP 4 /* Flag indicate uent is setup */
+
 static inline void ub_entity_assign_priv_flag(struct ub_entity *uent, int bit,
 					      bool flag)
 {

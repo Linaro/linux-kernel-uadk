@@ -143,3 +143,7 @@ const struct attribute_group *ub_bus_groups[] = {
 	&ub_bus_group,
 	NULL
 };
+
+const struct device_type ub_dev_type = {
+	.groups = NULL,
+};

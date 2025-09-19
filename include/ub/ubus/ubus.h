@@ -63,6 +63,28 @@ static inline int ub_show_guid(struct ub_guid *guid, char *buf)
 		       guid->bits.reserved, guid->bits.seq_num);
 }
 
+enum ub_port_type {
+	PHYSICAL,
+	VIRTUAL,
+};
+
+#define UB_MAX_CNA_NUM SZ_64K
+#define UB_PORT_CAP_NUM SZ_256
+
+struct ub_port {
+	struct ub_entity *uent;
+	u16 index;
+	enum ub_port_type type;
+	u32 cna;
+	struct ub_entity *r_uent; /* If valid, also represent link up */
+	u16 r_index;
+	guid_t r_guid;
+	struct kobject kobj;
+	DECLARE_BITMAP(cna_maps, UB_MAX_CNA_NUM);
+	/* cap cache */
+	DECLARE_BITMAP(cap_map, UB_PORT_CAP_NUM);
+};
+
 struct ub_entity {
 	/* Driver framework base info */
 	struct device dev;
@@ -80,6 +102,10 @@ struct ub_entity {
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;
+
+	/* entity port info */
+	u16 port_nums;
+	struct ub_port *ports;
 
 	struct dev_message *message;
 

@@ -7,10 +7,37 @@
 
 #include <linux/io.h>
 #include <linux/mm.h>
+#include <linux/resource_ext.h>
 
 #include "ubus.h"
 #include "msg.h"
 #include "resource.h"
+
+struct query_token_msg_pld_req {
+	u32 token_enable : 1;
+	u32 reserved : 31;
+};
+#define QUERY_TOKEN_MSG_REQ_PLD_SIZE 4
+#define QUERY_TOKEN_MSG_REQ_SIZE 36
+
+struct query_token_msg_pld_rsp {
+	u32 token_id : 20;
+	u32 reserved : 12;
+	u32 token_value;
+};
+#define QUERY_TOKEN_MSG_RSP_SIZE 40
+
+struct query_token_msg_pld {
+	union {
+		struct query_token_msg_pld_req req;
+		struct query_token_msg_pld_rsp rsp;
+	};
+};
+
+struct query_token_msg_pkt {
+	struct msg_pkt_header header;
+	struct query_token_msg_pld pld;
+};
 
 static const struct vm_operations_struct ub_phys_vm_ops = {
 	.access = generic_access_phys,
@@ -36,6 +63,73 @@ int ub_mmap_resource_range(struct ub_entity *uent, unsigned long idx,
 	return io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 				  vma->vm_end - vma->vm_start,
 				  vma->vm_page_prot);
+}
+
+static int _ub_assign_resource(struct ub_entity *uent, int idx,
+			       resource_size_t size, resource_size_t align)
+{
+	struct resource *res;
+	struct resource_entry *entry, *tmp;
+	struct resource *uent_res = &uent->zone[idx].res;
+	struct ub_bus_controller *ubc = uent->ubc;
+	int ret = -EINVAL;
+
+	if (ubc == NULL) {
+		ub_err(uent, "ub assign resource failed, ubc is NULL.\n");
+		return -EINVAL;
+	}
+
+	resource_list_for_each_entry_safe(entry, tmp, &ubc->resources) {
+		res = entry->res;
+
+		if (!(res->flags & IORESOURCE_MEM) ||
+		    !strstr(res->name, "UB_BUS_CTL"))
+			continue;
+		ret = allocate_resource(res, uent_res, size, 0, ~0, align, NULL,
+					NULL);
+		if (ret == 0)
+			return 0;
+	}
+	ub_err(uent, "ub assign resource failed, no res available, ret = %d\n", ret);
+
+	return -ENOMEM;
+}
+
+int ub_assign_resource(struct ub_entity *uent, int idx)
+{
+	struct resource *res = &uent->zone[idx].res;
+	resource_size_t size;
+	resource_size_t page_size = PAGE_SIZE;
+	/* decoder mapped address unit 1M */
+	resource_size_t align = page_size > SZ_1M ? page_size : SZ_1M;
+	int ret;
+
+	res->name = ub_name(uent);
+	res->flags |= IORESOURCE_UNSET | IORESOURCE_SIZEALIGN;
+	size = uent->zone[idx].region.size;
+	ret = _ub_assign_resource(uent, idx, size, align);
+	if (ret < 0) {
+		ub_err(uent, "RESOURCE %d: failed to assign, size=%#llx\n",
+		       idx, size);
+		return ret;
+	}
+
+	res->flags &= ~IORESOURCE_UNSET;
+	res->flags &= ~IORESOURCE_STARTALIGN;
+	ub_info(uent, "RESOURCE %d: assigned %pR\n", idx, res);
+
+	return 0;
+}
+
+void ub_release_resource(struct ub_entity *uent, int idx)
+{
+	int ret;
+
+	if (uent->zone[idx].res.parent) {
+		ret = release_resource(&uent->zone[idx].res);
+		if (ret)
+			ub_err(uent, "resource release failed, ret=%d.\n", ret);
+	}
 }
 
 static void __iomem *ub_iomap_range(struct ub_entity *uent, int res_id,
@@ -171,4 +265,195 @@ static int ub_entity_read_mmio_idx(struct ub_entity *uent, int idx)
 		return ub_read_sa_reg(uent, pg_size, idx);
 
 	return -EPERM;
+}
+
+int ub_insert_resource(struct ub_entity *dev, int idx)
+{
+	struct resource *res, *root = NULL;
+	int ret;
+
+	if (idx >= MAX_UB_RES_NUM)
+		return -EINVAL;
+
+	res = &dev->zone[idx].res;
+	if (!(res->flags & IORESOURCE_MEM))
+		return -EINVAL;
+
+	root = &iomem_resource;
+
+	ret = insert_resource(root, res);
+	if (ret) {
+		ub_warn(dev, "failed to claim uent resource %pR\n", res);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+int ub_entity_alloc_mmio_idx(struct ub_entity *dev, int idx)
+{
+	if (is_ibus_controller(dev) || is_idev(dev))
+		return ub_insert_resource(dev, idx);
+	return ub_assign_resource(dev, idx);
+}
+
+void ub_entity_free_mmio_idx(struct ub_entity *dev, int idx)
+{
+	ub_release_resource(dev, idx);
+	dev->zone[idx].init_succ = 0;
+	dev->zone[idx].ubba_used = 0;
+	dev->zone[idx].sa_used = 0;
+}
+
+static int ub_query_token_rsp_handle(struct ub_entity *uent,
+				     struct query_token_msg_pkt *pkt)
+{
+	struct query_token_msg_pld_rsp *rsp = &pkt->pld.rsp;
+
+	if (pkt->header.msgetah.rsp_status != UB_MSG_RSP_SUCCESS) {
+		ub_err(uent, "query token rsp, status=%#02x\n",
+		       pkt->header.msgetah.rsp_status);
+		return -EINVAL;
+	}
+
+	uent->token_id = rsp->token_id;
+	uent->token_value = rsp->token_value;
+
+	return 0;
+}
+
+static int ub_query_token_info(struct ub_entity *uent)
+{
+	struct message_device *mdev = uent->message->mdev;
+	struct query_token_msg_pkt req_pkt = {};
+	struct query_token_msg_pkt rsp_pkt = {};
+	struct msg_info info = {};
+	int ret;
+
+	ub_msg_pkt_header_init(&req_pkt.header, uent,
+			       QUERY_TOKEN_MSG_REQ_PLD_SIZE,
+			       code_gen(UB_MSG_CODE_SEC, UB_TOKEN_CHECK_CFG,
+					MSG_REQ), false);
+
+	req_pkt.pld.req.token_enable = 1;
+	message_info_init(&info, uent, &req_pkt, &rsp_pkt,
+			  (QUERY_TOKEN_MSG_REQ_SIZE << MSG_REQ_SIZE_OFFSET) |
+			   QUERY_TOKEN_MSG_RSP_SIZE);
+
+	ret = message_sync_request(mdev, &info, req_pkt.header.msgetah.code);
+	if (ret)
+		return ret;
+
+	return ub_query_token_rsp_handle(uent, &rsp_pkt);
+}
+
+static int ub_entity_writeback_addr(struct ub_entity *uent, int idx)
+{
+	u32 addr_l_reg[MAX_UB_RES_NUM] = { UB_ERS0_UBBA_L, UB_ERS1_UBBA_L,
+					   UB_ERS2_UBBA_L };
+	u32 addr_h_reg[MAX_UB_RES_NUM] = { UB_ERS0_UBBA_H, UB_ERS1_UBBA_H,
+					   UB_ERS2_UBBA_H };
+	u32 support_feature, ubba_l, ubba_h;
+	int ret;
+
+	if (!uent->zone[idx].sa_used)
+		return 0;
+
+	ret = ub_cfg_read_dword(uent, UB_CFG1_SUPPORT_FEATURE_L,
+				&support_feature);
+	if (ret) {
+		ub_err(uent,
+		       "read reg failed when request sup feature, ret=%d\n",
+		       ret);
+		return -EINVAL;
+	}
+	if (support_feature & UB_UBBAS_SUPPORT) {
+		ubba_l = (u32)(uent->zone[idx].res.start);
+		/* Shift right 32 bits to get upper-bit address */
+		ubba_h = (u32)((uent->zone[idx].res.start) >> 32);
+		ub_cfg_write_dword(uent, addr_l_reg[idx], ubba_l);
+		ub_cfg_write_dword(uent, addr_h_reg[idx], ubba_h);
+	}
+
+	return 0;
+}
+
+int _ub_entity_setup_mmio(struct ub_entity *dev)
+{
+	int ret;
+	int i;
+
+	if (is_ibus_controller(dev)) {
+		ub_info(dev, "now doesn't support ub bus controller mmio\n");
+		return 0;
+	}
+
+	if (is_device(dev) && !is_p_device(dev)) {
+		ret = ub_query_token_info(dev);
+		if (ret) {
+			ub_err(dev, "Token query failed\n");
+			return ret;
+		}
+		ub_info(dev, "Token ID=%#x\n", dev->token_id);
+	}
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++) {
+		ret = ub_entity_read_mmio_idx(dev, i);
+		if (ret)
+			continue;
+
+		ret = ub_entity_alloc_mmio_idx(dev, i);
+		if (ret) {
+			ub_err(dev,
+			       "failed to alloc resource for mmio idx %d\n", i);
+			goto fail;
+		}
+
+		/* Write back the address reg for the VM scenario capture. */
+		ret = ub_entity_writeback_addr(dev, i);
+		if (ret) {
+			ub_err(dev,
+			       "failed to write back address for mmio idx %d\n",
+			       i);
+			ub_entity_free_mmio_idx(dev, i);
+			goto fail;
+		}
+
+		ub_info(dev, "MMIO[%d]: ubba=%#lx, size=%#llx, hpa=%#llx, wr attr=%01u, prefetchable=%01u, order type=%01u,\n",
+			i, dev->zone[i].region.start, ub_resource_len(dev, i),
+			dev->zone[i].res.start, 0, 0, 0);
+		dev->zone[i].init_succ = 1;
+	}
+
+	return 0;
+
+fail:
+	for (i -= 1; i >= 0; i--)
+		if (dev->zone[i].init_succ)
+			ub_entity_free_mmio_idx(dev, i);
+
+	return ret;
+}
+
+int ub_entity_setup_mmio(struct ub_entity *uent)
+{
+	int i;
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++)
+		if (!uent->zone[i].init_succ)
+			break;
+
+	if (i == MAX_UB_RES_NUM)
+		return 0;
+
+	return _ub_entity_setup_mmio(uent);
+}
+
+void ub_entity_unset_mmio(struct ub_entity *dev)
+{
+	int i;
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++)
+		if (dev->zone[i].init_succ)
+			ub_entity_free_mmio_idx(dev, i);
 }

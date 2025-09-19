@@ -140,6 +140,8 @@ struct ub_entity {
 	unsigned short entity_idx;
 	u32 uent_num; /* ub dev number */
 	struct mmio_zone zone[MAX_UB_RES_NUM];
+	u32 token_id;
+	u32 token_value;
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;

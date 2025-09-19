@@ -34,6 +34,12 @@ enum ubase_ctrlq_ser_type {
 	UBASE_CTRLQ_SER_TYPE_QOS = 0x04,
 };
 
+enum ubase_ctrlq_opc_type {
+	UBASE_CTRLQ_OPC_CREATE_TP	= 0x11,
+	UBASE_CTRLQ_OPC_DESTROY_TP	= 0x12,
+	UBASE_CTRLQ_OPC_TP_FLUSH_DONE	= 0x14,
+};
+
 enum ubase_ctrlq_opc_type_qos {
 	UBASE_CTRLQ_OPC_QUERY_VL	= 0x01,
 	UBASE_CTRLQ_OPC_QUERY_SL	= 0x02,

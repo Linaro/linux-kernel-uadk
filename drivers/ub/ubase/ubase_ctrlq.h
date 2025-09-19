@@ -30,6 +30,32 @@ struct ubase_ctrlq_ue_info {
 	u16	bus_ue_id;
 };
 
+struct ubase_ctrlq_create_tp_req {
+	u8	trans_type : 4;
+	u8	rsv0 : 4;
+	u8	vl;
+	u8	rsv1[2];
+};
+
+struct ubase_ctrlq_create_tp_resp {
+	__le32	tpgn : 24;
+	__le32	rsv : 8;
+	__le32	tpn_cnt : 8;
+	__le32	start_tpn : 24;
+};
+
+struct ubase_ctrlq_destroy_tp_req {
+	u8	trans_type : 4;
+	u8	rsv0 : 4;
+	u8	vl;
+	u8	rsv1[2];
+};
+
+struct ubase_ctrlq_tp_fd_req {
+	__le32	tpn : 24;
+	__le32	rsv : 8;
+};
+
 struct ubase_ctrlq_query_vl_resp {
 	__le16 vl_bitmap;
 	u8 rsv[18];

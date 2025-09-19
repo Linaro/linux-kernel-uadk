@@ -10,6 +10,7 @@
 #include "ubase_cmd.h"
 #include "ubase_dev.h"
 #include "ubase_mailbox.h"
+#include "ubase_tp.h"
 #include "ubase_trace.h"
 #include "ubase_eq.h"
 
@@ -193,12 +194,40 @@ static int ubase_reg_event_handler(struct ubase_dev *udev)
 	return event_cause ? IRQ_HANDLED : IRQ_NONE;
 }
 
+static bool ubase_is_udma_tp_event(struct ubase_dev *udev, u32 tpn)
+{
+	struct ubase_tpg *tpg = udev->tp_ctx.tpg;
+	u32 i;
+
+	spin_lock(&udev->tp_ctx.tpg_lock);
+	if (!tpg) {
+		ubase_warn(udev, "unexpected tp event, tpn = %u.\n", tpn);
+		spin_unlock(&udev->tp_ctx.tpg_lock);
+		return true;
+	}
+
+	for (i = 0; i < udev->caps.unic_caps.tpg.max_cnt; i++) {
+		if (tpn >= tpg[i].start_tpn &&
+		    tpn < tpg[i].start_tpn + tpg[i].tp_cnt) {
+			spin_unlock(&udev->tp_ctx.tpg_lock);
+			return false;
+		}
+	}
+	spin_unlock(&udev->tp_ctx.tpg_lock);
+
+	return true;
+}
+
 static bool ubase_is_udma_event(struct ubase_dev *udev, u8 event_type,
 				u8 sub_type, struct ubase_aeqe *aeqe)
 {
+	u32 queue_id = aeqe->event.queue_event.num;
+
 	switch (event_type) {
 	case UBASE_EVENT_TYPE_CHECK_TOKEN:
 		return true;
+	case UBASE_EVENT_TYPE_TP_FLUSH_DONE:
+		return ubase_is_udma_tp_event(udev, queue_id);
 	default:
 		break;
 	}
@@ -989,6 +1018,11 @@ int ubase_register_ae_event(struct ubase_dev *udev)
 			UBASE_DRV_UNIC,
 			UBASE_EVENT_TYPE_MB,
 			{ ubase_cmd_mbx_event_cb },
+			udev
+		}, {
+			UBASE_DRV_UNIC,
+			UBASE_EVENT_TYPE_TP_FLUSH_DONE,
+			{ ubase_ae_tp_flush_done },
 			udev
 		}
 	};

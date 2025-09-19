@@ -12,6 +12,7 @@
 #include "ubase_cmd.h"
 #include "ubase_dev.h"
 #include "ubase_mailbox.h"
+#include "ubase_tp.h"
 #include "ubase_hw.h"
 
 #define UBASE_CTX_REMOVE_ALL		(-2)
@@ -715,10 +716,18 @@ int ubase_hw_init(struct ubase_dev *udev)
 	if (ret)
 		goto err_init_ta_tp_ext_buf;
 
+	ret = ubase_dev_init_tp_tpg(udev);
+	if (ret) {
+		ubase_err(udev, "failed to init tp & tpg, ret = %d.\n", ret);
+		goto err_init_tp_tpg;
+	}
+
 	set_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
 
 	return 0;
 
+err_init_tp_tpg:
+	ubase_uninit_ta_tp_ext_buf(udev);
 err_init_ta_tp_ext_buf:
 	ubase_uninit_ctx_buf(udev);
 
@@ -729,6 +738,7 @@ void ubase_hw_uninit(struct ubase_dev *udev)
 {
 	clear_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
 
+	ubase_dev_uninit_tp_tpg(udev);
 	ubase_uninit_ta_tp_ext_buf(udev);
 
 	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))

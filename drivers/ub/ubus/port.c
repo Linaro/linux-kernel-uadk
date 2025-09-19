@@ -5,6 +5,8 @@
 
 #define pr_fmt(fmt)	"ubus port: " fmt
 
+#include <linux/string_choices.h>
+
 #include "ubus.h"
 #include "port.h"
 
@@ -17,7 +19,335 @@ struct ub_port_attribute {
 #define to_ub_port(o) container_of(o, struct ub_port, kobj)
 #define to_ub_port_attr(a) container_of(a, struct ub_port_attribute, attr)
 
+#define UB_PORT_ATTR_RO(field) \
+	static struct ub_port_attribute ub_port_attr_##field = __ATTR_RO(field)
+
+#define UB_PORT_ATTR_RW(field) \
+	static struct ub_port_attribute ub_port_attr_##field = __ATTR_RW(field)
+
+#define UB_PORT_ATTR_WO(field) \
+	static struct ub_port_attribute ub_port_attr_##field = __ATTR_WO(field)
+
+int ub_port_read_byte(struct ub_port *port, u32 pos, u8 *val)
+{
+	u64 base = UB_PORT_SLICE_START + port->index * UB_PORT_SLICE_SIZE;
+
+	return ub_cfg_read_byte(port->uent, base + pos, val);
+}
+
+int ub_port_read_word(struct ub_port *port, u32 pos, u16 *val)
+{
+	u64 base = UB_PORT_SLICE_START + port->index * UB_PORT_SLICE_SIZE;
+
+	return ub_cfg_read_word(port->uent, base + pos, val);
+}
+
+int ub_port_read_dword(struct ub_port *port, u32 pos, u32 *val)
+{
+	u64 base = UB_PORT_SLICE_START + port->index * UB_PORT_SLICE_SIZE;
+
+	return ub_cfg_read_dword(port->uent, base + pos, val);
+}
+
+int ub_port_write_byte(struct ub_port *port, u32 pos, u8 val)
+{
+	u64 base = UB_PORT_SLICE_START + port->index * UB_PORT_SLICE_SIZE;
+
+	return ub_cfg_write_byte(port->uent, base + pos, val);
+}
+
+int ub_port_write_word(struct ub_port *port, u32 pos, u16 val)
+{
+	u64 base = UB_PORT_SLICE_START + port->index * UB_PORT_SLICE_SIZE;
+
+	return ub_cfg_write_word(port->uent, base + pos, val);
+}
+
+int ub_port_write_dword(struct ub_port *port, u32 pos, u32 val)
+{
+	u64 base = UB_PORT_SLICE_START + port->index * UB_PORT_SLICE_SIZE;
+
+	return ub_cfg_write_dword(port->uent,  base + pos, val);
+}
+
+static ssize_t cna_show(struct ub_port *port, char *buf)
+{
+	return sysfs_emit(buf, "%#06x\n", port->cna);
+}
+UB_PORT_ATTR_RO(cna);
+
+static ssize_t boundary_show(struct ub_port *port, char *buf)
+{
+	return sysfs_emit(buf, "%#01x\n", port->domain_boundary);
+}
+UB_PORT_ATTR_RO(boundary);
+
+static ssize_t linkup_show(struct ub_port *port, char *buf)
+{
+	u8 val;
+
+	if (port->type == VIRTUAL)
+		return sysfs_emit(buf, "Virtual port don't support\n");
+
+	if (ub_port_read_byte(port, UB_PORT_PHYSICAL_PORT_LINK_STATUS, &val)) {
+		ub_err(port->uent, "get port link cap fail\n");
+		return -EIO;
+	}
+
+	return sysfs_emit(buf, "%u\n", val & UB_PORT_LINK_STATE);
+}
+UB_PORT_ATTR_RO(linkup);
+
+static ssize_t neighbor_port_idx_show(struct ub_port *port, char *buf)
+{
+	if (!port->r_uent)
+		return sysfs_emit(buf, "No Neighbor\n");
+	return sysfs_emit(buf, "%u\n", port->r_index);
+}
+UB_PORT_ATTR_RO(neighbor_port_idx);
+
+static ssize_t neighbor_guid_show(struct ub_port *port, char *buf)
+{
+	struct ub_guid *guid;
+	int count;
+
+	if (!port->r_uent && guid_is_null(&port->r_guid))
+		return sysfs_emit(buf, "No Neighbor\n");
+
+	guid = port->r_uent ? &port->r_uent->guid :
+				    (struct ub_guid *)&port->r_guid;
+
+	count = ub_show_guid(guid, buf);
+
+	return count + sysfs_emit_at(buf, count, "\n");
+}
+UB_PORT_ATTR_RO(neighbor_guid);
+
+static ssize_t neighbor_show(struct ub_port *port, char *buf)
+{
+	if (!port->r_uent)
+		return sysfs_emit(buf, "No Neighbor\n");
+
+	return sysfs_emit(buf, "%05x\n", port->r_uent->uent_num);
+}
+UB_PORT_ATTR_RO(neighbor);
+
+static ssize_t asy_link_width_show(struct ub_port *port, char *buf)
+{
+	u8 val;
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_CAP, &val)) {
+		ub_err(port->uent, "get port cap15 cap fail\n");
+		return -EIO;
+	}
+
+	if (val & ASY_LINK_WIDTH_MASK)
+		return sysfs_emit(buf, "Support\n");
+	else
+		return sysfs_emit(buf, "Not Support\n");
+}
+UB_PORT_ATTR_RO(asy_link_width);
+
+static ssize_t glb_qdlws_show(struct ub_port *port, char *buf)
+{
+	u8 val;
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_CTRL, &val)) {
+		ub_err(port->uent, "get global qdlws fail\n");
+		return -EIO;
+	}
+
+	return sysfs_emit(buf, "%s\n", str_enable_disable(val & GLB_QDLWS_MASK));
+}
+
+static ssize_t glb_qdlws_store(struct ub_port *port, const char *buf,
+			       size_t count)
+{
+	unsigned long val;
+	int ret;
+	u8 cur;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret || (val != 0 && val != 1)) {
+		ub_err(port->uent, "Invalid val for global qdlws\n");
+		return -EINVAL;
+	}
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_CTRL, &cur)) {
+		ub_err(port->uent, "get global qdlws fail\n");
+		return -EIO;
+	}
+
+	if (val)
+		cur = cur | GLB_QDLWS_ENABLE_MASK;
+	else
+		cur = cur & GLB_QDLWS_DISABLE_MASK;
+
+	if (ub_port_write_byte(port, PORT_CAP15_QDLWS_CTRL, cur)) {
+		ub_err(port->uent, "set global qdlws fail\n");
+		return -EIO;
+	}
+
+	return count;
+}
+UB_PORT_ATTR_RW(glb_qdlws);
+
+static ssize_t tx_qdlws_show(struct ub_port *port, char *buf)
+{
+	u8 val;
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_CTRL, &val)) {
+		ub_err(port->uent, "get TX qdlws fail\n");
+		return -EIO;
+	}
+
+	return sysfs_emit(buf, "%s\n", str_enable_disable(val & TX_QDLWS_MASK));
+}
+
+static ssize_t tx_qdlws_store(struct ub_port *port, const char *buf,
+			      size_t count)
+{
+	unsigned long val;
+	int ret;
+	u8 cur;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret || (val != 0 && val != 1)) {
+		ub_err(port->uent, "Invalid val for TX qdlws\n");
+		return -EINVAL;
+	}
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_CTRL, &cur)) {
+		ub_err(port->uent, "get value for TX qdlws fail\n");
+		return -EIO;
+	}
+
+	if (val)
+		cur = cur | TX_QDLWS_ENABLE_MASK;
+	else
+		cur = cur & TX_QDLWS_DISABLE_MASK;
+
+	if (ub_port_write_byte(port, PORT_CAP15_QDLWS_CTRL, cur)) {
+		ub_err(port->uent, "set TX qdlws fail\n");
+		return -EIO;
+	}
+
+	return count;
+}
+UB_PORT_ATTR_RW(tx_qdlws);
+
+static ssize_t rx_qdlws_show(struct ub_port *port, char *buf)
+{
+	u8 val;
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_CTRL, &val)) {
+		ub_err(port->uent, "get RX qdlws fail\n");
+		return -EIO;
+	}
+
+	return sysfs_emit(buf, "%s\n", str_enable_disable(val & RX_QDLWS_MASK));
+}
+
+static ssize_t rx_qdlws_store(struct ub_port *port, const char *buf,
+			      size_t count)
+{
+	unsigned long val;
+	int ret;
+	u8 cur;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret || (val != 0 && val != 1)) {
+		ub_err(port->uent, "Invalid val for RX qdlws\n");
+		return -EINVAL;
+	}
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_CTRL, &cur)) {
+		ub_err(port->uent, "get value for RX qdlws fail\n");
+		return -EIO;
+	}
+
+	if (val)
+		cur = cur | RX_QDLWS_ENABLE_MASK;
+	else
+		cur = cur & RX_QDLWS_DISABLE_MASK;
+
+	if (ub_port_write_byte(port, PORT_CAP15_QDLWS_CTRL, cur)) {
+		ub_err(port->uent, "set RX qdlws fail\n");
+		return -EIO;
+	}
+
+	return count;
+}
+UB_PORT_ATTR_RW(rx_qdlws);
+
+static const char * const status[] = { "IDLE", "NAK", "In progress", "Timeout",
+				"Successful Done" };
+
+static ssize_t qdlws_exec_state_show(struct ub_port *port, char *buf)
+{
+	u8 val;
+
+	if (ub_port_read_byte(port, PORT_CAP15_QDLWS_STATE, &val)) {
+		ub_err(port->uent, "get qdlws exec state fail\n");
+		return -EIO;
+	}
+
+	val = val & QDLWS_EXEC_STATUS_MASK;
+	if (val > QDLWS_EXEC_STATUS_MAX) {
+		ub_err(port->uent, "get error state, value[%u]\n", val);
+		return sysfs_emit(buf, "Not support state\n");
+	}
+
+	return sysfs_emit(buf, "%s\n", status[val]);
+}
+UB_PORT_ATTR_RO(qdlws_exec_state);
+
+static struct attribute *ub_port_default_attrs[] = {
+	&ub_port_attr_cna.attr,
+	&ub_port_attr_boundary.attr,
+	&ub_port_attr_linkup.attr,
+	/* neighbor info */
+	&ub_port_attr_neighbor_port_idx.attr,
+	&ub_port_attr_neighbor_guid.attr,
+	&ub_port_attr_neighbor.attr,
+	NULL
+};
+
+static const struct attribute_group ub_port_default_group = {
+	.attrs = ub_port_default_attrs,
+};
+
+static struct attribute *ub_port_qdlws_attrs[] = {
+	&ub_port_attr_asy_link_width.attr,
+	&ub_port_attr_glb_qdlws.attr,
+	&ub_port_attr_tx_qdlws.attr,
+	&ub_port_attr_rx_qdlws.attr,
+	&ub_port_attr_qdlws_exec_state.attr,
+	NULL
+};
+
+static umode_t ub_port_qdlws_is_visible(struct kobject *kobj,
+					struct attribute *a, int n)
+{
+	struct ub_port *port = to_ub_port(kobj);
+
+	if (port->type == VIRTUAL)
+		return 0;
+
+	if (test_bit(UB_PORT_CAP15_QDLWS, port->cap_map))
+		return a->mode;
+
+	return 0;
+}
+
+static const struct attribute_group ub_port_qdlws_group = {
+	.is_visible = ub_port_qdlws_is_visible,
+	.attrs = ub_port_qdlws_attrs,
+};
+
 static const struct attribute_group *ub_port_groups[] = {
+	&ub_port_default_group,
+	&ub_port_qdlws_group,
 	NULL
 };
 
@@ -110,6 +440,25 @@ bool ub_check_and_connect(struct ub_port *port, struct ub_entity *r_uent)
 
 static int ub_port_config(struct ub_port *port)
 {
+	u32 map[UB_PORT_CAP_NUM / SZ_32];
+	int ret, i;
+
+	/* virtual port doesn't have bitmap */
+	if (port->type == VIRTUAL)
+		return 0;
+
+	for (i = 0; i < UB_PORT_CAP_NUM / SZ_32; i++) {
+		ret = ub_port_read_dword(
+			port, UB_CFG0_PORT_BITMAP + i * sizeof(u32), &map[i]);
+		if (ret) {
+			ub_err(port->uent,
+			       "failed to read port%u bitmap %d with %d\n",
+			       port->index, i, ret);
+			return ret;
+		}
+	}
+
+	memcpy((void *)port->cap_map, (void *)map, sizeof(map));
 	return 0;
 }
 

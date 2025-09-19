@@ -75,6 +75,7 @@ struct ub_port {
 	struct ub_entity *uent;
 	u16 index;
 	enum ub_port_type type;
+	u8 domain_boundary;
 	u32 cna;
 	struct ub_entity *r_uent; /* If valid, also represent link up */
 	u16 r_index;
@@ -100,6 +101,7 @@ struct ub_entity {
 	unsigned int cna;
 	unsigned int eid;
 	unsigned short entity_idx;
+	u32 uent_num; /* ub dev number */
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;

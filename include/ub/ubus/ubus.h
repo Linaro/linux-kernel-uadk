@@ -55,6 +55,14 @@ struct ub_guid {
 #define uent_base_code(uent) ((uent)->class_code & UB_BASE_CODE_MASK)
 #define uent_seq(uent) ((uent)->guid.bits.seq_num)
 
+enum ub_type {
+	UB_TYPE_BUS_INSTANCE = 0,
+	UB_TYPE_CONTROLLER = 1,
+	UB_TYPE_ICONTROLLER = 2,
+	UB_TYPE_SWITCH = 3,
+	UB_TYPE_ISWITCH = 4
+};
+
 static inline int ub_show_guid(struct ub_guid *guid, char *buf)
 {
 	return sprintf(buf, "%04x-%04x-%01x-%01x-%06x-%016llx",
@@ -114,6 +122,7 @@ struct ub_entity {
 	struct ub_port *ports;
 
 	struct dev_message *message;
+	u32 support_feature;
 
 	u16 upi;
 };
@@ -358,6 +367,37 @@ int ub_get_bus_controller(struct ub_entity *uents[], unsigned int max_num,
  */
 void ub_put_bus_controller(struct ub_entity *uents[], unsigned int num);
 
+/**
+ * ub_cc_supported() - Congestion control capability query.
+ * @uent: UB entity.
+ *
+ * Context: Any context.
+ * Return: %true if the entity supports congestion control, %false otherwise.
+ */
+bool ub_cc_supported(struct ub_entity *uent);
+
+/**
+ * ub_cc_enable() - Enable the congestion control capability of the entity.
+ * @uent: UB entity.
+ *
+ * Context: Any context.
+ * Return: 0 if success, or %-EINVAL if input parameters are invalid, or
+ * %-EPERM if the entity does not support congestion control, or other
+ * failed negative values.
+ */
+int ub_cc_enable(struct ub_entity *uent);
+
+/**
+ * ub_cc_disable() - Disable the congestion control capability of the entity.
+ * @uent: UB entity.
+ *
+ * Context: Any context.
+ * Return: 0 if success, or %-EINVAL if input parameters are invalid, or
+ * %-EPERM if the entity does not support congestion control, or other
+ * failed negative values.
+ */
+int ub_cc_disable(struct ub_entity *uent);
+
 /* Proper probing supporting hot-pluggable entities */
 int __ub_register_driver(struct ub_driver *drv, struct module *owner,
 			 const char *mod_name);
@@ -371,6 +411,12 @@ void ub_unregister_driver(struct ub_driver *drv);
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}
+static inline bool ub_cc_supported(struct ub_entity *uent)
+{ return false; }
+static inline int ub_cc_enable(struct ub_entity *uent)
+{ return -ENODEV; }
+static inline int ub_cc_disable(struct ub_entity *uent)
+{ return -ENODEV; }
 static inline int ub_cfg_read_byte(struct ub_entity *uent, u64 pos, u8 *val)
 { return -ENODEV; }
 static inline int ub_cfg_read_word(struct ub_entity *uent, u64 pos, u16 *val)

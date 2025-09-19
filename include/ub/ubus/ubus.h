@@ -175,6 +175,10 @@ struct ub_entity {
 	u16 port_nums;
 	struct ub_port *ports;
 
+	/* entity capability info */
+	unsigned int cfg0_bitmap[8];
+	unsigned int cfg1_bitmap[8];
+
 	unsigned int state_saved : 1;
 
 	/* entity DMA info */
@@ -191,6 +195,8 @@ struct ub_entity {
 
 	/* UB entity TID */
 	u32 tid;
+
+	bool sw_cap;
 
 	/* UB saved config space */
 	u32 saved_config_space[24]; /* Config space saved at reset time */

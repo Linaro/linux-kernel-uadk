@@ -19,6 +19,7 @@
 #include "ubus_controller.h"
 #include "ubus_driver.h"
 #include "ubus_inner.h"
+#include "cap.h"
 
 /*
  * Entity lifecycle
@@ -287,6 +288,7 @@ int ub_setup_ent(struct ub_entity *uent)
 		goto free_uent_num;
 
 	ub_config_eid(uent);
+	ub_set_cap_bitmap(uent);
 	ub_set_fm_info(uent);
 	ub_get_module_id(uent);
 
@@ -336,6 +338,7 @@ void ub_entity_add(struct ub_entity *uent, void *ctx)
 	dma_set_seg_boundary(&uent->dev, GENMASK(31, 0));
 
 	uent->state_saved = false;
+	ub_init_capabilities(uent);
 
 	if (is_primary(uent) || is_p_device(uent)) {
 		ubc = (struct ub_bus_controller *)ctx;
@@ -451,6 +454,7 @@ void ub_remove_ent(struct ub_entity *uent)
 	list_del(&uent->node);
 	up_write(&ub_bus_sem);
 
+	ub_uninit_capabilities(uent);
 	ub_unconfigure_ent(uent);
 	ub_entity_unset_mmio(uent);
 	ub_entity_num_free(uent);

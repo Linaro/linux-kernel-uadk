@@ -9,10 +9,13 @@
 #include <linux/resource_ext.h>
 
 #include "ubus.h"
+#include "omm.h"
 #include "decoder.h"
 
 #define MMIO_SIZE_MASK GENMASK_ULL(18, 16)
 #define MMIO_SIZE_OFFSET 16
+
+#define DECODER_PAGE_TABLE_ENTRY_SIZE 8
 
 static void ub_decoder_uninit_queue(struct ub_decoder *decoder)
 {}
@@ -80,11 +83,67 @@ static u32 ub_decoder_device_set(struct ub_decoder *decoder)
 
 static int ub_decoder_create_page_table(struct ub_decoder *decoder)
 {
+	struct page_table_desc *invalid_desc = &decoder->invalid_desc;
+	struct ub_entity *uent = decoder->uent;
+	struct page_table *pgtlb;
+	void *pgtlb_base;
+	size_t size;
+
+	size = DECODER_PAGE_TABLE_ENTRY_SIZE * DECODER_PAGE_TABLE_SIZE;
+	pgtlb = &decoder->pgtlb;
+	pgtlb_base = dmam_alloc_coherent(decoder->dev, size,
+					 &pgtlb->pgtlb_dma, GFP_KERNEL);
+	if (!pgtlb_base) {
+		ub_err(uent, "allocate ub decoder page table fail\n");
+		return -ENOMEM;
+	}
+	pgtlb->pgtlb_base = pgtlb_base;
+
+	size = sizeof(*pgtlb->desc_base) * DECODER_PAGE_TABLE_SIZE;
+	pgtlb->desc_base = kzalloc(size, GFP_KERNEL);
+	if (!pgtlb->desc_base) {
+		ub_err(uent, "allocate ub decoder page table desc fail\n");
+		goto release_pgtlb;
+	}
+
+	invalid_desc->page_base = dmam_alloc_coherent(decoder->dev,
+						      RANGE_TABLE_PAGE_SIZE,
+						      &invalid_desc->page_dma,
+						      GFP_KERNEL);
+	if (!invalid_desc->page_base) {
+		ub_err(uent, "decoder alloc free page fail\n");
+		goto release_desc;
+	}
+	decoder->invalid_page_dma = (invalid_desc->page_dma &
+				     DECODER_PGTBL_PGPRT_MASK) >>
+				     DECODER_DMA_PAGE_ADDR_OFFSET;
+
+	ub_decoder_init_page_table(decoder, pgtlb_base);
+
 	return 0;
+
+release_desc:
+	kfree(pgtlb->desc_base);
+	pgtlb->desc_base = NULL;
+release_pgtlb:
+	size = DECODER_PAGE_TABLE_ENTRY_SIZE * DECODER_PAGE_TABLE_SIZE;
+	dmam_free_coherent(decoder->dev, size, pgtlb_base, pgtlb->pgtlb_dma);
+	return -ENOMEM;
 }
 
 static void ub_decoder_free_page_table(struct ub_decoder *decoder)
-{}
+{
+	struct page_table_desc *invalid_desc = &decoder->invalid_desc;
+	size_t size;
+
+	dmam_free_coherent(decoder->dev, RANGE_TABLE_PAGE_SIZE,
+			   invalid_desc->page_base, invalid_desc->page_dma);
+	kfree(decoder->pgtlb.desc_base);
+
+	size = DECODER_PAGE_TABLE_ENTRY_SIZE * DECODER_PAGE_TABLE_SIZE;
+	dmam_free_coherent(decoder->dev, size, decoder->pgtlb.pgtlb_base,
+			   decoder->pgtlb.pgtlb_dma);
+}
 
 static void ub_get_decoder_mmio_base(struct ub_bus_controller *ubc,
 				     struct ub_decoder *decoder)

@@ -78,6 +78,8 @@ struct ub_entity {
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;
+
+	struct dev_message *message;
 };
 
 struct ub_dynids {

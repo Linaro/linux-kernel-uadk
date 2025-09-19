@@ -121,6 +121,11 @@ struct ub_port {
 	DECLARE_BITMAP(cap_map, UB_PORT_CAP_NUM);
 };
 
+struct ue_map {
+	u16 start_entity_idx;
+	u16 end_entity_idx;
+};
+
 struct ub_entity {
 	/* Driver framework base info */
 	struct device dev;
@@ -141,8 +146,16 @@ struct ub_entity {
 	unsigned short entity_idx;
 	u32 uent_num; /* ub dev number */
 	struct mmio_zone zone[MAX_UB_RES_NUM];
+	unsigned int total_funcs;
 	u32 token_id;
 	u32 token_value;
+
+	/* mue & ue info */
+	u8 is_mue;
+	u16 total_ues;
+	u16 num_ues;
+	struct ue_map uem;
+	struct list_head mue_list; /* management ub entity list */
 
 	/* entity topology info */
 	struct list_head node;
@@ -162,6 +175,10 @@ struct ub_entity {
 	struct list_head cna_list; /* store distance for cna in route table */
 
 	struct dev_message *message;
+
+	/* UB entity TID */
+	u32 tid;
+
 	u32 support_feature;
 
 	u16 upi;
@@ -301,6 +318,20 @@ extern struct bus_type ub_bus_type;
 
 void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
 const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
+
+/**
+ * ub_get_dst_eid() - Obtain the Dest EID of the entity.
+ * @uent: UB entity.
+ *
+ * Return the EID of bus instance if the entity has already been bound,
+ * or controller's EID.
+ *
+ * Context: Any context.
+ * Return: positive number if success, or %-EINVAL if @dev is %NULL,
+ * or %-ENODEV if entity's controller %NULL, or 0 if entity hasn't been
+ * initialized.
+ */
+int ub_get_dst_eid(struct ub_entity *uent);
 
 /**
  * ub_iomap() - Map the resource space of the entity.
@@ -512,6 +543,8 @@ void ub_stop_and_remove_ent(struct ub_entity *uent);
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}
+static inline int ub_get_dst_eid(struct ub_entity *uent)
+{ return -ENODEV; }
 static inline void __iomem *
 ub_iomap(struct ub_entity *uent, int resno, unsigned long maxlen)
 { return NULL; }

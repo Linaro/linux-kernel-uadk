@@ -13,5 +13,6 @@ void ub_start_ent(struct ub_entity *uent);
 void ub_remove_ent(struct ub_entity *uent);
 void ub_stop_entities(void);
 void ub_remove_entities(void);
+void ub_disable_ent(struct ub_entity *uent);
 
 #endif /* __UBUS_ENTITY_H__ */

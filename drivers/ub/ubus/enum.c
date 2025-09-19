@@ -1030,6 +1030,7 @@ static struct ub_entity *ub_enum_create_uent(struct ub_bus_controller *ubc)
 
 	uent->pue = uent;
 	uent->entity_idx = 0;
+	uent->is_mue = 1;
 	uent->ubc = ub_ubc_get(ubc);
 	uent->upi = UB_CP_UPI;
 	ret = message_probe_device(uent);

@@ -8,6 +8,8 @@
 #include <linux/kfifo.h>
 
 #include "ubus.h"
+#include "ubus_inner.h"
+#include "ubus_entity.h"
 #include "msg.h"
 #include "port.h"
 #include "cna.h"
@@ -989,4 +991,224 @@ map_fail:
 	kfifo_free(&bfs_route.kfifo);
 kfifo_fail:
 	return ret;
+}
+
+int ub_cfg_read_guid(struct ub_entity *uent)
+{
+	u32 val = 0;
+	int i, ret;
+
+	for (i = 0; i < UB_GUID_DW_NUM; i++) {
+		ret = ub_cfg_read_dword(uent, UB_GUID + i * sizeof(u32), &val);
+		if (ret)
+			return ret;
+
+		uent->guid.dw[i] = val;
+	}
+
+	return 0;
+}
+
+static void ub_enum_destroy_entity(struct ub_entity *uent)
+{
+	message_remove_device(uent);
+
+	if (is_primary(uent))
+		ub_ubc_put(uent->ubc);
+
+	kfree(uent);
+}
+
+static struct ub_entity *ub_enum_create_uent(struct ub_bus_controller *ubc)
+{
+	struct ub_entity *uent;
+	int ret;
+
+	uent = ub_alloc_ent();
+	if (!uent)
+		return NULL;
+
+	uent->pue = uent;
+	uent->entity_idx = 0;
+	uent->ubc = ub_ubc_get(ubc);
+	uent->upi = UB_CP_UPI;
+	ret = message_probe_device(uent);
+	if (ret) {
+		dev_err(&ubc->dev, "enum msg probe dev failed, ret=%d\n", ret);
+		goto err_out;
+	}
+
+	return uent;
+err_out:
+	ub_ubc_put(ubc);
+	kfree(uent);
+	return NULL;
+}
+
+static struct ub_entity *ub_enum_create_bus_controller(struct ub_bus_controller *ubc)
+{
+	struct ub_entity *uent;
+	int ret;
+
+	uent = ub_enum_create_uent(ubc);
+	if (!uent)
+		return (struct ub_entity *)ERR_PTR(-ENOMEM);
+
+	ubc->uent = uent;
+	ret = ub_cfg_read_guid(uent);
+	if (ret) {
+		dev_err(&ubc->dev, "read guid failed, ret=%d\n", ret);
+		goto err_out;
+	}
+
+	uent->topo_rank = 0;
+	uent->dev.parent = &ubc->dev;
+
+	return uent;
+err_out:
+	ub_enum_destroy_entity(uent);
+	return (struct ub_entity *)ERR_PTR(ret);
+}
+
+static void ub_enum_topo_ent_uninit(struct ub_entity *uent)
+{
+	if (is_primary(uent)) {
+		ub_route_clear(uent); /* alloc in route_config */
+		ub_cna_free(uent); /* alloc in na_cfg */
+		ub_ports_unset(uent); /* alloc in scan_device */
+	}
+}
+
+static int ub_enum_and_configure_ent(struct ub_entity *uent, void *buf)
+{
+	int ret;
+
+	ret = ub_enum_ent(uent, buf);
+	if (ret)
+		return ret;
+
+	ret = ub_enum_na_cfg(uent, buf);
+	if (ret)
+		ub_ports_unset(uent);
+
+	return ret;
+}
+
+void ub_enum_clear_ent_list(struct list_head *dev_list)
+{
+	struct ub_entity *uent, *tmp;
+	struct ub_port *port;
+
+	list_for_each_entry_safe_reverse(uent, tmp, dev_list, node) {
+		list_del(&uent->node);
+		for_each_uent_port(port, uent)
+			ub_port_disconnect(port);
+
+		ub_cna_free(uent);
+		ub_ports_unset(uent);
+		ub_enum_destroy_entity(uent);
+	}
+}
+
+static int ub_enum_bus_controllers(struct list_head *dev_list)
+{
+	struct ub_bus_controller *ubc;
+	struct ub_entity *uent;
+	int ret;
+
+	list_for_each_entry(ubc, &ubc_list, node) {
+		uent = ub_enum_create_bus_controller(ubc);
+		if (IS_ERR(uent)) {
+			ret = PTR_ERR(uent);
+			dev_err(&ubc->dev, "create controller failed, ret=%d\n",
+				ret);
+			goto clear_list;
+		}
+
+		ret = ub_enum_and_configure_ent(uent, topo_scan.buf);
+		if (ret) {
+			dev_err(&ubc->dev, "enum controller failed, ret=%d\n",
+				ret);
+			ub_enum_destroy_entity(uent);
+			goto clear_list;
+		}
+
+		list_add_tail(&uent->node, dev_list);
+	}
+
+	return 0;
+clear_list:
+	ub_enum_clear_ent_list(dev_list);
+	return ret;
+}
+
+/*
+ * During topo scan, just alloc ub_entity, alloc ub_port, alloc cna,
+ * so, when topo scan failed, just go to free devs in topo_scan.uents
+ */
+static int ub_enum_topo_scan(struct list_head *dev_list)
+{
+	int ret;
+
+	ret = ub_enum_topo_scan_init();
+	if (ret) {
+		pr_err("enum topo scan init failed, ret=%d\n", ret);
+		return ret;
+	}
+
+	ret = ub_enum_bus_controllers(dev_list);
+	if (ret) {
+		pr_err("enum create controllers failed, ret=%d\n", ret);
+		goto out;
+	}
+
+	if (list_empty(dev_list)) {
+		pr_warn("No ub bus controller exists in the current environment.\n");
+		ret = -ENODEV;
+		goto out;
+	}
+
+out:
+	ub_enum_topo_scan_uninit();
+	return ret;
+}
+
+static void ub_enum_free_all(void)
+{
+	struct ub_entity *uent, *tmp;
+
+	list_for_each_entry_safe_reverse(uent, tmp, &topo_scan.dev_list, node) {
+		list_del(&uent->node);
+		ub_enum_topo_ent_uninit(uent);
+		ub_enum_destroy_entity(uent);
+	}
+}
+
+int ub_enum_probe(void)
+{
+	int ret;
+
+	ret = ub_enum_topo_scan(&topo_scan.dev_list);
+	if (ret == -ENODEV) {
+		return 0;
+	} else if (ret) {
+		pr_err("topo_scan failed, ret=%d\n", ret);
+		return ret;
+	}
+
+	ret = ub_enum_bfs_route_cal(&topo_scan.dev_list);
+	if (ret) {
+		pr_err("route cal failed, ret=%d\n", ret);
+		goto err_out;
+	}
+
+	return 0;
+err_out:
+	ub_enum_free_all();
+	return ret;
+}
+
+void ub_enum_remove(void)
+{
+	ub_enum_free_all();
 }

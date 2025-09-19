@@ -37,6 +37,19 @@ enum ub_entity_type {
 
 #define UB_COMPACT_EID_MASK GENMASK(19, 0)
 
+/* ub_entity priv_flags */
+#define UB_ENTITY_ROUTE_UPDATED 2 /* Flag indicate uent's route is updated */
+static inline void ub_entity_assign_priv_flag(struct ub_entity *uent, int bit,
+					      bool flag)
+{
+	assign_bit(bit, &uent->priv_flags, flag);
+}
+
+static inline bool ub_entity_test_priv_flag(struct ub_entity *uent, int bit)
+{
+	return test_bit(bit, &uent->priv_flags);
+}
+
 int ub_host_probe(void);
 void ub_host_remove(void);
 

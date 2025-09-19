@@ -101,6 +101,7 @@ struct ub_entity {
 	struct ub_driver *driver;
 	bool match_driver; /* Skip attaching driver before dev ready */
 	const char *driver_override; /* Driver name to force a match */
+	unsigned long priv_flags; /* Private flags for the UB driver */
 
 	/* entity base info */
 	int ent_type;
@@ -120,6 +121,9 @@ struct ub_entity {
 	/* entity port info */
 	u16 port_nums;
 	struct ub_port *ports;
+
+	/* entity route info */
+	struct list_head cna_list; /* store distance for cna in route table */
 
 	struct dev_message *message;
 	u32 support_feature;

@@ -117,6 +117,7 @@ struct ub_entity {
 	/* entity topology info */
 	struct ub_bus_controller *ubc;
 	struct ub_entity *pue; /* ue/mue connected to their mue */
+	int topo_rank; /* The levels of Breadth-First Search */
 
 	/* entity port info */
 	u16 port_nums;

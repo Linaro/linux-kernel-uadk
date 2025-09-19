@@ -7,5 +7,10 @@
 #define __UBUS_ENTITY_H__
 
 struct ub_entity *ub_alloc_ent(void);
+int ub_setup_ent(struct ub_entity *uent);
+void ub_entity_add(struct ub_entity *uent, void *ctx);
+void ub_start_ent(struct ub_entity *uent);
+void ub_stop_entities(void);
+void ub_remove_entities(void);
 
 #endif /* __UBUS_ENTITY_H__ */

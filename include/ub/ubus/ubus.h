@@ -74,6 +74,10 @@ struct ub_entity {
 	u16 class_code;
 	u16 mod_vendor; /* entity's module vendor and module id */
 	u16 module;
+	unsigned int cna;
+
+	/* entity topology info */
+	struct ub_bus_controller *ubc;
 };
 
 struct ub_dynids {
@@ -133,7 +137,13 @@ struct ub_driver {
 
 struct ub_bus_controller {
 	struct device dev;
+	struct ub_entity *uent;
+
+	u32 ctl_no;
+	struct message_device *mdev;
 	struct list_head node;
+	struct list_head devs;
+	struct ub_bus_controller_ops *ops;
 };
 
 static inline struct ub_driver *to_ub_driver(struct device_driver *drv)
@@ -172,6 +182,34 @@ struct ub_entity *ub_entity_get(struct ub_entity *uent);
  */
 void ub_entity_put(struct ub_entity *uent);
 
+/**
+ * ub_get_bus_controller() - Obtains the ub bus controller entity list.
+ * @uents: Output buffer for the UBC entities list.
+ * @max_num: Buffer size.
+ * @real_num: Real entities num.
+ *
+ * All ub bus controllers in the system are returned. Increase the reference
+ * counting of all entities by 1. Remember to call ub_put_bus_controller() after
+ * using it.
+ *
+ * Context: Any context.
+ * Return: 0 if success, or %-EINVAL if input parameter is NULL,
+ * or %-ENOMEM if buffer is too small.
+ */
+int ub_get_bus_controller(struct ub_entity *uents[], unsigned int max_num,
+		      unsigned int *real_num);
+
+/**
+ * ub_put_bus_controller() - Free the ub bus controller device list.
+ * @uents: UBC entities list
+ * @num: entities num
+ *
+ * Decrement the reference counting of all entities by 1.
+ *
+ * Context: Any context.
+ */
+void ub_put_bus_controller(struct ub_entity *uents[], unsigned int num);
+
 /* Proper probing supporting hot-pluggable entities */
 int __ub_register_driver(struct ub_driver *drv, struct module *owner,
 			 const char *mod_name);
@@ -185,6 +223,12 @@ void ub_unregister_driver(struct ub_driver *drv);
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}
+static inline int ub_get_bus_controller(struct ub_entity *uents[],
+				    unsigned int max_num,
+				    unsigned int *real_num)
+{ return -ENODEV; }
+static inline void
+ub_put_bus_controller(struct ub_entity *uents[], unsigned int num) {}
 static inline int
 __ub_register_driver(struct ub_driver *drv, struct module *owner,
 		     const char *mod_name)

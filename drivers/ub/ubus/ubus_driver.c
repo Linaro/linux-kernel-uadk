@@ -15,6 +15,102 @@
 
 #include "sysfs.h"
 #include "ubus.h"
+#include "ubus_controller.h"
+
+static DEFINE_MUTEX(manage_subsystem_ops_mutex);
+static const struct ub_manage_subsystem_ops *manage_subsystem_ops;
+
+int register_ub_manage_subsystem_ops(const struct ub_manage_subsystem_ops *ops)
+{
+	if (!ops)
+		return -EINVAL;
+
+	mutex_lock(&manage_subsystem_ops_mutex);
+	if (!manage_subsystem_ops) {
+		manage_subsystem_ops = ops;
+		mutex_unlock(&manage_subsystem_ops_mutex);
+		pr_info("ub manage subsystem ops register successfully\n");
+		return 0;
+	}
+
+	pr_warn("ub manage subsystem ops has been registered\n");
+	mutex_unlock(&manage_subsystem_ops_mutex);
+
+	return -EINVAL;
+}
+EXPORT_SYMBOL_GPL(register_ub_manage_subsystem_ops);
+
+void unregister_ub_manage_subsystem_ops(const struct ub_manage_subsystem_ops *ops)
+{
+	if (!ops)
+		return;
+
+	mutex_lock(&manage_subsystem_ops_mutex);
+	if (manage_subsystem_ops == ops) {
+		manage_subsystem_ops = NULL;
+		pr_info("ub manage subsystem ops unregister successfully\n");
+	} else {
+		pr_warn("ub manage subsystem ops is not registered by this vendor\n");
+	}
+	mutex_unlock(&manage_subsystem_ops_mutex);
+}
+EXPORT_SYMBOL_GPL(unregister_ub_manage_subsystem_ops);
+
+const struct ub_manage_subsystem_ops *get_ub_manage_subsystem_ops(void)
+{
+	return manage_subsystem_ops;
+}
+
+struct ub_bus_controller *ub_find_bus_controller(u32 ctl_no)
+{
+	struct ub_bus_controller *ubc;
+
+	list_for_each_entry(ubc, &ubc_list, node)
+		if (ubc->ctl_no == ctl_no)
+			return ubc;
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(ub_find_bus_controller);
+
+int ub_get_bus_controller(struct ub_entity *ubc_dev[], unsigned int max_num,
+		      unsigned int *real_num)
+{
+	struct ub_bus_controller *ubc;
+	unsigned int ubc_num = 0;
+
+	if (!real_num || !ubc_dev) {
+		pr_err("%s: input parameters invalid\n", __func__);
+		return -EINVAL;
+	}
+
+	list_for_each_entry(ubc, &ubc_list, node) {
+		if (ubc_num >= max_num) {
+			pr_err("ubc list num over max num %u\n", max_num);
+			ub_put_bus_controller(ubc_dev, max_num);
+			return -ENOMEM;
+		}
+
+		ubc_dev[ubc_num] = ub_entity_get(ubc->uent);
+		ubc_num++;
+	}
+	*real_num = ubc_num;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ub_get_bus_controller);
+
+void ub_put_bus_controller(struct ub_entity *ubc_dev[], unsigned int num)
+{
+	unsigned int i;
+
+	if (ubc_dev) {
+		for (i = 0; i < num; i++)
+			ub_entity_put(ubc_dev[i]);
+		memset(ubc_dev, 0, sizeof(struct ub_entity *) * num);
+	}
+}
+EXPORT_SYMBOL_GPL(ub_put_bus_controller);
 
 struct ub_entity *ub_entity_get(struct ub_entity *dev)
 {

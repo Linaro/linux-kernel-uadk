@@ -15,7 +15,9 @@
 
 #include "sysfs.h"
 #include "ubus.h"
+#include "ubus_config.h"
 #include "ubus_controller.h"
+#include "ubus_inner.h"
 
 static DEFINE_MUTEX(manage_subsystem_ops_mutex);
 static const struct ub_manage_subsystem_ops *manage_subsystem_ops;

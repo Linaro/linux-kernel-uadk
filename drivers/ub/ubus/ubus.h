@@ -8,6 +8,8 @@
 #include <ub/ubfi/ubfi.h>
 #include <ub/ubus/ubus.h>
 
+#define UB_CP_UPI 0x7FFF
+
 int ub_host_probe(void);
 void ub_host_remove(void);
 

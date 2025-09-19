@@ -116,3 +116,21 @@ void message_remove_device(struct ub_entity *uent)
 		ops->remove_dev(uent);
 	dev_message_put(uent);
 }
+
+int message_sync_request(struct message_device *mdev, struct msg_info *info,
+			 u8 code)
+{
+	if (mdev->ops->sync_request)
+		return mdev->ops->sync_request(mdev, info, code);
+
+	return -ENOTTY;
+}
+
+int message_send(struct message_device *mdev, struct msg_info *info,
+		 u8 code)
+{
+	if (mdev->ops->send)
+		return mdev->ops->send(mdev, info, code);
+
+	return -ENOTTY;
+}

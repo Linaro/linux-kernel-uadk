@@ -76,11 +76,14 @@ struct ub_entity {
 	u16 mod_vendor; /* entity's module vendor and module id */
 	u16 module;
 	unsigned int cna;
+	unsigned int eid;
 
 	/* entity topology info */
 	struct ub_bus_controller *ubc;
 
 	struct dev_message *message;
+
+	u16 upi;
 };
 
 struct ub_dynids {

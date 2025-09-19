@@ -190,11 +190,17 @@ enum message_tx_type {
  * struct message_ops - message ops and capabilities
  * @probe_dev: probe ub_entity to init message
  * @remove_dev: remove ub_entity to uninit message
+ * @sync_request: send message to target ub_entity and wait response
+ * @send: send message to target ub_entity but not wait response
  * @owner: Driver module providing these ops
  */
 struct message_ops {
 	int (*probe_dev)(struct ub_entity *uent);
 	void (*remove_dev)(struct ub_entity *uent);
+	int (*sync_request)(struct message_device *mdev, struct msg_info *info,
+			    u8 code);
+	int (*send)(struct message_device *mdev, struct msg_info *info,
+		    u8 code);
 	struct module *owner;
 };
 
@@ -236,9 +242,16 @@ static inline void message_info_init(struct msg_info *info, struct ub_entity *ue
 	info->rsp_pkt_size = (u16)size;
 }
 
+void ub_msg_pkt_header_init(struct msg_pkt_header *header, struct ub_entity *uent,
+			    u16 plen, u8 code, bool flag);
+
 int message_device_register(struct message_device *mdev);
 void message_device_unregister(struct message_device *mdev);
 int message_probe_device(struct ub_entity *uent);
 void message_remove_device(struct ub_entity *uent);
+int message_sync_request(struct message_device *mdev, struct msg_info *info,
+			 u8 code);
+int message_send(struct message_device *mdev, struct msg_info *info,
+		 u8 code);
 
 #endif /* __MSG_H__ */

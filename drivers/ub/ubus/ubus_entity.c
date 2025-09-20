@@ -357,6 +357,8 @@ void ub_entity_add(struct ub_entity *uent, void *ctx)
 	list_add_tail(&uent->node, list);
 	up_write(&ub_bus_sem);
 
+	dev_set_msi_domain(&uent->dev, uent->ubc->dev.msi.domain);
+
 	uent->match_driver = false;
 	ret = device_add(&uent->dev);
 	WARN_ON(ret < 0);

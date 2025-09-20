@@ -497,6 +497,78 @@ void ub_disable_intr(struct ub_entity *uent);
 u32 ub_intr_vec_count(struct ub_entity *uent);
 
 /**
+ * ub_int_type1_vec_count() - Interrupt Vectors Supported by a entity.
+ * @uent: UB entity.
+ *
+ * Querying the Number of Interrupt Vectors Supported by a entity.
+ * For interrupt type 1.
+ *
+ * Context: Any context.
+ * Return: Number of Interrupts Supported if success, or 0 if failed.
+ */
+u32 ub_int_type1_vec_count(struct ub_entity *uent);
+
+#define UB_IRQ_AFFINITY (1 << 0) /* Auto-assign affinity */
+/**
+ * ub_alloc_irq_vectors_affinity() - Allocate multiple entity interrupt vectors.
+ * @uent: UB entity.
+ * @min_vecs: minimum required number of vectors (must be >= 1).
+ * @max_vecs: maximum desired number of vectors.
+ *
+ * @flags: allocation flags(can be 0):
+ *
+ *         * %UB_IRQ_AFFINITY  Auto-manage IRQs affinity by spreading
+ *           the vectors around available CPUs
+ *
+ * @affd: affinity requirements (can be %NULL).
+ *
+ * Allocate interrupt vectors for the entity and set the affinity.
+ *
+ * Context: Any context.
+ * Return: the number of vectors allocated (which might be smaller than
+ * @max_vecs) if success, or a negative error code on error. If less than
+ * @min_vecs interrupt vectors are available for @uent the function will
+ * fail with -ENOSPC
+ */
+int ub_alloc_irq_vectors_affinity(struct ub_entity *uent, unsigned int min_vecs,
+				  unsigned int max_vecs, unsigned int flags,
+				  struct irq_affinity *affd);
+static inline int ub_alloc_irq_vectors(struct ub_entity *uent,
+				       unsigned int min_vecs,
+				       unsigned int max_vecs)
+{
+	return ub_alloc_irq_vectors_affinity(uent, min_vecs, max_vecs, 0, NULL);
+}
+
+/**
+ * ub_irq_vector() - Obtaining the Linux IRQ number.
+ * @uent: UB entity.
+ * @nr: Interrupt vector.
+ *
+ * Translate from Interrupt Vectors to Linux IRQ number.
+ *
+ * Context: Any context.
+ * Return: IRQ number if success, or %-EINVAL if failed.
+ */
+int ub_irq_vector(struct ub_entity *uent, unsigned int nr);
+
+/**
+ * ub_irq_get_affinity() - Get a entity interrupt vector affinity
+ * @uent: the UB entity to operate on
+ * @nr:  entity-relative interrupt vector index (0-based); has different
+ *       meanings, depending on interrupt mode:
+ *
+ *         * INTR_TYPE2     the index in the USI vector table
+ *         * INTR_TYPE1     the index of the enabled USI vectors
+ *
+ * Return: USI vector affinity, NULL if @nr is out of range or if
+ * the USI vector was allocated without explicit affinity
+ * requirements (e.g., by ub_alloc_irq_vectors(), or
+ * ub_alloc_irq_vectors_affinity() without the %UB_IRQ_AFFINITY flag).
+ */
+const struct cpumask *ub_irq_get_affinity(struct ub_entity *uent, int nr);
+
+/**
  * ub_cfg_read_byte() - 1 byte configuration access read.
  * @uent: UB entity.
  * @pos: Config space address.
@@ -692,6 +764,21 @@ ub_irq_calc_affinity_vectors(unsigned int minvec, unsigned int maxvec,
 static inline void ub_disable_intr(struct ub_entity *uent) {}
 static inline u32 ub_intr_vec_count(struct ub_entity *uent)
 { return 0; }
+static inline u32 ub_int_type1_vec_count(struct ub_entity *uent)
+{ return 0; }
+static inline int
+ub_alloc_irq_vectors_affinity(struct ub_entity *uent, unsigned int min_vecs,
+			      unsigned int max_vecs, unsigned int flags,
+			      struct irq_affinity *affd)
+{ return -ENODEV; }
+static inline int ub_alloc_irq_vectors(struct ub_entity *uent,
+				       unsigned int min_vecs,
+				       unsigned int max_vecs)
+{ return -ENODEV; }
+static inline int ub_irq_vector(struct ub_entity *uent, unsigned int nr)
+{ return -EINVAL; }
+static inline const struct cpumask *
+ub_irq_get_affinity(struct ub_entity *uent, int nr) { return cpu_possible_mask; }
 static inline int
 __ub_register_driver(struct ub_driver *drv, struct module *owner,
 		     const char *mod_name)

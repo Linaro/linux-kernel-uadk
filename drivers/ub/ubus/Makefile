@@ -4,6 +4,6 @@ obj-$(CONFIG_UB_UBUS) += ub-driver.o controller.o config.o entity.o
 obj-$(CONFIG_UB_UBUS) += msi/
 
 ubus-y := ubus_driver.o sysfs.o ubus_controller.o msg.o ubus_config.o port.o cc.o eid.o cna.o route.o
-ubus-y += enum.o resource.o ubus_entity.o reset.o cap.o
+ubus-y += enum.o resource.o ubus_entity.o reset.o cap.o interrupt.o
 
 obj-$(CONFIG_UB_UBUS_BUS) += ubus.o

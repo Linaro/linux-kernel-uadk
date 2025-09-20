@@ -27,4 +27,16 @@ config UB_UBUS_BUS
 	  the UB bus device management functionality.
 	  Say 'M' here unless you know what you are doing.
 
+config UB_UBUS_USI
+	default n
+	bool "UBUS Message Signaled Interrupts (USI)"
+	depends on UB_UBUS
+	select GENERIC_MSI_IRQ
+	help
+		This allows device drivers to enable MSI (Message Signaled
+		Interrupts).  Message Signaled Interrupts enable a device to
+		generate an interrupt using an inbound Memory Write on its
+		UnifiedBus instead of asserting a device IRQ pin.If you
+		don't know what to do here, say Y.
+
 endif

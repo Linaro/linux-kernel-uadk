@@ -185,6 +185,16 @@ struct ub_entity {
 	u64 dma_mask;
 	struct device_dma_parameters dma_parms;
 
+	/* UB interrupt info */
+	raw_spinlock_t usi_lock;
+	unsigned int no_intr : 1;
+	unsigned int intr_enabled : 1;
+	unsigned int intr_type1 : 1;
+	void __iomem *intr_addr_base;
+	void __iomem *intr_vector_base;
+	u32 intr_device_id;
+	const struct attribute_group **msi_irq_groups;
+
 	/* UB reset info */
 	unsigned int reset_fn : 1;
 

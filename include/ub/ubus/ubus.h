@@ -258,6 +258,11 @@ struct ub_dynids {
  *		context, so it can sleep.
  * @shutdown:	Hook into reboot_notifier_list (kernel/sys.c).
  *		Intended to stop any idling operations.
+ * @virt_configure: Optional driver callback to allow configuration of
+ *		ues. This function is called to enable or disable ues.
+ * @virt_notify: Optional driver callback to notify the driver about
+ *		changes in ue status. This function is called
+ *		when the status of a ue changes.
  * @activate:	Activate a specific entity. This function is called to
  *		activate an entity by its index.
  * @deactivate:	Deactivate a specific entity. This function is called to
@@ -285,6 +290,8 @@ struct ub_driver {
 	/* entity removed (NULL if not a hot-plug capable driver) */
 	void (*remove)(struct ub_entity *uent);
 	void (*shutdown)(struct ub_entity *uent);
+	int (*virt_configure)(struct ub_entity *uent, int entity_idx, bool is_en);
+	int (*virt_notify)(struct ub_entity *uent, int entity_idx, bool is_en);
 	int (*activate)(struct ub_entity *uent, u32 entity_idx);
 	int (*deactivate)(struct ub_entity *uent, u32 entity_idx);
 	const struct ub_error_handlers *err_handler;
@@ -367,6 +374,58 @@ extern struct bus_type ub_bus_type;
 
 void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
 const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
+
+/**
+ * ub_get_ent_by_eid() - Searching for UB Devices by EID.
+ * @eid: entity EID.
+ *
+ * Traverse the UB bus device linked list and search for the device with
+ * the target EID. You need to call ub_entity_put() after using it.
+ *
+ * Context: Any context.
+ * Return: The device found, or NULL if not found.
+ */
+struct ub_entity *ub_get_ent_by_eid(unsigned int eid);
+
+/**
+ * ub_get_ent_by_uent_num() - Searching for UB entities by entity Num.
+ * @uent_num: entity Num.
+ *
+ * Traverse the UB bus device linked list and search for the entity with
+ * the target entity Num. You need to call ub_entity_put() after using it.
+ *
+ * Context: Any context.
+ * Return: The entity found, or NULL if not found.
+ */
+struct ub_entity *ub_get_ent_by_uent_num(unsigned int uent_num);
+
+/**
+ * ub_get_ent_by_guid() - Searching for UB entities by GUID.
+ * @guid: GUID.
+ *
+ * Traverse the UB bus entity linked list and search for the entity with
+ * the target GUID. You need to call ub_entity_put() after using it.
+ *
+ * Context: Any context.
+ * Return: The entity found, or NULL if not found.
+ */
+struct ub_entity *ub_get_ent_by_guid(const struct ub_guid *guid);
+
+/**
+ * ub_get_entity() - Searching for UB entities by Vendor and entity ID.
+ * @vendor: Vendor ID.
+ * @entity: entity ID.
+ * @from: Previous UB entity found in search, or %NULL for new search.
+ *
+ * Traverse the UB bus entity linked list and search for the entity with
+ * the target Vendor and entity ID. You need to call ub_entity_put()
+ * after using it.
+ *
+ * Context: Any context.
+ * Return: The entity found, or NULL if not found.
+ */
+struct ub_entity *ub_get_entity(unsigned int vendor, unsigned int entity,
+			     struct ub_entity *from);
 
 /**
  * ub_entity_enable() - Enable or disable ub entity
@@ -833,6 +892,15 @@ void ub_stop_and_remove_ent(struct ub_entity *uent);
 
 #else /* CONFIG_UB_UBUS is not enabled */
 #define dev_is_ub(d) (false)
+static inline struct ub_entity *ub_get_ent_by_eid(unsigned int eid)
+{ return NULL; }
+static inline struct ub_entity *ub_get_ent_by_uent_num(unsigned int uent_num)
+{ return NULL; }
+static inline struct ub_entity *ub_get_ent_by_guid(const struct ub_guid *guid)
+{ return NULL; }
+static inline struct ub_entity *
+ub_get_entity(unsigned int vendor, unsigned int entity, struct ub_entity *from)
+{ return NULL; }
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}

@@ -711,10 +711,40 @@ failed:
 	return ret;
 }
 
+void ub_virt_notify(struct ub_entity *pue, u16 entity_idx, bool is_en)
+{
+	const char *operate = is_en ? "enable" : "disable";
+	struct ub_driver *pdrv;
+	int ret;
+
+	if (pue) {
+		pdrv = pue->driver;
+		if (pdrv && pdrv->virt_notify) {
+			ret = pdrv->virt_notify(pue, entity_idx, is_en);
+			if (ret)
+				ub_warn(pue, "drv virt notify %s ue with entity_idx %u failed, ret=%d\n",
+					operate, entity_idx, ret);
+		}
+	}
+}
+
 void ub_disable_ent(struct ub_entity *uent)
 {
+	struct ub_entity *pue;
+	bool ue_flag = false;
+	u16 entity_idx;
+
 	ub_info(uent, "disable entity, eid=%#05x\n", uent->eid);
+	if (!uent->is_mue) {
+		pue = uent->pue;
+		entity_idx = uent->entity_idx;
+		ue_flag = true;
+	}
+
 	ub_stop_and_remove_ent(uent);
+
+	if (ue_flag)
+		ub_virt_notify(pue, entity_idx, false);
 }
 EXPORT_SYMBOL_GPL(ub_disable_ent);
 

@@ -164,6 +164,7 @@ struct ub_entity {
 	u16 num_ues;
 	struct ue_map uem;
 	struct list_head mue_list; /* management ub entity list */
+	struct list_head ue_list; /* entity list in management ub entity */
 
 	/* entity topology info */
 	struct list_head node;
@@ -359,6 +360,69 @@ extern struct bus_type ub_bus_type;
 
 void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
 const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
+
+/**
+ * ub_enable_entities() - Enable ues of mue in batches.
+ * @pue: UB mue.
+ * @nums: Number of enabled entities.
+ *
+ * Create ues in batches, initialize them, and add them to the system.
+ *
+ * Context: Any context.
+ * Return: 0 if success, or %-EINVAL if @pue type is not mue or nums over
+ * mue's total ue nums, or %-ENOMEM if the system is out of memory,
+ * or other failed negative values.
+ */
+int ub_enable_entities(struct ub_entity *pue, int nums);
+
+/**
+ * ub_disable_entities() - Disable ues of mue in batches.
+ * @pue: UB mue.
+ *
+ * Remove all enabled ues under the mue from the system.
+ *
+ * Context: Any context.
+ */
+void ub_disable_entities(struct ub_entity *pue);
+
+/**
+ * ub_enable_ue() - Enable a single ue.
+ * @pue: UB mue.
+ * @entity_idx: Number of the entity to be enabled.
+ *
+ * Create a specified ue under mue, initialize the ue,
+ * and add it to the system.
+ *
+ * Context: Any context.
+ * Return: 0 if success, or %-EINVAL if @pue type is not mue or @entity_idx
+ * is no longer in the ue range of mue, or %-EEXIST if entity has been
+ * enabled, or other failed negative values.
+ */
+int ub_enable_ue(struct ub_entity *pue, int entity_idx);
+
+/**
+ * ub_disable_ue() - Disable a single ue.
+ * @pue: UB mue.
+ * @entity_idx: Number of the entity to be disabled.
+ *
+ * Remove a specified ue.
+ *
+ * Context: Any context.
+ * Return: 0 if success, or %-EINVAL if @pue type is not mue or @entity_idx
+ * is no longer in the ue range of mue, or %-ENODEV if entity hasn't
+ * been enabled.
+ */
+int ub_disable_ue(struct ub_entity *pue, int entity_idx);
+
+/**
+ * ub_get_entity_flex_en() - Acquire the capability to enable flexible functionality.
+ *
+ * Return whether flexible enabling of entity is supported.
+ *
+ * Context: Any context.
+ * Return: true if support, or false if not support.
+ */
+bool ub_get_entity_flex_en(void);
 
 /**
  * ub_get_dst_eid() - Obtain the Dest EID of the entity.
@@ -710,6 +774,15 @@ void ub_stop_and_remove_ent(struct ub_entity *uent);
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}
+static inline int ub_enable_entities(struct ub_entity *pue, int nums)
+{ return -ENODEV; }
+static inline void ub_disable_entities(struct ub_entity *pue) {}
+static inline int ub_enable_ue(struct ub_entity *pue, int entity_idx)
+{ return -ENODEV; }
+static inline int ub_disable_ue(struct ub_entity *pue, int entity_idx)
+{ return -ENODEV; }
+static inline bool ub_get_entity_flex_en(void)
+{ return false; }
 static inline int ub_get_dst_eid(struct ub_entity *uent)
 { return -ENODEV; }
 static inline void __iomem *

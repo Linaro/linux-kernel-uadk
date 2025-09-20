@@ -18,6 +18,11 @@
 #include "ubus_config.h"
 #include "ubus_controller.h"
 #include "ubus_inner.h"
+#include "ubus_entity.h"
+
+bool entity_flex_en;
+module_param(entity_flex_en, bool, 0444);
+MODULE_PARM_DESC(entity_flex_en, "Entity Flexible enable: default: 0");
 
 DECLARE_RWSEM(ub_bus_sem);
 
@@ -485,6 +490,11 @@ static struct attribute *ub_drv_attrs[] = {
 };
 ATTRIBUTE_GROUPS(ub_drv);
 
+static int ub_bus_num_ue(struct device *dev)
+{
+	return ub_num_ue(to_ub_entity(dev));
+}
+
 void ub_bus_type_init(void)
 {
 	ub_bus_type.match = ub_bus_match;
@@ -495,6 +505,7 @@ void ub_bus_type_init(void)
 	ub_bus_type.dev_groups = ub_entity_groups;
 	ub_bus_type.bus_groups = ub_bus_groups;
 	ub_bus_type.drv_groups = ub_drv_groups;
+	ub_bus_type.num_vf = ub_bus_num_ue;
 }
 
 void ub_bus_type_uninit(void)
@@ -507,6 +518,7 @@ void ub_bus_type_uninit(void)
 	ub_bus_type.dev_groups = NULL;
 	ub_bus_type.bus_groups = NULL;
 	ub_bus_type.drv_groups = NULL;
+	ub_bus_type.num_vf = NULL;
 }
 
 int ub_host_probe(void)

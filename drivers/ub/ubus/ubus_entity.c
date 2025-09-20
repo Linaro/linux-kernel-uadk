@@ -6,6 +6,7 @@
 #define pr_fmt(fmt)	"ubus entity: " fmt
 
 #include <linux/dma-mapping.h>
+#include <linux/list_sort.h>
 
 #include "ubus.h"
 #include "sysfs.h"
@@ -20,6 +21,7 @@
 #include "ubus_driver.h"
 #include "ubus_inner.h"
 #include "cap.h"
+#include "ubus_entity.h"
 
 /*
  * Entity lifecycle
@@ -43,6 +45,7 @@ struct ub_entity *ub_alloc_ent(void)
 
 	INIT_LIST_HEAD(&uent->node);
 	INIT_LIST_HEAD(&uent->mue_list);
+	INIT_LIST_HEAD(&uent->ue_list);
 	INIT_LIST_HEAD(&uent->cna_list);
 
 	uent->dev.type = &ub_dev_type;
@@ -312,12 +315,22 @@ static void ub_unconfigure_ent(struct ub_entity *uent)
 {
 }
 
+static int ub_ue_sort_by_ent_idx(void *priv, const struct list_head *a,
+				    const struct list_head *b)
+{
+	struct ub_entity *uent_a = container_of(a, struct ub_entity, node);
+	struct ub_entity *uent_b = container_of(b, struct ub_entity, node);
+
+	return uent_a->entity_idx > uent_b->entity_idx;
+}
+
 static void ub_release_ent(struct device *dev);
 void ub_entity_add(struct ub_entity *uent, void *ctx)
 {
 	struct ub_bus_controller *ubc;
 	struct list_head *list;
 	struct ub_entity *pue;
+	u8 need_sort = 0;
 	int ret, node;
 
 	if (!uent || !ctx)
@@ -344,10 +357,15 @@ void ub_entity_add(struct ub_entity *uent, void *ctx)
 		ubc = (struct ub_bus_controller *)ctx;
 		node = ub_ubc_to_node(ubc);
 		list = &ubc->devs;
-	} else {
+	} else if (uent->is_mue) {
 		pue = (struct ub_entity *)ctx;
 		node = dev_to_node(&pue->dev);
 		list = &pue->mue_list;
+	} else {
+		pue = (struct ub_entity *)ctx;
+		node = dev_to_node(&pue->dev);
+		list = &pue->ue_list;
+		need_sort = 1;
 	}
 
 	set_dev_node(&uent->dev, node);
@@ -355,6 +373,8 @@ void ub_entity_add(struct ub_entity *uent, void *ctx)
 
 	down_write(&ub_bus_sem);
 	list_add_tail(&uent->node, list);
+	if (need_sort)
+		list_sort(NULL, list, ub_ue_sort_by_ent_idx);
 	up_write(&ub_bus_sem);
 
 	dev_set_msi_domain(&uent->dev, uent->ubc->dev.msi.domain);
@@ -428,6 +448,9 @@ void ub_stop_ent(struct ub_entity *uent)
 		return;
 	ub_entity_assign_priv_flag(uent, UB_ENTITY_START, false);
 
+	/* Stop ue in mue, when uent is not mue, ue_list is NULL */
+	list_for_each_entry_safe_reverse(ent, tmp, &uent->ue_list, node)
+		ub_stop_ent(ent);
 	/* Stop mue in primary dev, when uent is entN, mue_list is NULL */
 	list_for_each_entry_safe_reverse(ent, tmp, &uent->mue_list, node)
 		ub_stop_ent(ent);
@@ -444,6 +467,9 @@ void ub_remove_ent(struct ub_entity *uent)
 	if (!uent->dev.kobj.parent)
 		return;
 
+	/* Remove ue in mue, when uent is not mue, ue_list is NULL */
+	list_for_each_entry_safe_reverse(ent, tmp, &uent->ue_list, node)
+		ub_remove_ent(ent);
 	/* Remove mue in primary dev, when uent is entN, mue_list is NULL */
 	list_for_each_entry_safe_reverse(ent, tmp, &uent->mue_list, node)
 		ub_remove_ent(ent);
@@ -699,3 +725,156 @@ static void ub_disable_mues(struct ub_entity *pue)
 	list_for_each_entry_safe_reverse(mue, tmp, &pue->mue_list, node)
 		ub_disable_ent(mue);
 }
+
+void ub_disable_ues(struct ub_entity *mue);
+static int ub_enable_ues(struct ub_entity *mue, int nums)
+{
+	int ret;
+	int i;
+
+	if (nums > mue->total_ues)
+		return -EINVAL;
+
+	for (i = 0; i < nums; i++) {
+		ret = ub_enable_ent(mue, mue->uem.start_entity_idx + i, 0,
+				     NULL);
+		if (ret)
+			goto failed;
+	}
+	mue->num_ues = nums;
+	return 0;
+failed:
+	ub_disable_ues(mue);
+	return ret;
+}
+
+void ub_disable_ues(struct ub_entity *mue)
+{
+	struct ub_entity *ue, *tmp;
+	u16 pool_ues = 0;
+
+	list_for_each_entry_safe_reverse(ue, tmp, &mue->ue_list,
+					 node) {
+		if (is_p_device(ue) || is_p_idevice(ue))
+			pool_ues++;
+		else
+			ub_disable_ent(ue);
+	}
+
+	mue->num_ues = pool_ues;
+}
+
+static int ub_check_ue_para(struct ub_entity *pue, int entity_idx)
+{
+	if (!pue->is_mue || !pue->total_ues) {
+		ub_err(pue, "It's not mue or ues 0.\n");
+		return -EINVAL;
+	}
+
+	if (entity_idx < pue->uem.start_entity_idx || entity_idx > pue->uem.end_entity_idx) {
+		ub_err(pue, "Entity idx is err, start=%d, pre=%d, end=%d.\n",
+		       pue->uem.start_entity_idx, entity_idx, pue->uem.end_entity_idx);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/* ub_enable_ue does not support parallel execution */
+int ub_enable_ue(struct ub_entity *pue, int entity_idx)
+{
+	struct ub_entity *ue;
+	int ret;
+
+	if (!pue)
+		return -EINVAL;
+
+	ret = ub_check_ue_para(pue, entity_idx);
+	if (ret)
+		return ret;
+
+	list_for_each_entry(ue, &pue->ue_list, node)
+		if (ue->entity_idx == entity_idx) {
+			ub_err(ue, "entity_idx[%d] already exists, eid=%#05x\n",
+			       entity_idx, ue->eid);
+			return -EEXIST;
+		}
+
+	ret = ub_enable_ent(pue, entity_idx, 0, NULL);
+	if (ret)
+		return ret;
+
+	pue->num_ues += 1;
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ub_enable_ue);
+
+int ub_disable_ue(struct ub_entity *pue, int entity_idx)
+{
+	struct ub_entity *vd_dev;
+	int ret;
+
+	if (!pue)
+		return -EINVAL;
+
+	ret = ub_check_ue_para(pue, entity_idx);
+	if (ret)
+		return ret;
+
+	list_for_each_entry(vd_dev, &pue->ue_list, node)
+		if (vd_dev->entity_idx == entity_idx) {
+			ub_disable_ent(vd_dev);
+			pue->num_ues -= 1;
+			return 0;
+		}
+
+	ub_err(pue, "No matching entity_idx[%d] found\n", entity_idx);
+
+	return -ENODEV;
+}
+EXPORT_SYMBOL_GPL(ub_disable_ue);
+
+bool ub_get_entity_flex_en(void)
+{
+	return entity_flex_en;
+}
+EXPORT_SYMBOL_GPL(ub_get_entity_flex_en);
+
+int ub_enable_entities(struct ub_entity *uent, int nums)
+{
+	if (!uent)
+		return -EINVAL;
+
+	if (!uent->is_mue) {
+		ub_err(uent, "It's not mue.\n");
+		return -EINVAL;
+	}
+
+	return ub_enable_ues(uent, nums);
+}
+EXPORT_SYMBOL_GPL(ub_enable_entities);
+
+void ub_disable_entities(struct ub_entity *uent)
+{
+	if (!uent)
+		return;
+
+	if (!uent->is_mue)
+		return;
+
+	ub_disable_ues(uent);
+}
+EXPORT_SYMBOL_GPL(ub_disable_entities);
+
+int ub_num_ue(struct ub_entity *uent)
+{
+	if (!uent)
+		return -EINVAL;
+
+	if (!uent->is_mue)
+		return 0;
+
+	return uent->num_ues;
+}
+EXPORT_SYMBOL_GPL(ub_num_ue);

@@ -218,6 +218,8 @@ int ub_reset_entity(struct ub_entity *dev)
 		return ret;
 	}
 
+	ub_entity_enable(dev, 0);
+
 	rc = ub_elr(dev);
 
 	ub_restore_state(dev);

@@ -878,3 +878,177 @@ int ub_num_ue(struct ub_entity *uent)
 	return uent->num_ues;
 }
 EXPORT_SYMBOL_GPL(ub_num_ue);
+
+void ub_entity_enable(struct ub_entity *uent, u8 enable)
+{
+	int ret;
+
+	if (!uent)
+		return;
+
+	ub_cfg_write_byte(uent, UB_BUS_ACCESS_EN, enable);
+	ub_cfg_write_byte(uent, UB_ENTITY_RS_ACCESS_EN, enable);
+
+	if (!enable && !ub_entity_test_priv_flag(uent, UB_ENTITY_ACTIVE))
+		return;
+
+	if (uent->ubc && uent->ubc->ops && uent->ubc->ops->entity_enable) {
+		ret = uent->ubc->ops->entity_enable(uent, enable);
+		if (ret) {
+			ub_err(uent, "entity enable, ret=%d, enable=%u\n",
+			       ret, enable);
+			return;
+		}
+	}
+
+	ub_info(uent, "Change the entity status to %s\n", enable ?  "normal" : "disable");
+
+	if (enable)
+		ub_entity_assign_priv_flag(uent, UB_ENTITY_ACTIVE, true);
+	else
+		ub_entity_assign_priv_flag(uent, UB_ENTITY_ACTIVE, false);
+}
+EXPORT_SYMBOL_GPL(ub_entity_enable);
+
+int ub_set_user_info(struct ub_entity *uent)
+{
+	if (!uent || !uent->ubc || !uent->ubc->uent)
+		return -EINVAL;
+
+	u32 eid = uent->ubc->uent->eid;
+
+	if (is_p_device(uent))
+		goto cfg1;
+
+	/* set dsteid to device */
+	ub_cfg_write_dword(uent, UB_UEID_0, eid);
+	ub_cfg_write_dword(uent, UB_UEID_1, 0);
+	ub_cfg_write_dword(uent, UB_UEID_2, 0);
+	ub_cfg_write_dword(uent, UB_UEID_3, 0);
+	ub_cfg_write_dword(uent, UB_UCNA, uent->ubc->uent->cna);
+
+cfg1:
+	/* set tid to device */
+	ub_cfg_write_dword(uent, UB_ENTITY_TOKEN_ID, uent->tid);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ub_set_user_info);
+
+void ub_unset_user_info(struct ub_entity *uent)
+{
+	if (!uent)
+		return;
+
+	if (is_p_device(uent))
+		goto cfg1;
+
+	ub_cfg_write_dword(uent, UB_UCNA, 0);
+	/* clear eid */
+	ub_cfg_write_dword(uent, UB_UEID_0, 0);
+	ub_cfg_write_dword(uent, UB_UEID_1, 0);
+	ub_cfg_write_dword(uent, UB_UEID_2, 0);
+	ub_cfg_write_dword(uent, UB_UEID_3, 0);
+
+cfg1:
+	/* clear tid */
+	ub_cfg_write_dword(uent, UB_ENTITY_TOKEN_ID, 0);
+}
+EXPORT_SYMBOL_GPL(ub_unset_user_info);
+
+static struct ub_entity *ub_get_ue_by_entity_idx(struct ub_entity *pue, u32 entity_idx)
+{
+	struct ub_entity *ue;
+
+	if (ub_check_ue_para(pue, entity_idx))
+		return NULL;
+
+	list_for_each_entry(ue, &pue->ue_list, node) {
+		if (ue->entity_idx == entity_idx)
+			return ue;
+	}
+
+	return NULL;
+}
+
+int ub_activate_entity(struct ub_entity *uent, u32 entity_idx)
+{
+	struct ub_entity *target_dev;
+	struct ub_driver *udrv;
+	int ret;
+
+	if (uent && uent->entity_idx != entity_idx && uent->is_mue)
+		target_dev = ub_get_ue_by_entity_idx(uent, entity_idx);
+	else
+		target_dev = uent;
+	if (!target_dev)
+		return -EINVAL;
+
+	udrv = uent->driver;
+	if (!udrv || !udrv->activate) {
+		ub_err(uent, "udrv or activate is null\n");
+		return -EINVAL;
+	}
+
+	if (!device_trylock(&target_dev->dev))
+		return -EBUSY;
+
+	if (ub_entity_test_priv_flag(target_dev, UB_ENTITY_ACTIVE)) {
+		ub_warn(uent, "entity_idx[%u] is already in normal state\n", entity_idx);
+		device_unlock(&target_dev->dev);
+		return 0;
+	}
+
+	ret = udrv->activate(uent, entity_idx);
+	if (ret) {
+		ub_err(uent, "udrv activate entity_idx[%u] failed, ret=%d\n", entity_idx, ret);
+	} else {
+		ub_entity_assign_priv_flag(target_dev, UB_ENTITY_ACTIVE, true);
+		ub_info(uent, "udrv activate entity_idx[%u] success\n", entity_idx);
+	}
+
+	device_unlock(&target_dev->dev);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ub_activate_entity);
+
+int ub_deactivate_entity(struct ub_entity *uent, u32 entity_idx)
+{
+	struct ub_entity *target_dev;
+	struct ub_driver *udrv;
+	int ret;
+
+	if (uent && uent->entity_idx != entity_idx && uent->is_mue)
+		target_dev = ub_get_ue_by_entity_idx(uent, entity_idx);
+	else
+		target_dev = uent;
+	if (!target_dev)
+		return -EINVAL;
+
+	udrv = uent->driver;
+	if (!udrv || !udrv->deactivate) {
+		ub_err(uent, "udrv or deactivate is null\n");
+		return -EINVAL;
+	}
+
+	if (!device_trylock(&target_dev->dev))
+		return -EBUSY;
+
+	if (!ub_entity_test_priv_flag(target_dev, UB_ENTITY_ACTIVE)) {
+		ub_warn(uent, "entity_idx[%u] is already in disable state\n", entity_idx);
+		device_unlock(&target_dev->dev);
+		return 0;
+	}
+
+	ret = udrv->deactivate(uent, entity_idx);
+	if (ret) {
+		ub_err(uent, "udrv deactivate entity_idx[%u] failed, ret=%d\n", entity_idx, ret);
+	} else {
+		ub_entity_assign_priv_flag(target_dev, UB_ENTITY_ACTIVE, false);
+		ub_info(uent, "udrv deactivate entity_idx[%u] success\n", entity_idx);
+	}
+
+	device_unlock(&target_dev->dev);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ub_deactivate_entity);

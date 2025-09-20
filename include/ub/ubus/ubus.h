@@ -258,6 +258,10 @@ struct ub_dynids {
  *		context, so it can sleep.
  * @shutdown:	Hook into reboot_notifier_list (kernel/sys.c).
  *		Intended to stop any idling operations.
+ * @activate:	Activate a specific entity. This function is called to
+ *		activate an entity by its index.
+ * @deactivate:	Deactivate a specific entity. This function is called to
+ *		deactivate an entity by its index.
  * @err_handler: Error handling callbacks.
  * @groups:	Sysfs attribute groups.
  * @dev_groups: Attributes attached to the device that will be
@@ -281,6 +285,8 @@ struct ub_driver {
 	/* entity removed (NULL if not a hot-plug capable driver) */
 	void (*remove)(struct ub_entity *uent);
 	void (*shutdown)(struct ub_entity *uent);
+	int (*activate)(struct ub_entity *uent, u32 entity_idx);
+	int (*deactivate)(struct ub_entity *uent, u32 entity_idx);
 	const struct ub_error_handlers *err_handler;
 	const struct attribute_group **groups;
 	const struct attribute_group **dev_groups;
@@ -360,6 +366,39 @@ extern struct bus_type ub_bus_type;
 
 void ub_bus_type_iommu_ops_set(const struct iommu_ops *ops);
 const struct iommu_ops *ub_bus_type_iommu_ops_get(void);
+
+/**
+ * ub_entity_enable() - Enable or disable ub entity
+ * @uent: UB entity.
+ * @enable: Enable or disable.
+ *
+ * Enables or disables the entity access bus and the path through which
+ * the bus accesses the entity.
+ *
+ * Context: Any context.
+ */
+void ub_entity_enable(struct ub_entity *uent, u8 enable);
+
+/**
+ * ub_set_user_info() - Initialize host information for the entity.
+ * @uent: UB entity.
+ *
+ * Initialize necessary host information for the entity for communication
+ * purposes, such as the host EID, CNA, and token ID.
+ *
+ * Context: Any context.
+ */
+int ub_set_user_info(struct ub_entity *uent);
+
+/**
+ * ub_unset_user_info() - Deinitialize host information for the entity.
+ * @uent: UB entity.
+ *
+ * Clearing the Host Information of a entity.
+ *
+ * Context: Any context.
+ */
+void ub_unset_user_info(struct ub_entity *uent);
 
 /**
  * ub_enable_entities() - Enable ues of mue in batches.
@@ -633,6 +672,28 @@ int ub_irq_vector(struct ub_entity *uent, unsigned int nr);
 const struct cpumask *ub_irq_get_affinity(struct ub_entity *uent, int nr);
 
 /**
+ * ub_activate_entity() - Activate entity.
+ * @uent: UB entity.
+ * @entity_idx: Number of the entity to be activated.
+ *
+ * Context: Any context, It will take device_trylock()/device_unlock()
+ * Return: 0 if success, or %-EINVAL if the device doesn't match the driver,
+ * or %-EBUSY if can't get device_trylock(), or other failed negative values.
+ */
+int ub_activate_entity(struct ub_entity *uent, u32 entity_idx);
+
+/**
+ * ub_deactivate_entity() - Deactivate entity.
+ * @uent: UB entity.
+ * @entity_idx: Number of the entity to be deactivated.
+ *
+ * Context: Any context, It will take device_trylock()/device_unlock()
+ * Return: 0 if success, or %-EINVAL if the entity doesn't match the driver,
+ * or %-EBUSY if can't get device_trylock(), or other failed negative values.
+ */
+int ub_deactivate_entity(struct ub_entity *uent, u32 entity_idx);
+
+/**
  * ub_cfg_read_byte() - 1 byte configuration access read.
  * @uent: UB entity.
  * @pos: Config space address.
@@ -774,6 +835,10 @@ void ub_stop_and_remove_ent(struct ub_entity *uent);
 static inline struct ub_entity *ub_entity_get(struct ub_entity *uent)
 { return NULL; }
 static inline void ub_entity_put(struct ub_entity *uent) {}
+static inline void ub_entity_enable(struct ub_entity *uent, u8 enable) {}
+static inline int ub_set_user_info(struct ub_entity *uent)
+{ return -ENODEV; }
+static inline void ub_unset_user_info(struct ub_entity *uent) {}
 static inline int ub_enable_entities(struct ub_entity *pue, int nums)
 { return -ENODEV; }
 static inline void ub_disable_entities(struct ub_entity *pue) {}
@@ -852,6 +917,10 @@ static inline int ub_irq_vector(struct ub_entity *uent, unsigned int nr)
 { return -EINVAL; }
 static inline const struct cpumask *
 ub_irq_get_affinity(struct ub_entity *uent, int nr) { return cpu_possible_mask; }
+static inline int ub_activate_entity(struct ub_entity *uent, u32 entity_idx)
+{ return -ENODEV; }
+static inline int ub_deactivate_entity(struct ub_entity *uent, u32 entity_idx)
+{ return -ENODEV; }
 static inline int
 __ub_register_driver(struct ub_driver *drv, struct module *owner,
 		     const char *mod_name)

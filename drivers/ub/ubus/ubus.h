@@ -43,6 +43,7 @@ enum ub_entity_type {
 #define UB_ENTITY_DETACHED 1 /* Flag indicate uent is detached */
 #define UB_ENTITY_ROUTE_UPDATED 2 /* Flag indicate uent's route is updated */
 #define UB_ENTITY_SETUP 4 /* Flag indicate uent is setup */
+#define UB_ENTITY_ACTIVE 5 /* Flag indicate uent is in normal or disable state */
 
 static inline void ub_entity_assign_priv_flag(struct ub_entity *uent, int bit,
 					      bool flag)

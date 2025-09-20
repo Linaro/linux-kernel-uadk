@@ -330,6 +330,32 @@ int ubase_ubus_irq_vector(struct device *dev, u32 idx)
 	return ub_irq_vector(ue, idx);
 }
 
+static int ubase_ubus_suspend(struct device *dev)
+{
+	struct ubase_dev *udev = dev_get_drvdata(dev);
+
+	ubase_info(udev, "UBUS suspend start.\n");
+	ubase_suspend(udev);
+
+	return 0;
+}
+
+static int ubase_ubus_resume(struct device *dev)
+{
+	struct ubase_dev *udev = dev_get_drvdata(dev);
+
+	ubase_info(udev, "UBUS resume start.\n");
+	ubase_resume(udev);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(ubase_ubus_pm_ops, ubase_ubus_suspend, ubase_ubus_resume);
+
+static const struct device_driver ubase_ue_driver = {
+	.pm = &ubase_ubus_pm_ops,
+};
+
 static int ubase_ubus_virt_configure(struct ub_entity *ue, int bus_ue_id, bool is_en)
 {
 	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
@@ -362,6 +388,46 @@ static int ubase_ubus_virt_notify(struct ub_entity *ue, int bus_ue_id, bool is_e
 	return 0;
 }
 
+static void ubase_ubus_reset_prepare(struct ub_entity *ue)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "UBUS ELR start.\n");
+	ubase_suspend(udev);
+}
+
+static void ubase_ubus_reset_done(struct ub_entity *ue)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_resume(udev);
+	ubase_info(udev, "UBUS ELR done.\n");
+}
+
+static ub_ers_result_t ubase_ubus_error_detected(struct ub_entity *ue,
+						 ub_channel_state_t state)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "UBUS error detected, state = %u.\n", state);
+
+	switch (state) {
+	case ub_channel_io_normal:
+		return UB_ERS_RESULT_NEED_RESET;
+	case ub_channel_io_frozen:
+		return UB_ERS_RESULT_DISCONNECT;
+	case ub_channel_io_perm_failure:
+	default:
+		return UB_ERS_RESULT_NONE;
+	}
+}
+
+static const struct ub_error_handlers ubase_ubus_err_handler = {
+	.ub_reset_prepare	= ubase_ubus_reset_prepare,
+	.ub_reset_done		= ubase_ubus_reset_done,
+	.ub_error_detected	= ubase_ubus_error_detected,
+};
+
 static struct ub_driver ubase_ubus_driver = {
 	.name		= ubase_ubus_driver_name,
 	.id_table	= ubase_ubus_tbl,
@@ -370,7 +436,10 @@ static struct ub_driver ubase_ubus_driver = {
 	.shutdown	= ubase_ubus_shutdown,
 	.virt_configure	= ubase_ubus_virt_configure,
 	.virt_notify	= ubase_ubus_virt_notify,
-	.driver		= {},
+	.err_handler	= &ubase_ubus_err_handler,
+	.driver		= {
+		.pm = &ubase_ubus_pm_ops,
+	},
 };
 
 int ubase_ubus_register_driver(void)

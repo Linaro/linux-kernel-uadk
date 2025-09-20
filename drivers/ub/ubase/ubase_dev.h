@@ -399,6 +399,12 @@ void ubase_port_up(struct ubase_dev *udev);
 int ubase_dev_init(struct ubase_dev *udev);
 void ubase_dev_uninit(struct ubase_dev *udev);
 
+int ubase_dev_reset_init(struct ubase_dev *udev);
+void ubase_dev_reset_uninit(struct ubase_dev *udev);
+
+void ubase_suspend_aux_devices(struct ubase_dev *udev);
+void ubase_resume_aux_devices(struct ubase_dev *udev);
+
 void ubase_virt_handler(struct ubase_dev *udev, u16 bus_ue_id, bool is_en);
 
 #endif

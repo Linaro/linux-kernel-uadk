@@ -10,6 +10,7 @@
 #include <ub/ubase/ubase_comm_mbx.h>
 
 #include "ubase_cmd.h"
+#include "ubase_ctrlq.h"
 #include "ubase_dev.h"
 #include "ubase_mailbox.h"
 #include "ubase_tp.h"
@@ -768,9 +769,40 @@ void ubase_ue_uninit(struct ubase_dev *udev)
 	ubase_uninit_ctx_buf_lock(&udev->ctx_buf);
 }
 
+static int ubase_notify_ctrl_plane_init_res(struct ubase_dev *udev)
+{
+	struct ubase_ctrlq_reset_ctrl_req req = {0};
+	struct ubase_ctrlq_msg msg = {0};
+	u32 resp;
+	int ret;
+
+	msg.service_ver = UBASE_CTRLQ_SER_VER_01;
+	msg.service_type = UBASE_CTRLQ_SER_TYPE_DEV_REGISTER;
+	msg.opcode = UBASE_CTRLQ_OPC_UE_RESET_CTRL;
+	msg.need_resp = 1;
+	msg.in_size = sizeof(req);
+	msg.in = &req;
+	msg.out_size = sizeof(resp);
+	msg.out = &resp;
+
+	req.flag = UBASE_CTRL_PLANE_INIT_RES;
+
+	ret = __ubase_ctrlq_send(udev, &msg, NULL);
+	if (ret)
+		dev_err(udev->dev,
+			"failed to notify ctrl plane init res, ret = %d.\n",
+			ret);
+
+	return ret;
+}
+
 int ubase_hw_init(struct ubase_dev *udev)
 {
 	int ret;
+
+	ret = ubase_notify_ctrl_plane_init_res(udev);
+	if (ret)
+		return ret;
 
 	ret = ubase_ctx_buf_alloc(udev);
 	if (ret) {
@@ -807,8 +839,10 @@ void ubase_hw_uninit(struct ubase_dev *udev)
 	ubase_dev_uninit_tp_tpg(udev);
 	ubase_uninit_ta_tp_ext_buf(udev);
 
-	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits)) {
+		ubase_ctrlq_disable_remote(udev);
 		ubase_destroy_ctx_res(udev);
+	}
 
 	ubase_uninit_ctx_buf(udev);
 }

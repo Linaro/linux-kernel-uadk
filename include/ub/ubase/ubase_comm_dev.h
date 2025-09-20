@@ -230,11 +230,19 @@ struct ubase_adev_caps *ubase_get_udma_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_cdma_caps(struct auxiliary_device *adev);
 struct ubase_adev_qos *ubase_get_adev_qos(struct auxiliary_device *adev);
 
+void ubase_reset_event(struct auxiliary_device *adev,
+		       enum ubase_reset_type reset_type);
+enum ubase_reset_stage ubase_get_reset_stage(struct auxiliary_device *adev);
+
 void ubase_virt_register(struct auxiliary_device *adev,
 			 void (*virt_handler)(struct auxiliary_device *adev,
 					      u16 bus_ue_id, bool is_en));
 void ubase_virt_unregister(struct auxiliary_device *adev);
 
+void ubase_reset_register(struct auxiliary_device *adev,
+			  void (*reset_handler)(struct auxiliary_device *adev,
+						enum ubase_reset_stage stage));
+void ubase_reset_unregister(struct auxiliary_device *adev);
 int ubase_get_bus_eid(struct auxiliary_device *adev, struct ubase_bus_eid *eid);
 
 #endif

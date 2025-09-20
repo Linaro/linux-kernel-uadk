@@ -261,6 +261,32 @@ static void ubase_ctrlq_clean_msg_queue(struct ubase_dev *udev)
 	spin_unlock_bh(&csq->lock);
 }
 
+void ubase_ctrlq_disable_remote(struct ubase_dev *udev)
+{
+	struct ubase_ctrlq_chan_ctrl_req req = {0};
+	struct ubase_ctrlq_msg msg = {0};
+	u32 resp;
+	int ret;
+
+	if (!ubase_dev_ctrlq_supported(udev))
+		return;
+
+	msg.service_ver = UBASE_CTRLQ_SER_VER_01;
+	msg.service_type = UBASE_CTRLQ_SER_TYPE_DEV_REGISTER;
+	msg.opcode = UBASE_CTRLQ_OPC_CTRLQ_CTRL;
+	msg.need_resp = 1;
+	msg.in_size = sizeof(req);
+	msg.in = &req;
+	msg.out_size = sizeof(resp);
+	msg.out = &resp;
+	req.opc = UBASE_CTRLQ_CHAN_DISABLE_OPC;
+
+	ret = __ubase_ctrlq_send(udev, &msg, NULL);
+	if (ret)
+		ubase_err(udev, "failed to disable remote ctrlq, ret = %d.\n",
+			  ret);
+}
+
 static void ubase_ctrlq_clean_pending_msgs(struct ubase_dev *udev)
 {
 #define UBASE_CTRLQ_CLEAN_WAIT_TIME	5
@@ -646,6 +672,13 @@ int __ubase_ctrlq_send(struct ubase_dev *udev, struct ubase_ctrlq_msg *msg,
 		return ret;
 
 	while (retry_cnt++ <= UBASE_CTRLQ_RETRY_TIMES) {
+		if (udev->reset_stage == UBASE_RESET_STAGE_UNINIT &&
+		    !(msg->opcode == UBASE_CTRLQ_OPC_CTRLQ_CTRL &&
+		      msg->service_type == UBASE_CTRLQ_SER_TYPE_DEV_REGISTER)) {
+			ubase_dbg(udev, "ctrlq send is disabled.\n");
+			return -EAGAIN;
+		}
+
 		if (!test_bit(UBASE_CTRLQ_STATE_ENABLE, &udev->ctrlq.state)) {
 			ubase_warn(udev, "ctrlq is disabled in csq.\n");
 			return -EAGAIN;

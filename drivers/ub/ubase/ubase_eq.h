@@ -189,6 +189,7 @@ struct ubase_aeq_work {
 
 int ubase_irq_table_init(struct ubase_dev *udev);
 void ubase_irq_table_uninit(struct ubase_dev *udev);
+void ubase_irq_table_free(struct ubase_dev *udev);
 
 int ubase_register_ae_event(struct ubase_dev *udev);
 void ubase_unregister_ae_event(struct ubase_dev *udev);

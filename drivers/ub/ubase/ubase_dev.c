@@ -12,6 +12,7 @@
 #include "ubase_ctrlq.h"
 #include "ubase_hw.h"
 #include "ubase_mailbox.h"
+#include "ubase_reset.h"
 #include "ubase_dev.h"
 
 #define UBASE_PERIOD_100MS 100
@@ -332,7 +333,15 @@ static void ubase_period_service_task(struct work_struct *work)
 	ubase_enable_period_service_task(udev);
 }
 
-void ubase_service_task(struct work_struct *work)
+static void ubase_reset_service_task(struct work_struct *work)
+{
+	struct ubase_delay_work *ubase_work =
+		container_of(work, struct ubase_delay_work, service_task.work);
+
+	ubase_reset_service(ubase_work);
+}
+
+static void ubase_service_task(struct work_struct *work)
 {
 	struct ubase_delay_work *ubase_work =
 		container_of(work, struct ubase_delay_work, service_task.work);
@@ -345,6 +354,8 @@ void ubase_service_task(struct work_struct *work)
 static void ubase_init_delayed_work(struct ubase_dev *udev)
 {
 	INIT_DELAYED_WORK(&udev->service_task.service_task, ubase_service_task);
+	INIT_DELAYED_WORK(&udev->reset_service_task.service_task,
+			  ubase_reset_service_task);
 	INIT_DELAYED_WORK(&udev->period_service_task.service_task,
 			  ubase_period_service_task);
 }
@@ -504,10 +515,24 @@ static int ubase_handle_ue2ue_event(void *dev, void *data, u32 len)
 	return 0;
 }
 
+static int ubase_handle_ue_reset_event(void *dev, void *data, u32 len)
+{
+	struct ubase_dev *udev = dev;
+
+	ubase_info(udev, "recv ue reset req, will reset.\n");
+	__ubase_reset_event(udev, UBASE_UE_RESET);
+
+	return 0;
+}
+
 static struct ubase_crq_event_nb ubase_crq_events[] = {
 	{
 		.opcode = UBASE_OPC_UE2UE_UBASE,
 		.crq_handler = ubase_handle_ue2ue_event,
+	},
+	{
+		.opcode = UBASE_OPC_NOTIFY_UE_RESET,
+		.crq_handler = ubase_handle_ue_reset_event,
 	},
 };
 
@@ -688,6 +713,98 @@ void ubase_dev_uninit(struct ubase_dev *udev)
 	}
 }
 
+static void __ubase_reset_uninit(struct ubase_dev *udev, int end)
+{
+	int i;
+
+	for (i = end; i >= 0; i--) {
+		if (!ubase_init_func_support(udev,
+			ubase_init_func_map[i].support_devs))
+			continue;
+
+		if (ubase_init_func_map[i].uninit_func &&
+		    ubase_init_func_map[i].need_reset)
+			ubase_init_func_map[i].uninit_func(udev);
+	}
+}
+
+int ubase_dev_reset_init(struct ubase_dev *udev)
+{
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(ubase_init_func_map); i++) {
+		if (!ubase_init_func_map[i].need_reset)
+			continue;
+
+		if (!ubase_init_func_support(udev,
+					     ubase_init_func_map[i].support_devs))
+			continue;
+
+		if (!ubase_init_func_map[i].init_func)
+			continue;
+
+		ret = ubase_init_func_map[i].init_func(udev);
+		if (ret) {
+			ubase_err(udev, "failed to %s, ret = %d.\n",
+				  ubase_init_func_map[i].err_msg, ret);
+			goto err_init;
+		}
+	}
+
+	return 0;
+
+err_init:
+	__ubase_reset_uninit(udev, i - 1);
+
+	return ret;
+}
+
+void ubase_dev_reset_uninit(struct ubase_dev *udev)
+{
+	__ubase_reset_uninit(udev, ARRAY_SIZE(ubase_init_func_map) - 1);
+}
+
+void ubase_suspend_aux_devices(struct ubase_dev *udev)
+{
+	struct ubase_priv *priv = &udev->priv;
+	struct ubase_adev *uadev;
+	int i;
+
+	mutex_lock(&priv->uadev_lock);
+	for (i = ARRAY_SIZE(ubase_adev_devices) - 1; i >= 0; i--) {
+		uadev = priv->uadev[i];
+		if (!uadev)
+			continue;
+
+		mutex_lock(&uadev->reset_lock);
+		if (uadev->reset_handler)
+			uadev->reset_handler(&uadev->adev, udev->reset_stage);
+		mutex_unlock(&uadev->reset_lock);
+	}
+	mutex_unlock(&priv->uadev_lock);
+}
+
+void ubase_resume_aux_devices(struct ubase_dev *udev)
+{
+	struct ubase_priv *priv = &udev->priv;
+	struct ubase_adev *uadev;
+	int i;
+
+	mutex_lock(&priv->uadev_lock);
+	for (i = 0; i < ARRAY_SIZE(ubase_adev_devices); i++) {
+		uadev = priv->uadev[i];
+		if (!uadev)
+			continue;
+
+		mutex_lock(&uadev->reset_lock);
+		if (uadev->reset_handler)
+			uadev->reset_handler(&uadev->adev,
+					     UBASE_RESET_STAGE_INIT);
+		mutex_unlock(&uadev->reset_lock);
+	}
+	mutex_unlock(&priv->uadev_lock);
+}
+
 bool ubase_adev_ubl_supported(struct auxiliary_device *adev)
 {
 	if (!adev)
@@ -761,6 +878,19 @@ struct ubase_adev_caps *ubase_get_cdma_caps(struct auxiliary_device *adev)
 }
 EXPORT_SYMBOL(ubase_get_cdma_caps);
 
+enum ubase_reset_stage ubase_get_reset_stage(struct auxiliary_device *adev)
+{
+	struct ubase_dev *udev;
+
+	if (!adev)
+		return UBASE_RESET_STAGE_NONE;
+
+	udev = __ubase_get_udev_by_adev(adev);
+
+	return udev->reset_stage;
+}
+EXPORT_SYMBOL(ubase_get_reset_stage);
+
 void ubase_virt_register(struct auxiliary_device *adev,
 			 void (*virt_handler)(struct auxiliary_device *adev,
 					      u16 bus_ue_id, bool is_en))
@@ -793,6 +923,39 @@ void ubase_virt_unregister(struct auxiliary_device *adev)
 	mutex_unlock(&uadev->virt_lock);
 }
 EXPORT_SYMBOL(ubase_virt_unregister);
+
+void ubase_reset_register(struct auxiliary_device *adev,
+			  void (*reset_handler)(struct auxiliary_device *adev,
+						enum ubase_reset_stage stage))
+{
+	struct ubase_adev *uadev;
+
+	if (!adev || !reset_handler)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->reset_lock);
+	if (!uadev->reset_handler)
+		uadev->reset_handler = reset_handler;
+	mutex_unlock(&uadev->reset_lock);
+}
+EXPORT_SYMBOL(ubase_reset_register);
+
+void ubase_reset_unregister(struct auxiliary_device *adev)
+{
+	struct ubase_adev *uadev;
+
+	if (!adev)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->reset_lock);
+	uadev->reset_handler = NULL;
+	mutex_unlock(&uadev->reset_lock);
+}
+EXPORT_SYMBOL(ubase_reset_unregister);
 
 struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev)
 {

@@ -197,6 +197,10 @@ enum {
 #define CPER_SEC_DMAR_IOMMU						\
 	GUID_INIT(0x036F84E1, 0x7F37, 0x428c, 0xA7, 0x9E, 0x57, 0x5F,	\
 		  0xDF, 0xAA, 0x84, 0xEC)
+/* UBUS */
+#define CPER_SEC_UBUS							\
+	GUID_INIT(0x74D255B0, 0x73E8, 0x488A, 0xB8, 0x67, 0x90, 0x65,	\
+		  0x4A, 0x35, 0x86, 0x5E)
 
 #define CPER_PROC_VALID_TYPE			0x0001
 #define CPER_PROC_VALID_ISA			0x0002
@@ -539,6 +543,20 @@ struct cper_sec_pcie {
 	}		bridge;
 	u8	capability[60];
 	u8	aer_info[96];
+};
+
+struct cper_sec_ubus {
+	u64	validation_bits;
+	u32	eid;
+	u32	cna;
+	u32	port;
+	u32	vendor;
+	u16	device;
+	u16	type;
+	u16	class_code;
+	u16	reserved;
+	u32	overflow_flag;
+	u32	err_info[72];
 };
 
 /* Firmware Error Record Reference, UEFI v2.7 sec N.2.10  */

@@ -38,6 +38,23 @@
 	(ub_resource_end((dev), (resno)) -		\
 	ub_resource_start((dev), (resno)) + 1))
 
+typedef unsigned int __bitwise ub_channel_state_t;
+enum {
+	ub_channel_io_normal = (__force ub_channel_state_t) 1,
+	ub_channel_io_frozen = (__force ub_channel_state_t) 2,
+	ub_channel_io_perm_failure = (__force ub_channel_state_t) 3,
+};
+
+typedef unsigned int __bitwise ub_ers_result_t;
+enum ub_ers_result {
+	UB_ERS_RESULT_NONE = (__force ub_ers_result_t) 1,
+	UB_ERS_RESULT_CAN_RECOVER = (__force ub_ers_result_t) 2,
+	UB_ERS_RESULT_NEED_RESET = (__force ub_ers_result_t) 3,
+	UB_ERS_RESULT_DISCONNECT = (__force ub_ers_result_t) 4,
+	UB_ERS_RESULT_RECOVERED = (__force ub_ers_result_t) 5,
+	UB_ERS_RESULT_NO_ERR_DRIVER = (__force ub_ers_result_t) 6,
+};
+
 #define UB_GUID_DW_NUM SZ_4
 
 struct ub_bus_region {
@@ -222,6 +239,8 @@ struct ub_error_handlers {
 	/* UB function reset prepare or completed */
 	void (*ub_reset_prepare)(struct ub_entity *uent);
 	void (*ub_reset_done)(struct ub_entity *uent);
+	ub_ers_result_t (*ub_error_detected)(struct ub_entity *uent, ub_channel_state_t state);
+	ub_ers_result_t (*ub_resource_enabled)(struct ub_entity *uent);
 };
 
 struct ub_dynids {

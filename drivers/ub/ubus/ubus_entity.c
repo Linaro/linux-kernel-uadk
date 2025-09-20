@@ -21,6 +21,7 @@
 #include "ubus_driver.h"
 #include "ubus_inner.h"
 #include "cap.h"
+#include "eu.h"
 #include "ubus_entity.h"
 
 /*
@@ -309,10 +310,12 @@ EXPORT_SYMBOL_GPL(ub_setup_ent);
 
 static void ub_configure_ent(struct ub_entity *uent)
 {
+	ub_eu_table_init(uent);
 }
 
 static void ub_unconfigure_ent(struct ub_entity *uent)
 {
+	ub_eu_table_uninit(uent);
 }
 
 static int ub_ue_sort_by_ent_idx(void *priv, const struct list_head *a,

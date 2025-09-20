@@ -229,6 +229,9 @@ struct ub_entity {
 	/* UB saved config space */
 	u32 saved_config_space[24]; /* Config space saved at reset time */
 
+	/* entity bus instance info */
+	struct ub_eu_table *eu_table;
+
 	u32 support_feature;
 
 	u16 upi;

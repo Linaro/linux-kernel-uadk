@@ -14,6 +14,21 @@
 
 static struct dentry *ubase_dbgfs_root;
 
+static int ubase_dbg_dump_rst_info(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+
+	seq_printf(s, "ELR reset count: %u\n", udev->reset_stat.elr_reset_cnt);
+	seq_printf(s, "port reset count: %u\n", udev->reset_stat.port_reset_cnt);
+	seq_printf(s, "reset done count: %u\n", udev->reset_stat.reset_done_cnt);
+	seq_printf(s, "HW reset done count: %u\n", udev->reset_stat.hw_reset_done_cnt);
+	seq_printf(s, "reset fail count: %u\n", udev->reset_stat.reset_fail_cnt);
+	seq_printf(s, "udev state: 0x%lx\n", udev->state_bits);
+
+	return 0;
+}
+
+
 static bool __ubase_dbg_dentry_support(struct device *dev, u32 property)
 {
 	struct ubase_dev *udev = dev_get_drvdata(dev);
@@ -81,6 +96,15 @@ static struct ubase_dbg_dentry_info ubase_dbg_dentry[] = {
 };
 
 static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
+	{
+		.name = "reset_info",
+		.dentry_index = UBASE_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_PMU |
+			    UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_rst_info,
+	},
 	{
 		.name = "adev_qos",
 		.dentry_index = UBASE_DBG_DENTRY_QOS,

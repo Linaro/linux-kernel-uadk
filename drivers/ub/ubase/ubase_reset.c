@@ -26,6 +26,20 @@ static void ubase_reset_task_schedule(struct ubase_dev *udev)
 	}
 }
 
+static void ubase_reset_err_handle(struct ubase_dev *udev)
+{
+	udev->reset_stat.reset_fail_cnt++;
+	udev->reset_stat.reset_retry_cnt++;
+	if (udev->reset_stat.reset_retry_cnt < UBASE_RST_MAX_RETRY_CNT) {
+		ubase_reset_task_schedule(udev);
+		ubase_info(udev, "re-schedule reset task(%u).\n",
+			   udev->reset_stat.reset_retry_cnt);
+		return;
+	}
+
+	ubase_err(udev, "failed to reset, too many attempts.\n");
+}
+
 void ubase_reset_service(struct ubase_delay_work *ubase_work)
 {
 	struct ubase_dev *udev = container_of(ubase_work, struct ubase_dev,
@@ -190,6 +204,7 @@ void ubase_suspend(struct ubase_dev *udev)
 
 	if (ubase_dev_pmu_supported(udev)) {
 		__ubase_cmd_disable(udev);
+		udev->reset_stat.elr_reset_cnt++;
 		return;
 	}
 
@@ -199,6 +214,8 @@ void ubase_suspend(struct ubase_dev *udev)
 	ubase_suspend_aux_devices(udev);
 	ubase_wait_ue_reset_ready(udev);
 	udev->reset_stage = UBASE_RESET_STAGE_UNINIT;
+
+	udev->reset_stat.elr_reset_cnt++;
 
 	clear_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
 	ubase_cmd_disable(udev);
@@ -221,11 +238,14 @@ void ubase_resume(struct ubase_dev *udev)
 	if (ubase_dev_pmu_supported(udev)) {
 		ubase_ubus_reinit(udev->dev);
 		__ubase_cmd_enable(udev);
+		udev->reset_stat.reset_done_cnt++;
+		udev->reset_stat.hw_reset_done_cnt++;
 		clear_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits);
 		clear_bit(UBASE_STATE_DISABLED_B, &udev->state_bits);
 		return;
 	}
 
+	udev->reset_stat.hw_reset_done_cnt++;
 	ubase_suspend_aux_devices(udev);
 	ubase_dev_reset_uninit(udev);
 	ubase_ubus_reinit(udev->dev);
@@ -242,6 +262,8 @@ void ubase_resume(struct ubase_dev *udev)
 	ubase_resume_aux_devices(udev);
 	ubase_reset_done(udev);
 
+	udev->reset_stat.reset_done_cnt++;
+	udev->reset_stat.reset_retry_cnt = 0;
 	clear_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits);
 	clear_bit(UBASE_STATE_DISABLED_B, &udev->state_bits);
 	return;
@@ -250,4 +272,5 @@ err_resume:
 	ubase_resume_aux_devices(udev);
 	clear_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits);
 	clear_bit(UBASE_STATE_DISABLED_B, &udev->state_bits);
+	ubase_reset_err_handle(udev);
 }

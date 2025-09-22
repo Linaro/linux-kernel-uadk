@@ -443,6 +443,15 @@ struct ub_share_port_ops {
 	void (*event_notify)(struct ub_entity *uent, u16 port_id, int event);
 };
 
+struct ub_vdm_pld {
+	void *req_pld;
+	u16 req_pld_len;
+	void *rsp_pld;
+	u16 rsp_pld_len;
+	u16 rsp_buf_len;
+	u8 sub_msg_code;
+};
+
 #ifdef CONFIG_UB_UBUS
 extern struct bus_type ub_bus_type;
 #define dev_is_ub(d) ((d)->bus == &ub_bus_type)
@@ -706,6 +715,20 @@ int ub_reset_entity(struct ub_entity *ent);
  * or %-EIO if device can't reset now, can try later.
  */
 int ub_device_reset(struct ub_entity *ent);
+
+/**
+ * ub_vdm_message() - Send vendor private message.
+ * @uent: UB entity.
+ * @vdm_pld: Vendor private message payload context.
+ *
+ * Send a vendor private message to the entity. Response will put in
+ * vdm_pld->rsp_pld, and will fill in vdm->rsp_pld_len.
+ *
+ * Context: Any context, It will take spin_lock_irqsave()/spin_unlock_restore()
+ * Return: 0 if success, or %-EINVAL if parameters invalid,
+ * or %-ENOMEM if system out of memory, or other failed negative values.
+ */
+int ub_vdm_message(struct ub_entity *uent, struct ub_vdm_pld *vdm_pld);
 
 /* Only for ubus module */
 unsigned int ub_irq_calc_affinity_vectors(unsigned int minvec,
@@ -1036,6 +1059,9 @@ static inline void ub_unregister_share_port(struct ub_entity *uent, u16 port_id,
 static inline int ub_reset_entity(struct ub_entity *uent)
 { return -ENODEV; }
 static inline int ub_device_reset(struct ub_entity *uent)
+{ return -ENODEV; }
+static inline int ub_vdm_message(struct ub_entity *uent,
+				 struct ub_vdm_pld *vdm_pld)
 { return -ENODEV; }
 static inline unsigned int
 ub_irq_calc_affinity_vectors(unsigned int minvec, unsigned int maxvec,

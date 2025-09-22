@@ -167,7 +167,7 @@ static bool msg_rx_flag;
 int message_rx_init(void)
 {
 	const char *msg_name[UB_MSG_CODE_NUM] = {
-		NULL, "link wq", NULL, NULL,
+		NULL, "link wq", NULL, "vdm wq",
 		NULL, NULL, "pool wq", NULL
 	};
 	struct workqueue_struct *q;
@@ -279,6 +279,9 @@ static void message_rx_work(struct work_struct *work)
 
 	handler = rx_msg_handler[msg_code];
 
+	if (msg_code == UB_MSG_CODE_VDM)
+		handler = ubc->mdev->ops->vdm_rx_handler;
+
 	if (handler)
 		handler(ubc, task->pkt, task->len);
 	else
@@ -324,3 +327,92 @@ int message_rx_handler(struct ub_bus_controller *ubc, void *pkt, u16 len)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(message_rx_handler);
+
+static int handle_vdm_rsp_msg(struct ub_entity *uent, struct ub_vdm_pld *vdm_pld,
+			      struct msg_info *info)
+{
+	struct msg_pkt_header *header;
+
+	header = (struct msg_pkt_header *)info->rsp_packet;
+	if (header->msgetah.plen > vdm_pld->rsp_buf_len) {
+		ub_err(uent, "rsp msg len error, plen=%u, buf_len=%u\n",
+		       header->msgetah.plen, vdm_pld->rsp_buf_len);
+		return -ENOMEM;
+	}
+
+	if (header->msgetah.rsp_status) {
+		ub_err(uent, " vdm rsp msg status error, status=%u\n",
+		       header->msgetah.rsp_status);
+		return -EINVAL;
+	}
+
+	vdm_pld->rsp_pld_len = header->msgetah.plen;
+	if (!vdm_pld->rsp_pld) {
+		if (!vdm_pld->rsp_pld_len)
+			return 0;
+
+		ub_err(uent, "rsp_pld is NULL\n");
+		return -EINVAL;
+	}
+
+	memcpy(vdm_pld->rsp_pld, info->rsp_packet + MSG_PKT_HEADER_SIZE,
+	       vdm_pld->rsp_pld_len);
+
+	return 0;
+}
+
+int ub_vdm_message(struct ub_entity *uent, struct ub_vdm_pld *vdm_pld)
+{
+	struct msg_pkt_header *header;
+	struct msg_info info = {};
+	void *req_pkt;
+	void *rsp_pkt;
+	u32 pkt_size;
+	int ret;
+	u8 code;
+
+	if (!uent || !uent->message || !uent->message->mdev || !vdm_pld ||
+	    !vdm_pld->req_pld || !vdm_pld->req_pld_len) {
+		pr_err("input data error\n");
+		return -EINVAL;
+	}
+
+	if (vdm_pld->req_pld_len > SZ_1K ||
+	    MSG_PKT_HEADER_SIZE + vdm_pld->rsp_buf_len > U16_MAX) {
+		ub_err(uent, "input vdm msg too long\n");
+		return -EINVAL;
+	}
+
+	req_pkt = kzalloc(MSG_PKT_HEADER_SIZE + vdm_pld->req_pld_len, GFP_KERNEL);
+	if (!req_pkt)
+		return -ENOMEM;
+
+	rsp_pkt = kzalloc(MSG_PKT_HEADER_SIZE + vdm_pld->rsp_buf_len, GFP_KERNEL);
+	if (!rsp_pkt) {
+		kfree(req_pkt);
+		return -ENOMEM;
+	}
+
+	code = code_gen(UB_MSG_CODE_VDM, vdm_pld->sub_msg_code, MSG_REQ);
+	header = (struct msg_pkt_header *)req_pkt;
+	pkt_size = msg_size_gen((vdm_pld->req_pld_len + MSG_PKT_HEADER_SIZE),
+				(vdm_pld->rsp_buf_len + MSG_PKT_HEADER_SIZE));
+	ub_msg_pkt_header_init(header, uent, vdm_pld->req_pld_len, code, false);
+	memcpy(req_pkt + MSG_PKT_HEADER_SIZE, vdm_pld->req_pld,
+	       vdm_pld->req_pld_len);
+	message_info_init(&info, uent, req_pkt, rsp_pkt, pkt_size);
+	ret = message_sync_request(uent->message->mdev, &info, code);
+	if (ret) {
+		ub_err(uent, "message sync execute error, ret=%d\n", ret);
+		goto out;
+	}
+
+	ret = handle_vdm_rsp_msg(uent, vdm_pld, &info);
+
+out:
+	kfree(req_pkt);
+	kfree(rsp_pkt);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ub_vdm_message);

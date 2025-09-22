@@ -196,6 +196,7 @@ typedef void (*rx_msg_handler_t)(struct ub_bus_controller *ubc, void *pkt, u16 l
  * @send: send message to target ub_entity but not wait response
  * @response: send response message to target
  * @sync_enum: send enum message to target ub_entity and wait response
+ * @vdm_rx_handler: send vdm response message to target
  * @owner: Driver module providing these ops
  */
 struct message_ops {
@@ -209,6 +210,7 @@ struct message_ops {
 			u8 code);
 	int (*sync_enum)(struct message_device *mdev, struct msg_info *info,
 			 u8 cmd);
+	rx_msg_handler_t vdm_rx_handler;
 	struct module *owner;
 };
 

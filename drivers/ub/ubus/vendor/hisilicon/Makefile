@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0+
 
-hisi_ubus-objs := hisi-ubus.o controller.o
+hisi_ubus-objs := hisi-ubus.o controller.o vdm.o
 
 obj-$(CONFIG_UB_HISI_UBUS) += hisi_ubus.o

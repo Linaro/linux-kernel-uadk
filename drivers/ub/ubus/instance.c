@@ -14,14 +14,20 @@
 #include "ubus_driver.h"
 #include "instance.h"
 
+#define DYNAMIC_DEFAULT_UBC 0
+
 static LIST_HEAD(ubi_list);
 static DEFINE_MUTEX(ubi_list_mutex);
+static DEFINE_MUTEX(dynamic_mutex);
 static u32 instance_count;
 
 static void ub_unregister_bus_instance(struct ub_bus_instance *bi);
 static void ub_bus_instance_destroy(struct ub_bus_instance *bi)
 {
 	guid_t *tar = (guid_t *)&guid_null;
+
+	if (is_dynamic(bi))
+		tar = &bi->info.guid.id;
 
 	ummu_core_del_eid(tar, bi->info.eid, EID_BYPASS);
 	ub_unregister_bus_instance(bi);
@@ -151,6 +157,13 @@ static int bi_valid_check(struct ub_bus_instance *bi)
 		return -EINVAL;
 	}
 
+	if (is_cluster(bi) && (info->eid == 0 || info->upi == 0 ||
+			       info->eid <= ubc_eid_end)) {
+		pr_err("cluster bi eid or upi invalid, eid=%#x, upi=%#x\n",
+		       info->eid, info->upi);
+		return -EINVAL;
+	}
+
 	if (is_server(bi) && info->eid && info->eid <= ubc_eid_end) {
 		pr_err("server bi eid within the local scope, eid=%#x\n",
 		       info->eid);
@@ -166,6 +179,9 @@ static int ub_cfg_bus_instance_eid(struct ub_bus_instance *bi, bool alloc)
 	struct ub_guid guid = info->guid;
 	u32 eid;
 	int ret;
+
+	if (is_cluster(bi))
+		return 0;
 
 	if (alloc) {
 		if (info->eid)
@@ -193,7 +209,7 @@ static void ub_cfg_bus_instance_upi(struct ub_bus_instance *bi)
 {
 	struct ub_bus_instance_info *info = &bi->info;
 
-	if (info->upi)
+	if (is_cluster(bi) || info->upi)
 		return;
 
 	info->upi = UB_CP_UPI;
@@ -202,7 +218,8 @@ static void ub_cfg_bus_instance_upi(struct ub_bus_instance *bi)
 static int ub_register_bus_instance(struct ub_bus_instance *bi)
 {
 	struct ub_bus_instance_info *info = &bi->info;
-	int ret;
+	struct ub_bus_controller *ubc;
+	int ret, i = 0, count = 0;
 
 	ret = bi_duplicate_check(info);
 	if (ret)
@@ -218,10 +235,20 @@ static int ub_register_bus_instance(struct ub_bus_instance *bi)
 
 	ub_cfg_bus_instance_upi(bi);
 
-	ret = ub_cfg_eu_table(bi->major, true, bi->info.eid,
-				bi->info.upi);
-	if (ret)
-		goto out;
+	if (is_static_server(bi)) {
+		ret = ub_cfg_eu_table(bi->major, true, bi->info.eid,
+				      bi->info.upi);
+		if (ret)
+			goto out;
+	} else {
+		list_for_each_entry(ubc, &ubc_list, node) {
+			ret = ub_cfg_eu_table(ubc, true, bi->info.eid,
+					      bi->info.upi);
+			if (ret)
+				goto cfg_fail;
+			count++;
+		}
+	}
 
 	mutex_lock(&ubi_list_mutex);
 	bi->registered = true;
@@ -229,7 +256,14 @@ static int ub_register_bus_instance(struct ub_bus_instance *bi)
 	instance_count++;
 	mutex_unlock(&ubi_list_mutex);
 	return 0;
+cfg_fail:
+	list_for_each_entry(ubc, &ubc_list, node) {
+		if (i == count)
+			break;
 
+		(void)ub_cfg_eu_table(ubc, false, bi->info.eid, bi->info.upi);
+		i++;
+	}
 out:
 	/* upi no need unconfigure */
 	(void)ub_cfg_bus_instance_eid(bi, false);
@@ -238,6 +272,8 @@ out:
 
 static void ub_unregister_bus_instance(struct ub_bus_instance *bi)
 {
+	struct ub_bus_controller *ubc;
+
 	mutex_lock(&ubi_list_mutex);
 	if (!bi->registered) {
 		mutex_unlock(&ubi_list_mutex);
@@ -249,8 +285,14 @@ static void ub_unregister_bus_instance(struct ub_bus_instance *bi)
 	bi->registered = false;
 	mutex_unlock(&ubi_list_mutex);
 
-	(void)ub_cfg_eu_table(bi->major, false, bi->info.eid,
-				bi->info.upi);
+	if (is_static_server(bi)) {
+		(void)ub_cfg_eu_table(bi->major, false, bi->info.eid,
+				      bi->info.upi);
+	} else {
+		list_for_each_entry(ubc, &ubc_list, node)
+			(void)ub_cfg_eu_table(ubc, false, bi->info.eid,
+					      bi->info.upi);
+	}
 
 	/* upi no need unconfigure */
 	(void)ub_cfg_bus_instance_eid(bi, false);
@@ -317,4 +359,210 @@ void ub_static_bus_instance_uninit(struct ub_bus_controller *ubc)
 
 	ub_bus_instance_put(ubc->bi);
 	ubc->bi = NULL;
+}
+
+static struct ub_bus_instance *
+ub_dynamic_bus_instance_create(struct ub_bus_instance_info *info, enum eid_type type)
+{
+	struct ub_bus_instance *bi;
+	struct ub_bus_controller *ubc;
+	int ret;
+
+	ubc = ub_find_bus_controller(DYNAMIC_DEFAULT_UBC);
+	if (!ubc) {
+		pr_err("ubc 0 not exist\n");
+		return (struct ub_bus_instance *)ERR_PTR(-ENODEV);
+	}
+
+	bi = ub_alloc_bus_instance();
+	if (!bi)
+		return (struct ub_bus_instance *)ERR_PTR(-ENOMEM);
+
+	if (ubc->cluster)
+		info->type = UBUS_INSTANCE_DYNAMIC_CLUSTER;
+	else
+		info->type = UBUS_INSTANCE_DYNAMIC_SERVER;
+
+	bi->info = *info;
+	bi->major = ubc;
+
+	ret = ub_register_bus_instance(bi);
+	if (ret)
+		goto put;
+
+	ret = ummu_core_add_eid(&bi->info.guid.id, bi->info.eid, type);
+	if (ret) {
+		pr_err("bus instance add eid, ret=%d\n", ret);
+		goto unregister;
+	}
+
+	return bi;
+
+unregister:
+	ub_unregister_bus_instance(bi);
+put:
+	ub_bus_instance_put(bi);
+	return (struct ub_bus_instance *)ERR_PTR(ret);
+}
+
+static void bi_info_init(struct ub_bus_instance_info *info,
+			 const struct ubus_cmd_bi_create *create)
+{
+	info->type = create->type;
+	info->upi = create->upi;
+	info->eid = create->eid;
+	guid_copy(&info->guid.id, (const guid_t *)create->guid);
+}
+
+int ub_ioctl_bus_instance_create(void __user *uptr)
+{
+	size_t size = sizeof(struct ubus_cmd_bi_create);
+	struct ubus_cmd_bi_create create = {};
+	struct ub_bus_instance_info info = {};
+	struct ub_bus_instance *bi;
+
+	if (copy_from_user(&create, uptr + UBUS_IOCTL_HEADER_SIZE, size))
+		return -EFAULT;
+
+	bi_info_init(&info, &create);
+
+	mutex_lock(&dynamic_mutex);
+	bi = ub_dynamic_bus_instance_create(&info, EID_BYPASS);
+	if (IS_ERR(bi)) {
+		pr_err("bus instance create failed, ret=%ld\n", PTR_ERR(bi));
+		mutex_unlock(&dynamic_mutex);
+		return PTR_ERR(bi);
+	}
+
+	create.eid = bi->info.eid;
+	create.upi = bi->info.upi;
+
+	if (copy_to_user(uptr + UBUS_IOCTL_HEADER_SIZE, &create, size)) {
+		ub_bus_instance_put(bi);
+		pr_err("bus instance copy to user failed\n");
+		mutex_unlock(&dynamic_mutex);
+		return -EFAULT;
+	}
+
+	mutex_unlock(&dynamic_mutex);
+	return 0;
+}
+
+int ub_ioctl_bus_instance_destroy(void __user *uptr)
+{
+	size_t size = sizeof(struct ubus_cmd_bi_destroy);
+	struct ubus_cmd_bi_destroy destroy = {};
+	struct ub_bus_instance *bi;
+	char b_str[SZ_64];
+
+	if (copy_from_user(&destroy, uptr + UBUS_IOCTL_HEADER_SIZE, size))
+		return -EFAULT;
+
+	(void)snprintf(b_str, SZ_64, "%#llx %llx",
+		       *((u64 *)&destroy.guid[SZ_8]),
+		       *((u64 *)&destroy.guid[0]));
+
+	mutex_lock(&dynamic_mutex);
+	bi = ub_find_bus_instance(guid_match, destroy.guid);
+	if (!bi) {
+		pr_err("bus instance destroy invalid, guid=%s\n", b_str);
+		mutex_unlock(&dynamic_mutex);
+		return -ENODEV;
+	}
+
+	if (!is_dynamic(bi)) {
+		pr_err("instance %s is not dynamic\n", b_str);
+		ub_bus_instance_put(bi);
+		mutex_unlock(&dynamic_mutex);
+		return -EINVAL;
+	}
+
+	if (kref_read(&bi->kref) != 2) { /* 2 is original + find */
+		pr_err("instance %s is still in use\n", b_str);
+		ub_bus_instance_put(bi);
+		mutex_unlock(&dynamic_mutex);
+		return -EBUSY;
+	}
+
+	ub_bus_instance_put(bi); /* put find */
+	ub_bus_instance_put(bi); /* real put */
+
+	mutex_unlock(&dynamic_mutex);
+	return 0;
+}
+
+int ub_msg_bus_instance_create(struct ub_bus_controller *ubc, u32 *guid, u32 eid,
+			       u16 upi, enum eid_type type)
+{
+	struct ub_bus_instance_info info = {};
+	struct ub_bus_instance *bi;
+	int ret = 0;
+
+	info.upi = upi;
+	info.eid = eid;
+	guid_copy(&info.guid.id, (const guid_t *)guid);
+
+	mutex_lock(&dynamic_mutex);
+	bi = ub_dynamic_bus_instance_create(&info, type);
+	if (IS_ERR(bi)) {
+		ret = PTR_ERR(bi);
+		dev_err(&ubc->dev, "msg bus instance create failed, ret=%d\n",
+			ret);
+	}
+
+	mutex_unlock(&dynamic_mutex);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ub_msg_bus_instance_create);
+
+int ub_msg_bus_instance_destroy(struct ub_bus_controller *ubc, u32 *guid)
+{
+	struct ub_bus_instance *bi;
+	char b_str[SZ_64];
+
+	(void)snprintf(b_str, SZ_64, "%#llx %llx", *((u64 *)&guid[SZ_2]),
+		       *((u64 *)&guid[0]));
+
+	mutex_lock(&dynamic_mutex);
+	bi = ub_find_bus_instance(guid_match, guid);
+	if (!bi) {
+		dev_err(&ubc->dev,
+			"msg bus instance destroy invalid, guid=%s\n", b_str);
+		mutex_unlock(&dynamic_mutex);
+		return -ENODEV;
+	}
+
+	if (!is_dynamic_cluster(bi)) {
+		dev_err(&ubc->dev, "msg destroy instance %s type invalid\n",
+			b_str);
+		ub_bus_instance_put(bi);
+		mutex_unlock(&dynamic_mutex);
+		return -EINVAL;
+	}
+
+	if (kref_read(&bi->kref) != 2) { /* 2 is original + find */
+		dev_err(&ubc->dev, "msg instance %s still in use\n", b_str);
+		ub_bus_instance_put(bi);
+		mutex_unlock(&dynamic_mutex);
+		return -EBUSY;
+	}
+
+	ub_bus_instance_put(bi); /* put find */
+	ub_bus_instance_put(bi); /* real put */
+
+	mutex_unlock(&dynamic_mutex);
+	return 0;
+}
+
+void ub_dynamic_bus_instance_drain(void)
+{
+	struct ub_bus_instance *bi, *tmp;
+
+	mutex_lock(&dynamic_mutex);
+
+	list_for_each_entry_safe(bi, tmp, &ubi_list, node)
+		if (is_dynamic(bi))
+			ub_bus_instance_put(bi);
+
+	mutex_unlock(&dynamic_mutex);
 }

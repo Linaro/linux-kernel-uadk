@@ -9,6 +9,7 @@
 #include <linux/cdev.h>
 
 #include "ubus.h"
+#include "instance.h"
 
 #define UBUS_MAX_DEVICES 1
 #define UBUS_DEVICE_NAME "unified_bus"
@@ -32,12 +33,39 @@ static int ubus_fops_release(struct inode *inode, struct file *filep)
 	return 0;
 }
 
+static int ub_ioctl_bus_instance(void __user *uptr)
+{
+	struct ubus_ioctl_bus_instance bi;
+
+	if (copy_from_user(&bi, uptr, UBUS_IOCTL_HEADER_SIZE))
+		return -EFAULT;
+
+	pr_info("ub ioctl bus instance, sub_cmd=%#x\n", bi.sub_cmd);
+	switch (bi.sub_cmd) {
+	case UBUS_CMD_BI_CREATE:
+		if (bi.argsz != sizeof(struct ubus_cmd_bi_create))
+			return -EINVAL;
+		return ub_ioctl_bus_instance_create(uptr);
+	case UBUS_CMD_BI_DESTROY:
+		if (bi.argsz != sizeof(struct ubus_cmd_bi_destroy))
+			return -EINVAL;
+		return ub_ioctl_bus_instance_destroy(uptr);
+	default:
+		pr_err("ubus bi sub cmd not support, cmd=%#x\n", bi.sub_cmd);
+		return -EINVAL;
+	}
+}
+
 static long ubus_fops_unl_ioctl(struct file *filep,
 				unsigned int cmd, unsigned long arg)
 {
+	void __user *uptr = (void __user *)arg;
+
 	switch (cmd) {
 	case UBUS_IOCTL_GET_API_VERSION:
 		return UBUS_API_VERSION;
+	case UBUS_IOCTL_BUS_INSTANCE:
+		return ub_ioctl_bus_instance(uptr);
 	default:
 		pr_err("ubus ioctl cmd %#x not support\n", cmd);
 		return -ENOTTY;

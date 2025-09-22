@@ -11,6 +11,7 @@
 #include <linux/iommu.h>
 #include <linux/ioport.h>
 #include <linux/types.h>
+#include <uapi/ub/ubus/ubus.h>
 #include <uapi/ub/ubus/ubus_regs.h>
 #include <ub/ubus/ubus_ids.h>
 #include <linux/mod_devicetable.h>
@@ -384,6 +385,9 @@ struct ub_bus_instance {
 	struct list_head uents;
 	struct mutex lock;
 };
+
+#define ub_bi_is_dynamic(bi) ((bi)->info.type == UBUS_INSTANCE_DYNAMIC_SERVER \
+		|| (bi)->info.type == UBUS_INSTANCE_DYNAMIC_CLUSTER)
 
 static inline struct ub_driver *to_ub_driver(struct device_driver *drv)
 {

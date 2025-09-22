@@ -15,6 +15,7 @@
 
 static void ubhp_destory_slot(struct ub_slot *slot)
 {
+	mutex_destroy(&slot->state_lock);
 	kfree(slot);
 }
 
@@ -25,10 +26,155 @@ static void ubhp_slot_release(struct kobject *kobj)
 	ubhp_destory_slot(slot);
 }
 
-static const struct kobj_type ub_slot_ktype = {
-	.release = ubhp_slot_release,
+enum slot_state {
+	SLOT_ON, /* slot on, device running */
+	SLOT_POWERON, /* from slot off to slot on */
+	SLOT_POWEROFF, /* from slot on to slot off */
+	SLOT_OFF, /* slot off, device not present */
 };
 
+struct ub_slot_attribute {
+	struct attribute attr;
+	ssize_t (*show)(struct ub_slot *slot, char *buf);
+	ssize_t (*store)(struct ub_slot *slot, const char *buf, size_t count);
+};
+
+#define to_ub_slot_attr(s) container_of(s, struct ub_slot_attribute, attr)
+
+static void ubhp_enable_slot(struct ub_slot *slot)
+{
+	bool queued = false;
+
+	ubhp_get_slot(slot);
+	mutex_lock(&slot->state_lock);
+
+	if (slot->state == SLOT_OFF)
+		queued = queue_work(get_rx_msg_wq(UB_MSG_CODE_LINK),
+				    &slot->button_work);
+	else
+		ub_info(slot->uent, "ignore slot poweron\n");
+
+	mutex_unlock(&slot->state_lock);
+	if (!queued)
+		ubhp_put_slot(slot);
+}
+
+static void ubhp_disable_slot(struct ub_slot *slot)
+{
+	bool queued = false;
+
+	ubhp_get_slot(slot);
+	mutex_lock(&slot->state_lock);
+
+	if (slot->state == SLOT_ON)
+		queued = queue_work(get_rx_msg_wq(UB_MSG_CODE_LINK),
+				    &slot->button_work);
+	else
+		ub_info(slot->uent, "ignore slot poweroff\n");
+
+	mutex_unlock(&slot->state_lock);
+	if (!queued)
+		ubhp_put_slot(slot);
+}
+
+static ssize_t power_show(struct ub_slot *slot, char *buf)
+{
+	ssize_t ret;
+
+	mutex_lock(&slot->state_lock);
+	switch (slot->state) {
+	case SLOT_ON:
+		ret = sysfs_emit(buf, "slot is %s\n", "on");
+		break;
+	case SLOT_POWERON:
+		ret = sysfs_emit(buf, "slot is %s\n", "poweron");
+		break;
+	case SLOT_POWEROFF:
+		ret = sysfs_emit(buf, "slot is %s\n", "poweroff");
+		break;
+	case SLOT_OFF:
+		ret = sysfs_emit(buf, "slot is %s\n", "off");
+		break;
+	default:
+		ret = sysfs_emit(buf, "unknown state %u\n", slot->state);
+		break;
+	}
+	mutex_unlock(&slot->state_lock);
+
+	return ret;
+}
+
+static ssize_t power_store(struct ub_slot *slot, const char *buf, size_t count)
+{
+	unsigned long power;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &power);
+	if (ret) {
+		ub_err(slot->uent, "Invalid val for power\n");
+		return ret;
+	}
+
+	switch (power) {
+	case 0:
+		ubhp_disable_slot(slot);
+		break;
+	case 1:
+		ubhp_enable_slot(slot);
+		break;
+	default:
+		ub_err(slot->uent, "Invalid val %lu for power\n", power);
+		return -EINVAL;
+	}
+
+	return count;
+}
+static struct ub_slot_attribute ub_slot_attr_power = __ATTR_RW(power);
+
+static struct attribute *ub_slot_default_attrs[] = {
+	&ub_slot_attr_power.attr,
+	NULL
+};
+ATTRIBUTE_GROUPS(ub_slot_default);
+
+static ssize_t ub_slot_attr_show(struct kobject *kobj, struct attribute *attr,
+				 char *buf)
+{
+	struct ub_slot_attribute *attribute = to_ub_slot_attr(attr);
+	struct ub_slot *slot = to_ub_slot(kobj);
+
+	if (!attribute->show)
+		return -EIO;
+
+	return attribute->show(slot, buf);
+}
+
+static ssize_t ub_slot_attr_store(struct kobject *kobj, struct attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct ub_slot_attribute *attribute = to_ub_slot_attr(attr);
+	struct ub_slot *slot = to_ub_slot(kobj);
+
+	if (!attribute->store)
+		return -EIO;
+
+	return attribute->store(slot, buf, count);
+}
+
+static const struct sysfs_ops ub_slot_sysfs_ops = {
+	.show = ub_slot_attr_show,
+	.store = ub_slot_attr_store,
+};
+
+static const struct kobj_type ub_slot_ktype = {
+	.release = ubhp_slot_release,
+	.sysfs_ops = &ub_slot_sysfs_ops,
+	.default_groups = ub_slot_default_groups,
+};
+
+static void ubhp_button_handler(struct work_struct *work);
+static void ubhp_present_handler(struct work_struct *work);
+static void ubhp_power_handler(struct work_struct *work);
 static struct ub_slot *ubhp_create_slot(void)
 {
 	struct ub_slot *slot;
@@ -39,6 +185,10 @@ static struct ub_slot *ubhp_create_slot(void)
 
 	slot->ports = NULL;
 	INIT_LIST_HEAD(&slot->node);
+	INIT_WORK(&slot->button_work, ubhp_button_handler);
+	INIT_DELAYED_WORK(&slot->present_work, ubhp_present_handler);
+	INIT_DELAYED_WORK(&slot->power_work, ubhp_power_handler);
+	mutex_init(&slot->state_lock);
 
 	return slot;
 }
@@ -116,6 +266,10 @@ static void ubhp_del_slot(struct ub_slot *slot)
 {
 	struct ub_port *port;
 
+	cancel_work_sync(&slot->button_work);
+	cancel_delayed_work_sync(&slot->power_work);
+	cancel_delayed_work_sync(&slot->present_work);
+
 	list_del(&slot->node);
 
 	for_each_slot_port(port, slot)
@@ -135,8 +289,12 @@ static int ubhp_add_slot(struct ub_slot *slot)
 	if (ret)
 		return ret;
 
-	if (slot->ports->r_uent)
+	if (slot->ports->r_uent) {
+		slot->state = SLOT_ON;
 		slot->r_uent = slot->ports->r_uent;
+	} else {
+		slot->state = SLOT_OFF;
+	}
 
 	for_each_slot_port(port, slot)
 		port->slot = slot;
@@ -271,4 +429,152 @@ static void ubhp_handle_link_down(struct ub_slot *slot)
 	ubhp_stop_entities(&dev_list);
 	ubhp_remove_entities(&dev_list);
 	ubhp_update_route_link_down(slot);
+}
+
+static void ubhp_handle_button_press(struct ub_slot *slot)
+{
+#define POWER_ON_WAIT 5
+	bool queued = false;
+
+	ubhp_get_slot(slot);
+	mutex_lock(&slot->state_lock);
+
+	if (slot->state == SLOT_ON) {
+		slot->state = SLOT_POWEROFF;
+		ub_info(slot->uent, "slot%u poweroff\n", slot->slot_id);
+		ubhp_set_indicators(slot, INDICATOR_BLINKING, INDICATOR_NOOP);
+		/* for power off, issued the present work immediately */
+		queued = queue_delayed_work(get_rx_msg_wq(UB_MSG_CODE_LINK),
+					    &slot->present_work, 0);
+	} else if (slot->state == SLOT_OFF) {
+		slot->state = SLOT_POWERON;
+		ub_info(slot->uent, "slot%u poweron\n", slot->slot_id);
+		ubhp_set_indicators(slot, INDICATOR_BLINKING, INDICATOR_NOOP);
+		/* for power on, left 5s for possible card insertion */
+		queued = queue_delayed_work(get_rx_msg_wq(UB_MSG_CODE_LINK),
+					    &slot->present_work,
+					    POWER_ON_WAIT * HZ);
+	}
+
+	mutex_unlock(&slot->state_lock);
+	if (!queued)
+		ubhp_put_slot(slot);
+}
+
+static void ubhp_button_handler(struct work_struct *work)
+{
+	struct ub_slot *slot = container_of(work, struct ub_slot, button_work);
+
+	ubhp_handle_button_press(slot);
+	ubhp_put_slot(slot);
+}
+
+void ubhp_handle_power(struct ub_slot *slot, bool power_on)
+{
+	if (!slot)
+		return;
+
+	mutex_lock(&slot->state_lock);
+
+	if (slot->state != SLOT_POWERON)
+		goto out;
+
+	if (power_on) {
+		ubhp_set_indicators(slot, INDICATOR_ON, INDICATOR_NOOP);
+		slot->state = SLOT_ON;
+		ub_info(slot->uent, "slot%u on\n", slot->slot_id);
+		ub_info(slot->uent,
+			"slot%u handle hotplug success\n", slot->slot_id);
+		if (cancel_work(&slot->button_work))
+			ubhp_put_slot(slot);
+	} else {
+		ubhp_set_slot_power(slot, POWER_OFF);
+		slot->state = SLOT_OFF;
+		ubhp_set_indicators(slot, INDICATOR_OFF, INDICATOR_NOOP);
+		ub_info(slot->uent, "slot%u off\n", slot->slot_id);
+		ub_info(slot->uent,
+			"slot%u handle hotplug unsuccess\n", slot->slot_id);
+	}
+
+out:
+	mutex_unlock(&slot->state_lock);
+}
+
+static void ubhp_power_handler(struct work_struct *work)
+{
+	struct delayed_work *power_work;
+	struct ub_slot *slot;
+
+	power_work = to_delayed_work(work);
+	slot = container_of(power_work, struct ub_slot, power_work);
+
+	ubhp_handle_power(slot, false);
+	ubhp_put_slot(slot);
+}
+
+static void ubhp_handle_present(struct ub_slot *slot)
+{
+#define HP_LINK_WAIT_DELAY 10
+	mutex_lock(&slot->state_lock);
+
+	if (slot->state == SLOT_POWEROFF || slot->state == SLOT_ON) {
+		ubhp_handle_link_down(slot);
+		ubhp_set_slot_power(slot, POWER_OFF);
+		ubhp_set_indicators(slot, INDICATOR_OFF, INDICATOR_NOOP);
+		slot->state = SLOT_OFF;
+		ub_info(slot->uent, "slot%u off\n", slot->slot_id);
+		goto out;
+	}
+
+	if (!ubhp_card_present(slot))
+		goto clear_state;
+
+	ubhp_set_slot_power(slot, POWER_ON);
+
+	mutex_unlock(&slot->state_lock);
+	ubhp_get_slot(slot);
+	queue_delayed_work(get_rx_msg_wq(UB_MSG_CODE_LINK),
+			   &slot->power_work, HP_LINK_WAIT_DELAY * HZ);
+	return;
+out:
+	/**
+	 * why cancel button work here:
+	 * 1. for a slot with many ports, it's possible that every port will send
+	 *	msg when hotplug event occurred, it's possible some of this msgs
+	 *	is handled after present work is triggered, if these msgs are
+	 *	handled as usually, may come into error like slot power off
+	 *	immediately after power on, so button work is banned during
+	 *	handling present work
+	 * 2. when the user pressed button repeatedly, some msgs come when
+	 *	handling present work, it's reasonable to ignore them
+	 *
+	 * by holding the state_lock both during button work and present work,
+	 *	it's guaranteed that button work and present work can't be handled
+	 *	at the same time. So cancel button work before present work ends
+	 *	makes sure that button work issued during present work is ignored
+	 */
+	if (cancel_work(&slot->button_work))
+		ubhp_put_slot(slot);
+	mutex_unlock(&slot->state_lock);
+
+	ub_info(slot->uent, "slot%u handle hotplug succeeded\n", slot->slot_id);
+	return;
+clear_state:
+	slot->state = SLOT_OFF;
+	ubhp_set_indicators(slot, INDICATOR_OFF, INDICATOR_NOOP);
+	ub_info(slot->uent, "slot%u off\n", slot->slot_id);
+	mutex_unlock(&slot->state_lock);
+	ub_info(slot->uent, "slot%u handle hotplug failed\n", slot->slot_id);
+}
+
+static void ubhp_present_handler(struct work_struct *work)
+{
+	struct delayed_work *present_work;
+	struct ub_slot *slot;
+
+	present_work = to_delayed_work(work);
+	slot = container_of(present_work, struct ub_slot, present_work);
+
+	ubhp_handle_present(slot);
+	ubhp_put_slot(slot);
 }

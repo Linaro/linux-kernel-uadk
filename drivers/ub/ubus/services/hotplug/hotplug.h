@@ -17,6 +17,12 @@
  * @slot_id: id of this slot
  * @port_start: start port_idx of ports belong to this slot
  * @port_num: number of ports belong to this slot
+ *
+ * @button_work: work to queue for button pressed event
+ * @present_work: work to queue for card present event
+ * @power_work: work to queue for power state update
+ * @state: current state machine position
+ * @state_lock: mutex lock for slot state
  */
 struct ub_slot {
 	/* slot info */
@@ -31,6 +37,13 @@ struct ub_slot {
 	u16 port_start;
 	u16 port_num;
 	u32 slot_cap;
+
+	/* hotplug info */
+	struct work_struct button_work;
+	struct delayed_work present_work;
+	struct delayed_work power_work;
+	u8 state;
+	struct mutex state_lock;
 };
 
 #define for_each_slot_port(p, s) \
@@ -59,6 +72,19 @@ enum hotplug_event {
 	HPE_OTHER
 };
 
+/**
+ * a slot must be get before any of its work is queued into workqueue
+ * and must be put after the work is end
+ * so that when a slot is released, its works are idle and don't need to cancel
+ */
+static inline struct ub_slot *ubhp_get_slot(struct ub_slot *slot)
+{
+	if (slot)
+		kobject_get(&slot->kobj);
+
+	return slot;
+}
+
 static inline void ubhp_put_slot(struct ub_slot *slot)
 {
 	if (slot)
@@ -74,6 +100,9 @@ bool ubhp_wait_linkup(struct ub_slot *slot);
 bool ubhp_card_present(struct ub_slot *slot);
 void ubhp_start_slots(struct ub_entity *uent);
 void ubhp_stop_slots(struct ub_entity *uent);
+
+/* core */
+void ubhp_handle_power(struct ub_slot *slot, bool power_on);
 
 /* route */
 int ubhp_update_route_link_up(struct ub_slot *slot);

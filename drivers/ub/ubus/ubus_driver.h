@@ -8,5 +8,7 @@
 
 extern struct rw_semaphore ub_bus_sem;
 extern struct bus_type ub_service_bus_type;
+int ub_host_probe(void);
+void ub_host_remove(void);
 
 #endif /* __UBUS_DRIVER_H__ */

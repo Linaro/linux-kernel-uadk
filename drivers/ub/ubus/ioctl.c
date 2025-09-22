@@ -50,6 +50,14 @@ static int ub_ioctl_bus_instance(void __user *uptr)
 		if (bi.argsz != sizeof(struct ubus_cmd_bi_destroy))
 			return -EINVAL;
 		return ub_ioctl_bus_instance_destroy(uptr);
+	case UBUS_CMD_BI_BIND:
+		if (bi.argsz != sizeof(struct ubus_cmd_bi_bind))
+			return -EINVAL;
+		return ub_ioctl_bus_instance_bind(uptr);
+	case UBUS_CMD_BI_UNBIND:
+		if (bi.argsz != sizeof(struct ubus_cmd_bi_unbind))
+			return -EINVAL;
+		return ub_ioctl_bus_instance_unbind(uptr);
 	default:
 		pr_err("ubus bi sub cmd not support, cmd=%#x\n", bi.sub_cmd);
 		return -EINVAL;

@@ -112,6 +112,19 @@ static ssize_t match_driver_show(struct device *dev,
 }
 static DEVICE_ATTR_RW(match_driver);
 
+static ssize_t instance_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+	u32 eid = 0;
+
+	if (uent->bi)
+		eid = uent->bi->info.eid;
+
+	return sysfs_emit(buf, "%#05x\n", eid);
+}
+DEVICE_ATTR_RO(instance);
+
 static struct attribute *ub_entity_attrs[] = {
 	&dev_attr_vendor.attr,
 	&dev_attr_device.attr,
@@ -120,6 +133,7 @@ static struct attribute *ub_entity_attrs[] = {
 	&dev_attr_driver_override.attr,
 	&dev_attr_match_driver.attr,
 	&dev_attr_guid.attr,
+	&dev_attr_instance.attr,
 	&dev_attr_kref.attr,
 	NULL
 };

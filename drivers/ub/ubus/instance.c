@@ -726,3 +726,199 @@ void ub_static_cluster_instance_drain(void)
 		ubc->cluster_bi = NULL;
 	}
 }
+
+/* Only for dynamic use */
+static int get_bus_instance_and_uent(u8 *b_guid, u8 *d_guid,
+				     struct ub_bus_instance **p_bi,
+				     struct ub_entity **p_uent)
+{
+	char b_str[SZ_64], d_str[SZ_64];
+	struct ub_bus_instance *bi;
+	struct ub_entity *uent;
+	int ret = -ENODEV;
+
+	(void)snprintf(b_str, SZ_64, "%#llx %llx", *((u64 *)&b_guid[SZ_8]),
+		       *((u64 *)&b_guid[0]));
+	(void)snprintf(d_str, SZ_64, "%#llx %llx", *((u64 *)&d_guid[SZ_8]),
+		       *((u64 *)&d_guid[0]));
+
+	bi = ub_find_bus_instance(guid_match, b_guid);
+	if (!bi)
+		goto err;
+
+	if (!is_dynamic(bi)) {
+		ret = -EINVAL;
+		goto put;
+	}
+
+	uent = ub_get_ent_by_guid((struct ub_guid *)d_guid);
+	if (!uent)
+		goto put;
+
+	*p_bi = bi;
+	*p_uent = uent;
+	return 0;
+put:
+	ub_bus_instance_put(bi);
+err:
+	pr_err("get bi and uent failed, bi_guid=%s, dev_guid=%s\n", b_str, d_str);
+	return ret;
+}
+
+static int ub_bind_bus_instance(struct ub_entity *uent, struct ub_bus_instance *bi)
+{
+	if (!uent || uent->bi || !bi || !bi->registered)
+		return -EINVAL;
+
+	uent->bi = ub_bus_instance_get(bi);
+
+	mutex_lock(&bi->lock);
+	list_add_tail(&uent->instance_node, &bi->uents);
+	mutex_unlock(&bi->lock);
+	return 0;
+}
+
+static void ub_unbind_bus_instance(struct ub_entity *uent)
+{
+	if (!uent || !uent->bi)
+		return;
+
+	mutex_lock(&uent->bi->lock);
+	list_del(&uent->instance_node);
+	mutex_unlock(&uent->bi->lock);
+
+	ub_bus_instance_put(uent->bi);
+	uent->bi = NULL;
+}
+
+int ub_ioctl_bus_instance_bind(void __user *uptr)
+{
+	size_t size = sizeof(struct ubus_cmd_bi_bind);
+	struct ubus_cmd_bi_bind bind = {};
+	struct ub_bus_instance *bi, *old;
+	struct ub_entity *uent;
+	char b_str[SZ_64];
+	int ret;
+
+	if (copy_from_user(&bind, uptr + UBUS_IOCTL_HEADER_SIZE, size))
+		return -EFAULT;
+
+	mutex_lock(&dynamic_mutex);
+	ret = get_bus_instance_and_uent(bind.instance_guid, bind.dev_guid, &bi,
+					&uent);
+	if (ret) {
+		mutex_unlock(&dynamic_mutex);
+		return ret;
+	}
+
+	(void)snprintf(b_str, SZ_64, "%#llx %llx",
+		       *((u64 *)&bind.instance_guid[SZ_8]),
+		       *((u64 *)&bind.instance_guid[0]));
+
+	mutex_lock(&uent->instance_lock);
+	old = uent->bi;
+	if (!old) {
+		ub_err(uent, "dev has no static instance\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (is_static(old)) {
+		ub_unbind_bus_instance(uent);
+		ret = ub_bind_bus_instance(uent, bi);
+		if (ret) {
+			ub_err(uent, "bind instance failed, guid=%s\n", b_str);
+			(void)ub_bind_bus_instance(uent, uent->ubc->bi);
+		}
+	} else {
+		/* If bind the same again, do nothing */
+		if (old != bi) {
+			ub_err(uent, "dev already bind instance\n");
+			ret = -EBUSY;
+		}
+	}
+
+out:
+	ub_entity_put(uent);
+	ub_bus_instance_put(bi);
+	mutex_unlock(&uent->instance_lock);
+	mutex_unlock(&dynamic_mutex);
+	return ret;
+}
+
+int ub_ioctl_bus_instance_unbind(void __user *uptr)
+{
+	size_t size = sizeof(struct ubus_cmd_bi_unbind);
+	struct ubus_cmd_bi_unbind unbind = {};
+	struct ub_bus_instance *bi;
+	struct ub_entity *uent;
+	char b_str[SZ_64];
+	int ret;
+
+	if (copy_from_user(&unbind, uptr + UBUS_IOCTL_HEADER_SIZE, size))
+		return -EFAULT;
+
+	mutex_lock(&dynamic_mutex);
+	ret = get_bus_instance_and_uent(unbind.instance_guid, unbind.dev_guid,
+					&bi, &uent);
+	if (ret) {
+		mutex_unlock(&dynamic_mutex);
+		return ret;
+	}
+
+	(void)snprintf(b_str, SZ_64, "%#llx %llx",
+		       *((u64 *)&unbind.instance_guid[SZ_8]),
+		       *((u64 *)&unbind.instance_guid[0]));
+
+	mutex_lock(&uent->instance_lock);
+	if (uent->bi != bi) {
+		ub_err(uent, "dev not bind bus instance, guid=%s\n", b_str);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ub_unbind_bus_instance(uent);
+	ret = ub_bind_bus_instance(uent, uent->ubc->bi);
+	if (ret) {
+		ub_err(uent, "unbind instance failed, guid=%s\n", b_str);
+		(void)ub_bind_bus_instance(uent, bi);
+	}
+
+out:
+	ub_entity_put(uent);
+	ub_bus_instance_put(bi);
+	mutex_unlock(&uent->instance_lock);
+	mutex_unlock(&dynamic_mutex);
+	return ret;
+}
+
+int ub_default_bus_instance_init(struct ub_entity *uent)
+{
+	struct ub_bus_instance *bi;
+	int ret;
+
+	if (is_switch(uent))
+		return 0;
+
+	bi = uent->ubc->bi;
+	if (!bi) {
+		ub_err(uent, "get default bi NULL\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&uent->instance_lock);
+	ret = ub_bind_bus_instance(uent, bi);
+	mutex_unlock(&uent->instance_lock);
+
+	return ret;
+}
+
+void ub_default_bus_instance_uninit(struct ub_entity *uent)
+{
+	if (is_switch(uent))
+		return;
+
+	mutex_lock(&uent->instance_lock);
+	ub_unbind_bus_instance(uent);
+	mutex_unlock(&uent->instance_lock);
+}

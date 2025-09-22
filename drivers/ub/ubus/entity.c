@@ -19,6 +19,8 @@ int ub_get_dst_eid(struct ub_entity *dev)
 		return -ENODEV;
 
 	eid = ubc->uent->eid;
+	if (dev->bi)
+		eid = dev->bi->info.eid;
 
 	return eid;
 }

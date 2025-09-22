@@ -233,6 +233,9 @@ struct ub_entity {
 	u32 saved_config_space[24]; /* Config space saved at reset time */
 
 	/* entity bus instance info */
+	struct mutex instance_lock;
+	struct list_head instance_node;
+	struct ub_bus_instance *bi;
 	struct ub_eu_table *eu_table;
 
 	u32 support_feature;

@@ -30,6 +30,8 @@ void ub_bus_instance_put(struct ub_bus_instance *bi);
 struct ub_bus_instance *ub_find_bus_instance(instance_match match, void *arg);
 int ub_ioctl_bus_instance_create(void __user *uptr);
 int ub_ioctl_bus_instance_destroy(void __user *uptr);
+int ub_ioctl_bus_instance_bind(void __user *uptr);
+int ub_ioctl_bus_instance_unbind(void __user *uptr);
 int ub_msg_bus_instance_create(struct ub_bus_controller *ubc, u32 *guid, u32 eid,
 			       u16 upi, enum eid_type type);
 int ub_msg_bus_instance_destroy(struct ub_bus_controller *ubc, u32 *guid);
@@ -37,5 +39,7 @@ void ub_dynamic_bus_instance_drain(void);
 int ub_notify_bus_instance_handle(struct ub_bus_controller *ubc, bool flag,
 				  u32 *guid, u32 eid, u16 upi);
 void ub_static_cluster_instance_drain(void);
+int ub_default_bus_instance_init(struct ub_entity *uent);
+void ub_default_bus_instance_uninit(struct ub_entity *uent);
 
 #endif /* __INSTANCE_H__ */

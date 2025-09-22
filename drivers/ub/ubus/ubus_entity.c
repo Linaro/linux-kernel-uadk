@@ -49,6 +49,7 @@ struct ub_entity *ub_alloc_ent(void)
 	INIT_LIST_HEAD(&uent->mue_list);
 	INIT_LIST_HEAD(&uent->ue_list);
 	INIT_LIST_HEAD(&uent->cna_list);
+	INIT_LIST_HEAD(&uent->instance_node);
 
 	uent->dev.type = &ub_dev_type;
 	uent->cna = 0;
@@ -407,6 +408,9 @@ void ub_start_ent(struct ub_entity *uent)
 		WARN_ON(ret);
 	}
 
+	ret = ub_default_bus_instance_init(uent);
+	WARN_ON(ret);
+
 	uent->match_driver = true;
 	ret = device_attach(&uent->dev);
 	if (ret < 0 && ret != -EPROBE_DEFER)
@@ -466,6 +470,8 @@ void ub_stop_ent(struct ub_entity *uent)
 
 	device_release_driver(&uent->dev);
 	uent->match_driver = false;
+
+	ub_default_bus_instance_uninit(uent);
 
 	if (is_ibus_controller(uent))
 		ub_static_bus_instance_uninit(uent->ubc);
@@ -963,6 +969,8 @@ int ub_set_user_info(struct ub_entity *uent)
 		goto cfg1;
 
 	/* set dsteid to device */
+	if (uent->bi)
+		eid = uent->bi->info.eid;
 	ub_cfg_write_dword(uent, UB_UEID_0, eid);
 	ub_cfg_write_dword(uent, UB_UEID_1, 0);
 	ub_cfg_write_dword(uent, UB_UEID_2, 0);

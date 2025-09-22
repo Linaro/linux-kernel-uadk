@@ -51,7 +51,41 @@ static bool cluster_mode;
 static acpi_status acpi_processor_ubc(acpi_handle handle, u32 lvl,
 				      void *context, void **rv)
 {
-	return AE_OK;
+	struct ub_bus_controller *ubc = context;
+	struct acpi_device *adev;
+	unsigned long long uid;
+	acpi_status status;
+	struct device *dev;
+	int ret;
+
+	status = acpi_evaluate_integer(handle, "_UID", NULL, &uid);
+	if (ACPI_FAILURE(status))
+		return AE_CTRL_TERMINATE;
+
+	pr_info("ubc acpi ubc->ctl_no %u, uid: %llu\n", ubc->ctl_no, uid);
+	if (ubc->ctl_no != (u32)uid)
+		return AE_OK;
+
+	adev = acpi_get_acpi_dev(handle);
+	if (!adev)
+		return AE_CTRL_TERMINATE;
+
+	dev = bus_find_device_by_acpi_dev(&platform_bus_type, adev);
+	if (!dev) {
+		status = AE_CTRL_TERMINATE;
+		goto out;
+	}
+	ret = ub_update_msi_domain(dev, DOMAIN_BUS_UB_MSI);
+	if (ret) {
+		status = AE_CTRL_TERMINATE;
+		goto out;
+	}
+	dev_set_msi_domain(&ubc->dev, dev->msi.domain);
+	pr_debug("set ubc msi domain success by acpi\n");
+
+out:
+	acpi_put_acpi_dev(adev);
+	return status;
 }
 
 static int acpi_update_ubc_msi_domain(void)
@@ -71,10 +105,28 @@ static int acpi_update_ubc_msi_domain(void)
 	return 0;
 }
 
+static struct irq_domain *of_usi_get_domain(struct device_node *np,
+					    enum irq_domain_bus_token token)
+{
+	struct device_node *usi_np;
+	struct irq_domain *d;
+
+	usi_np = of_parse_phandle(np, "msi-parent", 0);
+	if (!usi_np)
+		return NULL;
+
+	d = irq_find_matching_host(usi_np, token);
+	if (!d)
+		of_node_put(usi_np);
+
+	return d;
+}
+
 static int dts_update_ubc_msi_domain(void)
 {
 	struct ub_bus_controller *ubc;
 	struct device_node *np;
+	struct irq_domain *d;
 	u32 ctl_no;
 	bool find;
 	int ret;
@@ -97,6 +149,15 @@ static int dts_update_ubc_msi_domain(void)
 			pr_err("can't find ubc no=%u\n", ctl_no);
 			continue;
 		}
+
+		d = of_usi_get_domain(np, DOMAIN_BUS_UB_MSI);
+		if (!d) {
+			pr_err("can't find ub irq domain\n");
+			continue;
+		}
+
+		dev_set_msi_domain(&ubc->dev, d);
+		pr_debug("set ubc[%u] msi domain success\n", ctl_no);
 	}
 	return 0;
 }

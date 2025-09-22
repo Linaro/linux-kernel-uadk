@@ -100,6 +100,20 @@ int ubrt_register_gsi(u32 hwirq, int trigger, int polarity, const char *name,
 void ubrt_unregister_gsi(u32 hwirq);
 
 /**
+ * ub_update_msi_domain() - Update the MSI domain of UBC
+ * @dev: device with ub msi domain
+ * @bus_token: DOMAIN_BUS_UB_MSI
+ *
+ * Used when booting via ACPI. The MSI domain of the UB is reported by a
+ * platform device to the driver, and this function passes the MSI domain of the
+ * platform device to the UBC.
+ *
+ * Return: 0 if success or other if failed
+ */
+int ub_update_msi_domain(struct device *dev,
+			 enum irq_domain_bus_token bus_token);
+
+/**
  * ubrt_fwnode_set() - Associate a device's fwnode with an UBRT node
  * @index: Index of the UBRT node within its type.
  * @type: Type of the UBRT node.

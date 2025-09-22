@@ -11,6 +11,8 @@
 
 #include "ubus.h"
 #include "msg.h"
+#include "decoder.h"
+#include "omm.h"
 #include "resource.h"
 
 struct query_token_msg_pld_req {
@@ -303,6 +305,98 @@ void ub_entity_free_mmio_idx(struct ub_entity *dev, int idx)
 	dev->zone[idx].init_succ = 0;
 	dev->zone[idx].ubba_used = 0;
 	dev->zone[idx].sa_used = 0;
+}
+
+static void fill_decoder_map_info(struct ub_entity *uent, int idx,
+				  struct decoder_map_info *info)
+{
+	info->pa = uent->zone[idx].res.start;
+	info->uba = uent->zone[idx].region.start;
+	info->size = uent->zone[idx].region.size;
+	info->eid_low = uent->eid;
+	info->eid_high = 0;
+	info->tpg_num = is_primary(uent) ? uent->cna : uent->pue->cna;
+	info->order_id = 0;
+	info->order_type = 0;
+	info->token_id = uent->token_id;
+	info->token_value = uent->token_value;
+	info->upi = uent->bi ? uent->bi->info.upi : 0;
+	info->src_eid = uent->bi ? uent->bi->info.eid : 0;
+}
+
+static int ub_entity_decoder_map_mmio_idx(struct ub_entity *uent, int idx)
+{
+	struct decoder_map_info info = {};
+	struct ub_decoder *decoder;
+	int ret;
+
+	fill_decoder_map_info(uent, idx, &info);
+	decoder = is_primary(uent) ? uent->ubc->decoder :
+				     uent->pue->ubc->decoder;
+
+	ret = ub_decoder_map(decoder, &info);
+	if (ret)
+		ub_err(uent, "resource%d decoder map failed.\n", idx);
+
+	info.token_value = 0;
+	return ret;
+}
+
+static void ub_entity_decoder_unmap_mmio_idx(struct ub_entity *uent, int idx)
+{
+	struct ub_decoder *decoder;
+
+	if (!uent->zone[idx].sa_used)
+		return;
+
+	decoder = is_primary(uent) ? uent->ubc->decoder :
+				     uent->pue->ubc->decoder;
+	if (ub_decoder_unmap(decoder, uent->zone[idx].res.start,
+			     uent->zone[idx].region.size))
+		ub_warn(uent, "resource%d decoder unmap failed.\n", idx);
+}
+
+void ub_entity_decoder_unmap_mmio(struct ub_entity *dev)
+{
+	int i;
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++)
+		if (dev->zone[i].sa_used && dev->zone[i].init_succ &&
+		    dev->zone[i].decoder_mapped) {
+			ub_entity_decoder_unmap_mmio_idx(dev, i);
+			dev->zone[i].decoder_mapped = 0;
+		}
+}
+
+void ub_entity_decoder_map_mmio(struct ub_entity *dev)
+{
+	int i, ret;
+
+	if (is_ibus_controller(dev))
+		return;
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++) {
+		if (!dev->zone[i].sa_used || !dev->zone[i].init_succ)
+			continue;
+		if (dev->zone[i].decoder_mapped) {
+			ub_err(dev, "mmio idx[%d] has been mapped\n", i);
+			continue;
+		}
+		ret = ub_entity_decoder_map_mmio_idx(dev, i);
+		if (ret) {
+			ub_err(dev, "failed to establish ommu map, mmio_idx=%d, size=%#lx, error_code=%d\n",
+			       i, dev->zone[i].region.size, ret);
+			goto fail;
+		}
+		dev->zone[i].decoder_mapped = 1;
+	}
+
+	return;
+fail:
+	for (i -= 1; i >= 0; i--) {
+		ub_entity_decoder_unmap_mmio_idx(dev, i);
+		dev->zone[i].decoder_mapped = 0;
+	}
 }
 
 static int ub_query_token_rsp_handle(struct ub_entity *uent,

@@ -10,6 +10,7 @@
 
 #include "ubus.h"
 #include "eid.h"
+#include "resource.h"
 #include "eu.h"
 #include "ubus_driver.h"
 #include "instance.h"
@@ -775,6 +776,8 @@ static int ub_bind_bus_instance(struct ub_entity *uent, struct ub_bus_instance *
 	mutex_lock(&bi->lock);
 	list_add_tail(&uent->instance_node, &bi->uents);
 	mutex_unlock(&bi->lock);
+
+	ub_entity_decoder_map_mmio(uent);
 	return 0;
 }
 
@@ -789,6 +792,7 @@ static void ub_unbind_bus_instance(struct ub_entity *uent)
 
 	ub_bus_instance_put(uent->bi);
 	uent->bi = NULL;
+	ub_entity_decoder_unmap_mmio(uent);
 }
 
 int ub_ioctl_bus_instance_bind(void __user *uptr)

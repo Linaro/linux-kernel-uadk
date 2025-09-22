@@ -575,3 +575,42 @@ int ub_route_entities(struct list_head *dev_list)
 
 	return ub_enum_bfs_route_cal(dev_list);
 }
+
+void ub_route_table_clear_for_port(struct ub_port *port, struct ub_port *r_port)
+{
+	ub_route_clear_port(r_port);
+
+	ub_route_clear_port(port);
+
+	if (ub_entity_support_forward(r_port->uent))
+		ub_route_del_bfs(r_port->uent);
+
+	if (ub_entity_support_forward(port->uent))
+		ub_route_del_bfs(port->uent);
+
+	ub_route_sync_all();
+}
+
+int ub_route_table_set_for_port(struct ub_port *port,
+				struct ub_port *r_port)
+{
+	int ret;
+
+	ret = ub_route_mod_neighbor(port, r_port);
+	if (ret)
+		return ret;
+
+	ret = ub_route_mod_neighbor(r_port, port);
+	if (ret)
+		return ret;
+
+	if (ub_entity_support_forward(port->uent))
+		ub_route_mod_bfs(port->uent);
+
+	if (ub_entity_support_forward(r_port->uent))
+		ub_route_mod_bfs(r_port->uent);
+
+	ub_route_sync_all();
+
+	return 0;
+}

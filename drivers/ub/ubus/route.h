@@ -18,5 +18,8 @@ void ub_route_del_bfs(struct ub_entity *uent);
 void ub_route_sync_dev(struct ub_entity *uent);
 void ub_route_sync_all(void);
 int ub_route_entities(struct list_head *dev_list);
+void ub_route_table_clear_for_port(struct ub_port *port,
+				   struct ub_port *r_port);
+int ub_route_table_set_for_port(struct ub_port *port, struct ub_port *r_port);
 
 #endif /* __ROUTE_H__ */

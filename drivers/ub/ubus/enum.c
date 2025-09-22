@@ -1080,6 +1080,57 @@ static void ub_enum_topo_ent_uninit(struct ub_entity *uent)
 	}
 }
 
+static int ub_enum_ports(struct ub_entity *uent, u16 start_port, u16 num,
+			 void *buf)
+{
+	u16 left = num, start = start_port, count;
+	struct enum_pld_scan_pdu_common *pc;
+	struct enum_tlv_info info = {};
+	u8 total_slice, slice_id = 0;
+	int tlv_len, ret, nums = 0;
+	void *rsp, *tlv;
+
+	do {
+		rsp = (void *)ub_enum_topo_query_and_check(uent, buf, slice_id);
+		if (!rsp)
+			return -EBUSY;
+
+		pc = rsp;
+		tlv_len = (int)pc->pdu_len * SZ_4 - ENUM_PLD_SCAN_PDU_COMMON_SIZE;
+		tlv = rsp + ENUM_PLD_SCAN_PDU_COMMON_SIZE;
+
+		ret = ub_enum_tlv_parse(tlv, tlv_len, &info);
+		if (ret)
+			return ret;
+
+		if (slice_id == 0) {
+			if (!info.si || !info.pi || !info.pn || !info.ci) {
+				dev_err(&uent->ubc->dev, "port tlv si/pi/pn/ci null\n");
+				return -EINVAL;
+			}
+
+			total_slice = info.si->total_slice;
+		}
+
+		if (start >= nums + info.port_nums)
+			goto next;
+
+		info.pi += start - nums;
+		count = min(left, nums + info.port_nums - start);
+		ub_enum_parse_port(uent, info.pi, count);
+		start += count;
+		left -= count;
+
+		if (left == 0)
+			break;
+next:
+		nums += info.port_nums;
+		slice_id++;
+	} while (slice_id < total_slice);
+
+	return 0;
+}
+
 static int ub_enum_and_configure_ent(struct ub_entity *uent, void *buf)
 {
 	int ret;
@@ -1279,6 +1330,37 @@ clear_port:
 clear_list:
 	ub_enum_clear_ent_list(dev_list);
 	return ret;
+}
+
+int ub_enum_topo_scan_ports(struct ub_entity *uent, u16 start_port, u16 num,
+			    struct list_head *dev_list, void *buf)
+{
+	int ret;
+
+	if (!uent || !dev_list || !buf)
+		return -EINVAL;
+
+	ret = ub_enum_ports(uent, start_port, num, buf);
+	if (ret)
+		return ret;
+
+	return ub_enum_do_topo_scan(uent, dev_list, buf);
+}
+
+struct ub_entity *ub_enum_get_port_r_uent(struct ub_port *port, void *buf)
+{
+	struct ub_bus_controller *ubc;
+	int ret;
+
+	if (!port || !buf)
+		return NULL;
+
+	ret = ub_enum_ports(port->uent, port->index, 1, buf);
+	if (ret)
+		return NULL;
+
+	ubc = port->uent->ubc;
+	return ub_enum_get_ent(&port->r_guid, &ubc->devs);
 }
 
 /*

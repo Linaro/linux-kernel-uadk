@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0+
+
+menu "UB vendor drivers"
+	depends on UB_UBUS
+
+config UB_HISI_UBUS
+	tristate "hisilicon ubus"
+	depends on UB_UBUS_BUS
+	depends on UB_UBUS_USI
+	default n
+	help
+	  This option enables the modular part of the hisilicon ubus driver.
+	  If you choose the ubus function provided by HiSilicon say y
+	  and it will be accessible from within Linux.
+	  To compile this driver as a module, choose M here.
+	  Say 'M' here unless you know what you are doing
+
+endmenu

@@ -39,4 +39,6 @@ config UB_UBUS_USI
 		UnifiedBus instead of asserting a device IRQ pin.If you
 		don't know what to do here, say Y.
 
+source "drivers/ub/ubus/vendor/Kconfig"
+
 endif

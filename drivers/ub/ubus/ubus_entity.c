@@ -22,6 +22,7 @@
 #include "ubus_inner.h"
 #include "cap.h"
 #include "eu.h"
+#include "instance.h"
 #include "ubus_entity.h"
 
 /*
@@ -401,6 +402,11 @@ void ub_start_ent(struct ub_entity *uent)
 	if (!uent)
 		return;
 
+	if (is_ibus_controller(uent)) {
+		ret = ub_static_bus_instance_init(uent->ubc);
+		WARN_ON(ret);
+	}
+
 	uent->match_driver = true;
 	ret = device_attach(&uent->dev);
 	if (ret < 0 && ret != -EPROBE_DEFER)
@@ -460,6 +466,9 @@ void ub_stop_ent(struct ub_entity *uent)
 
 	device_release_driver(&uent->dev);
 	uent->match_driver = false;
+
+	if (is_ibus_controller(uent))
+		ub_static_bus_instance_uninit(uent->ubc);
 }
 EXPORT_SYMBOL_GPL(ub_stop_ent);
 

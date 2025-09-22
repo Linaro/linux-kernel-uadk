@@ -359,8 +359,30 @@ struct ub_bus_controller {
 	struct list_head devs;
 	struct ub_bus_controller_ops *ops;
 	bool cluster;
+	struct ub_bus_instance *bi;
 
 	void *data;
+};
+
+struct ub_bus_instance_info {
+	u8 type;
+	u16 upi;
+	u32 eid : 20;
+	struct ub_guid guid;
+};
+
+struct ub_bus_instance {
+	bool registered;
+	bool destroy;
+	struct list_head node;
+	struct kref kref;
+
+	struct ub_bus_instance_info info;
+
+	struct ub_bus_controller *major;
+
+	struct list_head uents;
+	struct mutex lock;
 };
 
 static inline struct ub_driver *to_ub_driver(struct device_driver *drv)

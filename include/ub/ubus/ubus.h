@@ -209,6 +209,11 @@ struct ub_entity {
 	u64 dma_mask;
 	struct device_dma_parameters dma_parms;
 
+	/* entity user interface */
+	struct bin_attribute *res_attr[MAX_UB_RES_NUM]; /* sysfs file for resources */
+	/* sysfs file for WC mapping of resources */
+	struct bin_attribute *res_attr_wc[MAX_UB_RES_NUM];
+
 	/* UB interrupt info */
 	raw_spinlock_t usi_lock;
 	unsigned int no_intr : 1;

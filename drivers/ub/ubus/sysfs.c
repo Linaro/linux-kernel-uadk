@@ -10,6 +10,7 @@
 #include "ubus_entity.h"
 #include "instance.h"
 #include "port.h"
+#include "resource.h"
 
 static inline void ub_resource_to_user(const struct ub_entity *dev, int res_id,
 				       const struct resource *rsrc,
@@ -92,6 +93,127 @@ static ssize_t kref_show(struct device *dev, struct device_attribute *attr, char
 	return sysfs_emit(buf, "%u\n", kref_read(&dev->kobj.kref));
 }
 static DEVICE_ATTR_RO(kref);
+
+#define DATA_POS (cur_pos - usr_pos)
+#define REMAIN_BYTE (len - DATA_POS)
+
+static ssize_t ub_read_config(struct file *filp, struct kobject *kobj,
+			      struct bin_attribute *bin_attr, char *buf,
+			      loff_t usr_pos, size_t count)
+{
+	struct ub_entity *uent = to_ub_entity(kobj_to_dev(kobj));
+	u64 cur_pos = usr_pos;
+	u8 *data = (u8 *)buf;
+	size_t len = count >> 1;
+	u32 val;
+
+	if (count == PAGE_SIZE || len == 0)
+		return -EINVAL;
+
+	memset(buf, 0, count);
+
+	if (cur_pos & 1) {
+		if (ub_cfg_read_byte(uent, cur_pos, (u8 *)&val))
+			memcpy(data + DATA_POS + len, &val, 1);
+		memcpy(data + DATA_POS, &val, 1);
+		cur_pos++;
+	}
+
+	if ((cur_pos & SZ_2) && (REMAIN_BYTE >= SZ_2)) {
+		if (ub_cfg_read_word(uent, cur_pos, (u16 *)&val))
+			memcpy(data + DATA_POS + len, &val, SZ_2);
+		memcpy(data + DATA_POS, &val, SZ_2);
+		cur_pos += SZ_2;
+	}
+
+	while (REMAIN_BYTE >= SZ_4) {
+		if (ub_cfg_read_dword(uent, cur_pos, &val))
+			memcpy(data + DATA_POS + len, &val, SZ_4);
+		memcpy(data + DATA_POS, &val, SZ_4);
+		cur_pos += SZ_4;
+	}
+
+	if (REMAIN_BYTE >= SZ_2) {
+		if (ub_cfg_read_word(uent, cur_pos, (u16 *)&val))
+			memcpy(data + DATA_POS + len, &val, SZ_2);
+		memcpy(data + DATA_POS, &val, SZ_2);
+		cur_pos += SZ_2;
+	}
+
+	if (REMAIN_BYTE) {
+		if (ub_cfg_read_byte(uent, cur_pos, (u8 *)&val))
+			memcpy(data + DATA_POS + len, &val, 1);
+		memcpy(data + DATA_POS, &val, 1);
+		cur_pos++;
+	}
+
+	return count;
+}
+
+static ssize_t ub_write_config(struct file *filp, struct kobject *kobj,
+			       struct bin_attribute *bin_attr, char *buf,
+			       loff_t usr_pos, size_t count)
+{
+	struct ub_entity *uent = to_ub_entity(kobj_to_dev(kobj));
+	u64 cur_pos = usr_pos;
+	u8 *data = (u8 *)buf;
+	size_t len = count;
+
+	if (cur_pos & 1) {
+		u8 val;
+
+		memcpy(&val, data + DATA_POS, 1);
+		ub_cfg_write_byte(uent, cur_pos, val);
+		cur_pos++;
+	}
+
+	if ((cur_pos & SZ_2) && (REMAIN_BYTE >= SZ_2)) {
+		u16 val;
+
+		memcpy(&val, data + DATA_POS, SZ_2);
+		ub_cfg_write_word(uent, cur_pos, val);
+		cur_pos += SZ_2;
+	}
+
+	while (REMAIN_BYTE >= SZ_4) {
+		u32 val;
+
+		memcpy(&val, data + DATA_POS, SZ_4);
+		ub_cfg_write_dword(uent, cur_pos, val);
+		cur_pos += SZ_4;
+	}
+
+	if (REMAIN_BYTE >= SZ_2) {
+		u16 val;
+
+		memcpy(&val, data + DATA_POS, SZ_2);
+		ub_cfg_write_word(uent, cur_pos, val);
+		cur_pos += SZ_2;
+	}
+
+	if (REMAIN_BYTE) {
+		u8 val;
+
+		memcpy(&val, data + DATA_POS, 1);
+		ub_cfg_write_byte(uent, cur_pos, val);
+		cur_pos++;
+	}
+
+	return count;
+}
+
+#undef REMAIN_BYTE
+#undef DATA_POS
+
+static const struct bin_attribute ub_config_bin_attr = {
+	.attr =	{
+		.name = "config",
+		.mode = 0644,
+	},
+	.size = UB_CFG_SAPCE_SLICE_END,
+	.read = ub_read_config,
+	.write = ub_write_config,
+};
 
 static ssize_t resource_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
@@ -283,8 +405,22 @@ const struct attribute_group *ub_entity_groups[] = {
 	NULL
 };
 
+static ssize_t cluster_show(const struct bus_type *bus, char *buf)
+{
+	struct ub_bus_controller *ubc;
+
+	if (list_empty(&ubc_list))
+		return 0;
+
+	ubc = list_first_entry(&ubc_list, struct ub_bus_controller, node);
+	return sysfs_emit(buf, "%d\n", ubc->cluster);
+}
+static BUS_ATTR_RO(cluster);
+
+
 static struct attribute *ub_bus_attrs[] = {
 	&bus_attr_instance.attr,
+	&bus_attr_cluster.attr,
 	NULL
 };
 
@@ -604,18 +740,191 @@ static void ub_remove_capabilities_sysfs(struct ub_entity *uent)
 			device_remove_file(&uent->dev, grp[i].attr);
 }
 
+static bool ub_mmap_fits(struct ub_entity *uent, int idx,
+			 struct vm_area_struct *vma)
+{
+	resource_size_t len, start, size;
+
+	if (ub_resource_len(uent, idx) == 0)
+		return false;
+
+	len = vma_pages(vma);
+	start = vma->vm_pgoff;
+	size = ((ub_resource_len(uent, idx) - 1) >> PAGE_SHIFT) + 1;
+	if (start < size && (start + len <= size))
+		return true;
+
+	return false;
+}
+
+static int ub_mmap_resource(struct kobject *kobj, struct bin_attribute *attr,
+			    struct vm_area_struct *vma, int write_combine)
+{
+	struct ub_entity *uent = to_ub_entity(kobj_to_dev(kobj));
+	unsigned long idx = (unsigned long)attr->private;
+
+	if (idx >= MAX_UB_RES_NUM)
+		return -EINVAL;
+
+	if (!ub_mmap_fits(uent, idx, vma))
+		return -EINVAL;
+
+	return ub_mmap_resource_range(uent, idx, vma, write_combine);
+}
+
+static int ub_mmap_resource_wc(struct file *filp, struct kobject *kobj,
+			       struct bin_attribute *attr,
+			       struct vm_area_struct *vma)
+{
+	return ub_mmap_resource(kobj, attr, vma, 1);
+}
+
+static int ub_mmap_resource_uc(struct file *filp, struct kobject *kobj,
+			       struct bin_attribute *attr,
+			       struct vm_area_struct *vma)
+{
+	return ub_mmap_resource(kobj, attr, vma, 0);
+}
+
+static int ub_create_attr(struct ub_entity *uent, int num, int write_combine)
+{
+	/* allocate attribute structure, piggyback attribute name */
+	int name_len = write_combine ? 13 : 10;
+	struct bin_attribute *attr;
+	char *res_attr_name;
+	int retval;
+
+	attr = kzalloc(sizeof(*attr) + name_len, GFP_ATOMIC);
+	if (!attr)
+		return -ENOMEM;
+
+	res_attr_name = (char *)(attr + 1);
+
+	sysfs_bin_attr_init(attr);
+	if (write_combine) {
+		uent->res_attr_wc[num] = attr;
+		sprintf(res_attr_name, "resource%d_wc", num);
+		attr->mmap = ub_mmap_resource_wc;
+	} else {
+		uent->res_attr[num] = attr;
+		sprintf(res_attr_name, "resource%d", num);
+		attr->mmap = ub_mmap_resource_uc;
+	}
+	attr->attr.name = res_attr_name;
+	attr->attr.mode = 0600;
+	attr->size = ub_resource_len(uent, num);
+	attr->private = (void *)(unsigned long)num;
+	retval = sysfs_create_bin_file(&uent->dev.kobj, attr);
+	if (retval) {
+		kfree(attr);
+		write_combine ? (uent->res_attr_wc[num] = NULL) :
+			(uent->res_attr[num] = NULL);
+	}
+
+	return retval;
+}
+
+static void ub_remove_resource_files(struct ub_entity *uent)
+{
+	int i;
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++) {
+		struct bin_attribute *res_attr;
+
+		res_attr = uent->res_attr[i];
+		if (res_attr) {
+			sysfs_remove_bin_file(&uent->dev.kobj, res_attr);
+			kfree(res_attr);
+			uent->res_attr[i] = NULL;
+		}
+
+		res_attr = uent->res_attr_wc[i];
+		if (res_attr) {
+			sysfs_remove_bin_file(&uent->dev.kobj, res_attr);
+			kfree(res_attr);
+			uent->res_attr_wc[i] = NULL;
+		}
+	}
+}
+
+static int ub_create_resource_files(struct ub_entity *uent)
+{
+	int i;
+	int retval;
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++) {
+		/* skip empty resources */
+		if (!ub_resource_len(uent, i))
+			continue;
+
+		retval = ub_create_attr(uent, i, 0);
+		if (retval) {
+			ub_remove_resource_files(uent);
+			return retval;
+		}
+
+		retval = ub_create_attr(uent, i, 1);
+		if (retval) {
+			ub_remove_resource_files(uent);
+			return retval;
+		}
+	}
+	return 0;
+}
+
 int ub_create_sysfs_dev_files(struct ub_entity *uent)
 {
 	int retval;
 
+	/* config interface */
+	retval = sysfs_create_bin_file(&uent->dev.kobj, &ub_config_bin_attr);
+	if (retval)
+		goto err;
+
+	retval = ub_create_resource_files(uent);
+	if (retval)
+		goto err_config_file;
+
 	retval = ub_create_capabilities_sysfs(uent);
 	if (retval)
-		return retval;
+		goto err_resource_files;
 
 	return 0;
+
+err_resource_files:
+	ub_remove_resource_files(uent);
+err_config_file:
+	sysfs_remove_bin_file(&uent->dev.kobj, &ub_config_bin_attr);
+err:
+	return retval;
 }
 
 void ub_remove_sysfs_ent_files(struct ub_entity *uent)
 {
 	ub_remove_capabilities_sysfs(uent);
+
+	sysfs_remove_bin_file(&uent->dev.kobj, &ub_config_bin_attr);
+
+	ub_remove_resource_files(uent);
+}
+
+int ub_bus_attr_dynamic_init(void)
+{
+	int ret;
+
+	ret = bus_create_file(&ub_bus_type, &bus_attr_instance);
+	if (ret)
+		return ret;
+
+	ret = bus_create_file(&ub_bus_type, &bus_attr_cluster);
+	if (ret)
+		bus_remove_file(&ub_bus_type, &bus_attr_instance);
+
+	return ret;
+}
+
+void ub_bus_attr_dynamic_uninit(void)
+{
+	bus_remove_file(&ub_bus_type, &bus_attr_cluster);
+	bus_remove_file(&ub_bus_type, &bus_attr_instance);
 }

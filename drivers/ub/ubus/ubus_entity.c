@@ -437,6 +437,8 @@ void ub_start_ent(struct ub_entity *uent)
 	ret = ub_default_bus_instance_init(uent);
 	WARN_ON(ret);
 
+	ub_create_sysfs_dev_files(uent);
+
 	if (!((is_p_device(uent) || is_p_idevice(uent)) && is_dynamic(uent->bi))) {
 		uent->match_driver = true;
 		ret = device_attach(&uent->dev);
@@ -498,6 +500,7 @@ void ub_stop_ent(struct ub_entity *uent)
 
 	device_release_driver(&uent->dev);
 	uent->match_driver = false;
+	ub_remove_sysfs_ent_files(uent);
 
 	ub_default_bus_instance_uninit(uent);
 

@@ -950,6 +950,10 @@ struct cdx_device_id {
 
 #define UB_ANY_ID (~0)
 
+enum {
+	UB_ID_F_VFIO_DRIVER_OVERRIDE = 1,
+};
+
 /**
  * struct ub_device_id - UB device identifier
  * @vendor:		Vendor ID

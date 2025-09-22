@@ -20,6 +20,14 @@
 	.vendor = (v), .device = (d), \
 	.mod_vendor = (u32)UB_ANY_ID, .module = (u32)UB_ANY_ID
 
+#define UB_ENTITY_DRIVER_OVERRIDE(v, d, driver_override) \
+	.vendor = (v), .device = (d), \
+	.mod_vendor = (u32)UB_ANY_ID, .module = (u32)UB_ANY_ID, \
+	.override_only = (driver_override)
+
+#define UB_DRIVER_OVERRIDE_ENTITY_VFIO(v, d) \
+	UB_ENTITY_DRIVER_OVERRIDE(v, d, UB_ID_F_VFIO_DRIVER_OVERRIDE)
+
 #define UB_ENTITY_MODULE(v, d, m_v, m) \
 	.vendor = (v), .device = (d), \
 	.mod_vendor = (m_v), .module = (m)

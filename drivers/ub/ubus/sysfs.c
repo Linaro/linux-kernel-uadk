@@ -9,6 +9,16 @@
 #include "sysfs.h"
 #include "ubus_entity.h"
 #include "instance.h"
+#include "port.h"
+
+static inline void ub_resource_to_user(const struct ub_entity *dev, int res_id,
+				       const struct resource *rsrc,
+				       resource_size_t *start,
+				       resource_size_t *end)
+{
+	*start = rsrc->start;
+	*end = rsrc->end;
+}
 
 #define ub_config_attr(field, format_string)	\
 static ssize_t field##_show(struct device *dev, struct device_attribute *attr, char *buf)	\
@@ -23,6 +33,15 @@ static DEVICE_ATTR_RO(field)
 ub_config_attr(device, "%#06x\n");
 ub_config_attr(type, "%#x\n");
 ub_config_attr(vendor, "%#06x\n");
+
+static ssize_t ubc_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ub_entity *uent;
+
+	uent = to_ub_entity(dev);
+	return sysfs_emit(buf, "%#05x\n", uent->ubc->uent->uent_num);
+}
+static DEVICE_ATTR_RO(ubc);
 
 static ssize_t class_code_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -44,11 +63,55 @@ static ssize_t guid_show(struct device *dev, struct device_attribute *attr, char
 }
 static DEVICE_ATTR_RO(guid);
 
+static ssize_t entity_idx_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+
+	return sysfs_emit(buf, "%u\n", uent->entity_idx);
+}
+static DEVICE_ATTR_RO(entity_idx);
+
+static ssize_t eid_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+
+	return sysfs_emit(buf, "%u\n", uent->eid);
+}
+static DEVICE_ATTR_RO(eid);
+
+static ssize_t tid_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+
+	return sysfs_emit(buf, "%u\n", uent->tid);
+}
+static DEVICE_ATTR_RO(tid);
+
 static ssize_t kref_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return sysfs_emit(buf, "%u\n", kref_read(&dev->kobj.kref));
 }
 static DEVICE_ATTR_RO(kref);
+
+static ssize_t resource_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+	resource_size_t start, end;
+	int i, cnt = 0;
+
+	for (i = 0; i < MAX_UB_RES_NUM; i++) {
+		struct resource *res =  &uent->zone[i].res;
+
+		ub_resource_to_user(uent, i, res, &start, &end);
+		cnt += sysfs_emit_at(buf, cnt, "%#016llx %#016llx %#016llx\n",
+				     (unsigned long long)start,
+				     (unsigned long long)end,
+				     (unsigned long long)res->flags);
+	}
+	return cnt;
+}
+static DEVICE_ATTR_RO(resource);
 
 static ssize_t driver_override_store(struct device *dev,
 				     struct device_attribute *attr,
@@ -112,6 +175,34 @@ static ssize_t match_driver_show(struct device *dev,
 }
 static DEVICE_ATTR_RW(match_driver);
 
+static ssize_t direct_link_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+	struct ub_port *port;
+	int cnt = 0;
+
+	for_each_uent_port(port, uent) {
+		if (!port->r_uent)
+			continue;
+		cnt += sysfs_emit_at(buf, cnt, "%#04x : %#04x [%#05x]\n",
+				     port->index, port->r_index,
+				     port->r_uent->uent_num);
+	}
+
+	return cnt;
+}
+DEVICE_ATTR_RO(direct_link);
+
+static ssize_t primary_cna_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+
+	return sysfs_emit(buf, "%#06x\n", uent->cna);
+}
+DEVICE_ATTR_RO(primary_cna);
+
 static ssize_t instance_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
@@ -125,15 +216,60 @@ static ssize_t instance_show(struct device *dev, struct device_attribute *attr,
 }
 DEVICE_ATTR_RO(instance);
 
+static ssize_t upi_show(struct device *dev, struct device_attribute *attr,
+			char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+
+	return sysfs_emit(buf, "%#04x\n", uent->upi);
+}
+DEVICE_ATTR_RO(upi);
+
+static ssize_t numa_show(struct device *dev, struct device_attribute *attr,
+			 char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+
+	return sysfs_emit(buf, "%#04x\n", uent->ubc->attr.proximity_domain);
+}
+DEVICE_ATTR_RO(numa);
+
+static ssize_t primary_entity_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+
+	if (uent->entity_idx == 0) /* this device is primary entity */
+		goto pue_print;
+	else if (uent->is_mue) /* find primary entity for mue */
+		uent = uent->pue;
+	else /* find primary entity for ue */
+		uent = uent->pue->pue;
+
+pue_print:
+	return sysfs_emit(buf, "%#05x\n", uent->uent_num);
+}
+DEVICE_ATTR_RO(primary_entity);
+
 static struct attribute *ub_entity_attrs[] = {
+	&dev_attr_resource.attr,
 	&dev_attr_vendor.attr,
 	&dev_attr_device.attr,
 	&dev_attr_class_code.attr,
 	&dev_attr_type.attr,
 	&dev_attr_driver_override.attr,
 	&dev_attr_match_driver.attr,
+	&dev_attr_direct_link.attr,
 	&dev_attr_guid.attr,
+	&dev_attr_ubc.attr,
+	&dev_attr_primary_cna.attr,
 	&dev_attr_instance.attr,
+	&dev_attr_upi.attr,
+	&dev_attr_entity_idx.attr,
+	&dev_attr_numa.attr,
+	&dev_attr_eid.attr,
+	&dev_attr_tid.attr,
+	&dev_attr_primary_entity.attr,
 	&dev_attr_kref.attr,
 	NULL
 };
@@ -164,6 +300,57 @@ const struct attribute_group *ub_bus_groups[] = {
 const struct device_type ub_dev_type = {
 	.groups = NULL,
 };
+
+static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
+			   const char *buf, size_t count)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+	unsigned long val;
+	ssize_t result;
+
+	result = kstrtoul(buf, 0, &val);
+	if (result < 0)
+		return result;
+
+	if (val != 1)
+		return -EINVAL;
+
+	result = ub_reset_entity(uent);
+	if (result < 0)
+		return result;
+
+	return count;
+}
+static DEVICE_ATTR_WO(reset);
+
+static ssize_t device_reset_store(struct device *dev, struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct ub_entity *uent = to_ub_entity(dev);
+	unsigned long val;
+	ssize_t result;
+
+	result = kstrtoul(buf, 0, &val);
+	if (result < 0 || val != 1)
+		return -EINVAL;
+
+	result = ub_device_reset(uent);
+	if (result < 0)
+		return result;
+
+	return count;
+}
+static DEVICE_ATTR_WO(device_reset);
+
+static ssize_t sw_cap_show(struct device *dev, struct device_attribute *attr,
+			   char *buf)
+{
+	struct ub_entity *uent;
+
+	uent = to_ub_entity(dev);
+	return sysfs_emit(buf, "%d\n", uent->sw_cap);
+}
+static DEVICE_ATTR_RO(sw_cap);
 
 static ssize_t ub_total_entities_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
@@ -363,12 +550,17 @@ DEVICE_ATTR_RO(mue_list);
 
 #define CREATE_CONDITIONS(c) ((c) ? 1 : 0)
 
+/* When adding sysfs, remember to add it in remove function. */
 static int ub_create_capabilities_sysfs(struct ub_entity *uent)
 {
 	struct dev_attr_creat_group grp[] = {
+		{ &dev_attr_reset, CREATE_CONDITIONS(uent->reset_fn) },
+		{ &dev_attr_device_reset,
+		  CREATE_CONDITIONS(uent->entity_idx == 0 && !is_ibus_controller(uent)) },
 		{ &dev_attr_ub_total_entities, CREATE_CONDITIONS(uent->entity_idx == 0) },
 		{ &dev_attr_ub_totalues, CREATE_CONDITIONS(uent->is_mue) },
 		{ &dev_attr_ub_numues, CREATE_CONDITIONS(uent->is_mue) },
+		{ &dev_attr_sw_cap, CREATE_CONDITIONS(is_ibus_controller(uent)) },
 		{ &dev_attr_ub_release_ue, CREATE_CONDITIONS(uent->is_mue && entity_flex_en) },
 		{ &dev_attr_mue_list, CREATE_CONDITIONS(uent->entity_idx == 0) },
 		{ &dev_attr_ue_list, CREATE_CONDITIONS(uent->is_mue) },
@@ -394,9 +586,13 @@ err:
 static void ub_remove_capabilities_sysfs(struct ub_entity *uent)
 {
 	struct dev_attr_creat_group grp[] = {
+		{ &dev_attr_reset, CREATE_CONDITIONS(uent->reset_fn) },
+		{ &dev_attr_device_reset,
+		  CREATE_CONDITIONS(uent->entity_idx == 0 && !is_ibus_controller(uent)) },
 		{ &dev_attr_ub_total_entities, CREATE_CONDITIONS(uent->entity_idx == 0) },
 		{ &dev_attr_ub_totalues, CREATE_CONDITIONS(uent->is_mue) },
 		{ &dev_attr_ub_numues, CREATE_CONDITIONS(uent->is_mue) },
+		{ &dev_attr_sw_cap, CREATE_CONDITIONS(is_ibus_controller(uent)) },
 		{ &dev_attr_ub_release_ue, CREATE_CONDITIONS(uent->is_mue && entity_flex_en) },
 		{ &dev_attr_mue_list, CREATE_CONDITIONS(uent->entity_idx == 0) },
 		{ &dev_attr_ue_list, CREATE_CONDITIONS(uent->is_mue) },

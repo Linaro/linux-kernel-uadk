@@ -1049,3 +1049,119 @@ void ubase_update_udma_dscp_vl(struct auxiliary_device *adev, u8 *dscp_vl,
 				       dscp_vl[i] : qos->tp_req_vl[0];
 }
 EXPORT_SYMBOL(ubase_update_udma_dscp_vl);
+
+int ubase_query_tm_queue(struct ubase_dev *udev, u16 bus_ue_id,
+			 struct ubase_query_tm_queue_cmd *resp)
+{
+	struct ubase_query_tm_queue_cmd req = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	req.bus_ue_id = cpu_to_le16(bus_ue_id);
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_TM_Q_INFO, true,
+			     sizeof(req), &req);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_TM_Q_INFO, false,
+			     sizeof(*resp), resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret == -EPERM)
+		return -EOPNOTSUPP;
+	if (ret)
+		ubase_err(udev,
+			  "failed to query tm queue info, bus_ue_id=%u, ret=%d.\n",
+			  bus_ue_id, ret);
+	return ret;
+}
+
+int ubase_query_tm_qset(struct ubase_dev *udev, u16 bus_ue_id,
+			struct ubase_query_tm_qset_cmd *resp)
+{
+	struct ubase_query_tm_qset_cmd req = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	req.bus_ue_id = cpu_to_le16(bus_ue_id);
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_TM_QS_INFO, true,
+			     sizeof(req), &req);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_TM_QS_INFO, false,
+			     sizeof(*resp), resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret == -EPERM)
+		return -EOPNOTSUPP;
+	if (ret)
+		ubase_err(udev,
+			  "failed to query tm qset info, bus_ue_id = %u, ret = %d.\n",
+			  bus_ue_id, ret);
+	return ret;
+}
+
+int ubase_query_tm_pri(struct ubase_dev *udev, u16 bus_ue_id,
+		       struct ubase_query_tm_pri_cmd *resp)
+{
+	struct ubase_query_tm_pri_cmd req = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	req.bus_ue_id = cpu_to_le16(bus_ue_id);
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_TM_PRI_INFO, true,
+			     sizeof(req), &req);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_TM_PRI_INFO, false,
+			     sizeof(*resp), resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret == -EPERM)
+		return -EOPNOTSUPP;
+	if (ret)
+		ubase_err(udev,
+			  "failed to query tm pri info, bus_ue_id = %u, ret = %d.\n",
+			  bus_ue_id, ret);
+	return ret;
+}
+
+int ubase_query_tm_pg(struct ubase_dev *udev, u16 bus_ue_id,
+		      struct ubase_query_tm_pg_cmd *resp)
+{
+	struct ubase_query_tm_pg_cmd req = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	req.bus_ue_id = cpu_to_le16(bus_ue_id);
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_TM_PG_INFO, true,
+			     sizeof(req), &req);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_TM_PG_INFO, false,
+			     sizeof(*resp), resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret == -EPERM)
+		return -EOPNOTSUPP;
+	if (ret)
+		ubase_err(udev,
+			  "failed to query tm pg info, bus_ue_id = %u, ret = %d.\n",
+			  bus_ue_id, ret);
+	return ret;
+}
+
+int ubase_query_tm_port(struct ubase_dev *udev,
+			struct ubase_query_tm_port_cmd *resp)
+{
+	struct ubase_query_tm_port_cmd req = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_TM_PORT_INFO, true,
+			     sizeof(req), &req);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_TM_PORT_INFO, false,
+			     sizeof(*resp), resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret == -EPERM)
+		return -EOPNOTSUPP;
+	if (ret)
+		ubase_err(udev, "failed to query tm port info, ret = %d.\n", ret);
+	return ret;
+}

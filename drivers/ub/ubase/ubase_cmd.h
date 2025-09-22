@@ -131,6 +131,95 @@ struct ubase_query_fst_fvt_rqmt_cmd {
 	struct ubase_rqmt_tbl rqmt_info[UBASE_MAX_VL_NUM];
 };
 
+struct ubase_query_tm_queue_cmd {
+	__le16 bus_ue_id;
+	u8 queue_num;
+	u8 resv0;
+	u8 queue_vl[UBASE_MAX_VL_NUM];
+	u8 queue_id[UBASE_MAX_VL_NUM];
+	u8 qset_id[UBASE_MAX_VL_NUM];
+	__le16 link_vld_bitmap;
+	u8 resv1[2];
+};
+
+struct ubase_query_tm_qset_cmd {
+	__le16 bus_ue_id;
+	u8 qset_num;
+	u8 rate_limit_bypass;
+	u8 ir_b[UBASE_MAX_VL_NUM];
+	u8 ir_u[UBASE_MAX_VL_NUM];
+	u8 ir_s[UBASE_MAX_VL_NUM];
+	u8 bs_b[UBASE_MAX_VL_NUM];
+	u8 bs_s[UBASE_MAX_VL_NUM];
+	__le32 rate[UBASE_MAX_VL_NUM];
+	u8 qset_id[UBASE_MAX_VL_NUM];
+	u8 pri_id[UBASE_MAX_VL_NUM];
+	__le16 qset_pri_link_vld;
+	__le16 qset_sch_mode;
+	u8 qset_weight[UBASE_MAX_VL_NUM];
+	u8 resv1[16];
+};
+
+struct ubase_query_tm_pri_cmd {
+	__le16 bus_ue_id;
+	u8 pri_id;
+	u8 pg_id;
+	u8 pri_sch_mode;
+	u8 pri_weight;
+	u8 c_ir_b;
+	u8 c_ir_u;
+	u8 c_ir_s;
+	u8 c_bs_b;
+	u8 c_bs_s;
+	u8 p_ir_b;
+	u8 p_ir_u;
+	u8 p_ir_s;
+	u8 p_bs_b;
+	u8 p_bs_s;
+	__le32 c_rate;
+	__le32 p_rate;
+
+	u8 c_rate_limit_bypass;
+	u8 p_rate_limit_bypass;
+	u8 resv1[30];
+};
+
+struct ubase_query_tm_pg_cmd {
+	__le16 bus_ue_id;
+	u8 pg_id;
+	u8 pg_sch_mode;
+	u8 pg_weight;
+	u8 c_ir_b;
+	u8 c_ir_u;
+	u8 c_ir_s;
+	u8 c_bs_b;
+	u8 c_bs_s;
+	u8 p_ir_b;
+	u8 p_ir_u;
+	u8 p_ir_s;
+	u8 p_bs_b;
+	u8 p_bs_s;
+	u8 resv0;
+	__le32 c_rate;
+	__le32 p_rate;
+
+	u8 c_rate_limit_bypass;
+	u8 p_rate_limit_bypass;
+	u8 resv1[30];
+};
+
+struct ubase_query_tm_port_cmd {
+	u8 ir_b;
+	u8 ir_u;
+	u8 ir_s;
+	u8 bs_b;
+	u8 bs_s;
+	u8 rate_limit_bypass;
+	u8 resv0[2];
+	__le32 rate;
+	u8 resv1[12];
+};
+
 struct ubase_query_ueid_cmd {
 	__le32 ueid[UBASE_BUS_EID_LEN];
 	u32 rsv[2];

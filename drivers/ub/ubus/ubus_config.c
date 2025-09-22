@@ -111,6 +111,7 @@ void ub_msg_pkt_header_init(struct msg_pkt_header *header, struct ub_entity *uen
 	cnth->nth_nlp = NTH_NLP_WITH_TPH;
 	cnth->scna = scna;
 	cnth->dcna = dcna;
+	cnth->mgmt = is_p_device(uent) ? 0 : 1;
 
 	header->ctph_nlp = CTPH_NLP_UPI_40BITS_UEID;
 	header->tp_opcode = CTPH_OPCODE_NOT_CNP;

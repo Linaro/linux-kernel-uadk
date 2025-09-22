@@ -123,6 +123,17 @@ void ub_bus_instance_put(struct ub_bus_instance *bi)
 }
 EXPORT_SYMBOL_GPL(ub_bus_instance_put);
 
+bool eid_match(struct ub_bus_instance *bi, void *arg)
+{
+	if (bi == NULL || arg == NULL)
+		return false;
+
+	u32 *eid = (u32 *)arg;
+
+	return bi->info.eid == *eid;
+}
+EXPORT_SYMBOL_GPL(eid_match);
+
 static struct ub_bus_instance *ub_alloc_bus_instance(void)
 {
 	struct ub_bus_instance *bi;
@@ -756,6 +767,12 @@ static int get_bus_instance_and_uent(u8 *b_guid, u8 *d_guid,
 	if (!uent)
 		goto put;
 
+	if (is_p_device(uent)) {
+		pr_err("fad dev not support bind again\n");
+		ub_entity_put(uent);
+		goto put;
+	}
+
 	*p_bi = bi;
 	*p_uent = uent;
 	return 0;
@@ -898,14 +915,24 @@ out:
 
 int ub_default_bus_instance_init(struct ub_entity *uent)
 {
+	bool m_idev = is_p_idevice(uent);
+	bool fad = is_p_device(uent);
 	struct ub_bus_instance *bi;
 	int ret;
 
 	if (is_switch(uent))
 		return 0;
 
-	bi = uent->ubc->bi;
+	if (fad || m_idev) {
+		mutex_lock(&dynamic_mutex);
+		bi = ub_find_bus_instance(eid_match, &uent->user_eid);
+	} else {
+		bi = uent->ubc->bi;
+	}
+
 	if (!bi) {
+		if (fad || m_idev)
+			mutex_unlock(&dynamic_mutex);
 		ub_err(uent, "get default bi NULL\n");
 		return -EINVAL;
 	}
@@ -913,6 +940,11 @@ int ub_default_bus_instance_init(struct ub_entity *uent)
 	mutex_lock(&uent->instance_lock);
 	ret = ub_bind_bus_instance(uent, bi);
 	mutex_unlock(&uent->instance_lock);
+
+	if (fad || m_idev) {
+		ub_bus_instance_put(bi);
+		mutex_unlock(&dynamic_mutex);
+	}
 
 	return ret;
 }

@@ -236,6 +236,7 @@ struct ub_entity {
 	struct mutex instance_lock;
 	struct list_head instance_node;
 	struct ub_bus_instance *bi;
+	u32 user_eid;
 	struct ub_eu_table *eu_table;
 
 	u32 support_feature;

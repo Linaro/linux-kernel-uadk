@@ -9,6 +9,7 @@
 #include <linux/limits.h>
 #include <linux/module.h>
 
+#include "pool.h"
 #include "msg.h"
 
 u8 err_to_msg_rsp(int err)
@@ -166,7 +167,7 @@ int message_rx_init(void)
 {
 	const char *msg_name[UB_MSG_CODE_NUM] = {
 		NULL, NULL, NULL, NULL,
-		NULL, NULL, NULL, NULL
+		NULL, NULL, "pool wq", NULL
 	};
 	struct workqueue_struct *q;
 	int i;
@@ -263,7 +264,7 @@ static rx_msg_handler_t rx_msg_handler[UB_MSG_CODE_NUM] = {
 	NULL,
 	NULL,
 	NULL,
-	NULL,
+	ub_pool_rx_msg_handler,
 };
 
 static void message_rx_work(struct work_struct *work)

@@ -41,5 +41,6 @@ int ub_notify_bus_instance_handle(struct ub_bus_controller *ubc, bool flag,
 void ub_static_cluster_instance_drain(void);
 int ub_default_bus_instance_init(struct ub_entity *uent);
 void ub_default_bus_instance_uninit(struct ub_entity *uent);
+bool eid_match(struct ub_bus_instance *bi, void *arg);
 
 #endif /* __INSTANCE_H__ */

@@ -196,6 +196,7 @@ struct ub_entity {
 	struct ue_map uem;
 	struct list_head mue_list; /* management ub entity list */
 	struct list_head ue_list; /* entity list in management ub entity */
+	u8 is_vdm_idev;
 
 	/* entity topology info */
 	struct list_head node;

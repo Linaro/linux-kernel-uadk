@@ -186,12 +186,15 @@ enum message_tx_type {
 
 #define msg_size_gen(req_size, rsp_size) ((u32)((req_size) << 16) | (rsp_size))
 
+typedef void (*rx_msg_handler_t)(struct ub_bus_controller *ubc, void *pkt, u16 len);
+
 /**
  * struct message_ops - message ops and capabilities
  * @probe_dev: probe ub_entity to init message
  * @remove_dev: remove ub_entity to uninit message
  * @sync_request: send message to target ub_entity and wait response
  * @send: send message to target ub_entity but not wait response
+ * @response: send response message to target
  * @sync_enum: send enum message to target ub_entity and wait response
  * @owner: Driver module providing these ops
  */
@@ -202,6 +205,8 @@ struct message_ops {
 			    u8 code);
 	int (*send)(struct message_device *mdev, struct msg_info *info,
 		    u8 code);
+	int (*response)(struct message_device *mdev, struct msg_info *info,
+			u8 code);
 	int (*sync_enum)(struct message_device *mdev, struct msg_info *info,
 			 u8 cmd);
 	struct module *owner;
@@ -256,7 +261,21 @@ int message_sync_request(struct message_device *mdev, struct msg_info *info,
 			 u8 code);
 int message_send(struct message_device *mdev, struct msg_info *info,
 		 u8 code);
+int message_response(struct message_device *mdev, struct msg_info *info,
+		     u8 code);
 int message_sync_enum(struct message_device *mdev, struct msg_info *info,
 		      u8 cmd);
+
+struct ub_rx_msg_task {
+	struct ub_bus_controller *ubc;
+	void *pkt;
+	u16 len;
+	struct work_struct work;
+};
+
+struct workqueue_struct *get_rx_msg_wq(u8 msg_code);
+int message_rx_handler(struct ub_bus_controller *ubc, void *pkt, u16 len);
+int message_rx_init(void);
+void message_rx_uninit(void);
 
 #endif /* __MSG_H__ */

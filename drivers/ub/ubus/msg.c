@@ -135,6 +135,16 @@ int message_send(struct message_device *mdev, struct msg_info *info,
 	return -ENOTTY;
 }
 
+int message_response(struct message_device *mdev, struct msg_info *info,
+		     u8 code)
+{
+	if (mdev->ops->response)
+		return mdev->ops->response(mdev, info, code);
+
+	return -ENOTTY;
+}
+EXPORT_SYMBOL_GPL(message_response);
+
 int message_sync_enum(struct message_device *mdev, struct msg_info *info,
 		      u8 cmd)
 {
@@ -143,3 +153,172 @@ int message_sync_enum(struct message_device *mdev, struct msg_info *info,
 
 	return -ENOTTY;
 }
+
+static struct workqueue_struct *rx_msg_wq[UB_MSG_CODE_NUM];
+struct workqueue_struct *get_rx_msg_wq(u8 msg_code)
+{
+	return rx_msg_wq[msg_code];
+}
+
+static bool msg_rx_flag;
+
+int message_rx_init(void)
+{
+	const char *msg_name[UB_MSG_CODE_NUM] = {
+		NULL, NULL, NULL, NULL,
+		NULL, NULL, NULL, NULL
+	};
+	struct workqueue_struct *q;
+	int i;
+
+	for (i = 0; i < UB_MSG_CODE_NUM; i++) {
+		if (!msg_name[i])
+			continue;
+		q = create_singlethread_workqueue(msg_name[i]);
+		if (!q) {
+			pr_err("alloc workqueue[%d] failed\n", i);
+			message_rx_uninit();
+			return -ENOMEM;
+		}
+
+		rx_msg_wq[i] = q;
+	}
+
+	msg_rx_flag = true;
+
+	return 0;
+}
+
+void message_rx_uninit(void)
+{
+#define MSG_RX_WAIT_US 1000
+	struct workqueue_struct *q;
+	int i;
+
+	msg_rx_flag = false;
+	/* For cpus still handle rx msg in interrupt context */
+	udelay(MSG_RX_WAIT_US);
+
+	for (i = 0; i < UB_MSG_CODE_NUM; i++) {
+		q = rx_msg_wq[i];
+		if (q) {
+			flush_workqueue(q);
+			destroy_workqueue(q);
+			rx_msg_wq[i] = NULL;
+		}
+	}
+}
+
+static struct ub_rx_msg_task *
+message_rx_task_alloc_and_init(struct ub_bus_controller *ubc, void *pkt, u16 len,
+			       work_func_t func)
+{
+	struct ub_rx_msg_task *task;
+
+	task = kzalloc(sizeof(*task), GFP_ATOMIC);
+	if (!task)
+		return (struct ub_rx_msg_task *)ERR_PTR(-ENOMEM);
+
+	task->pkt = kzalloc(len, GFP_ATOMIC);
+	if (!task->pkt) {
+		kfree(task);
+		return (struct ub_rx_msg_task *)ERR_PTR(-ENOMEM);
+	}
+
+	memcpy(task->pkt, pkt, len);
+	task->len = len;
+	task->ubc = ubc;
+	INIT_WORK(&task->work, func);
+
+	return task;
+}
+
+static void message_rx_task_free(struct ub_rx_msg_task *task)
+{
+	kfree(task->pkt);
+	kfree(task);
+}
+
+static bool msg_rx_code_valid(struct ub_bus_controller *ubc, u8 code)
+{
+	u8 msg = msg_code(code);
+
+	if (msg_type(code) == MSG_RSP)
+		return false;
+
+	if (msg == UB_MSG_CODE_RAS || msg == UB_MSG_CODE_CFG ||
+	    msg == UB_MSG_CODE_EXCH || msg == UB_MSG_CODE_MAX)
+		return false;
+
+	if (!ubc->cluster && msg == UB_MSG_CODE_POOL)
+		return false;
+
+	return true;
+}
+
+static rx_msg_handler_t rx_msg_handler[UB_MSG_CODE_NUM] = {
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+};
+
+static void message_rx_work(struct work_struct *work)
+{
+	struct ub_rx_msg_task *task = container_of(work, struct ub_rx_msg_task,
+						   work);
+	struct msg_pkt_header *header = (struct msg_pkt_header *)task->pkt;
+	u8 msg_code = header->msgetah.msg_code;
+	struct ub_bus_controller *ubc = task->ubc;
+	rx_msg_handler_t handler;
+
+	handler = rx_msg_handler[msg_code];
+
+	if (handler)
+		handler(ubc, task->pkt, task->len);
+	else
+		dev_err(&ubc->dev, "rx msg code not support, code=%#x\n",
+			msg_code);
+
+	message_rx_task_free(task);
+}
+
+int message_rx_handler(struct ub_bus_controller *ubc, void *pkt, u16 len)
+{
+	struct msg_pkt_header *header = (struct msg_pkt_header *)pkt;
+	struct msg_extended_header *msgetah = &header->msgetah;
+	struct ub_rx_msg_task *task;
+
+	if (!msg_rx_flag)
+		return -EBUSY;
+
+	if (len < MSG_PKT_HEADER_SIZE) {
+		dev_err(&ubc->dev, "rx msg len invalid, len=%#x\n", len);
+		return -EINVAL;
+	}
+
+	if (msgetah->plen != len - MSG_PKT_HEADER_SIZE) {
+		dev_err(&ubc->dev, "rx msg plen invalid, len=%#x, plen=%#x\n",
+			len, msgetah->plen);
+		return -EINVAL;
+	}
+
+	if (!msg_rx_code_valid(ubc, msgetah->code)) {
+		dev_err(&ubc->dev, "rx msg code invalid, code=%#x\n",
+			msgetah->code);
+		return -EINVAL;
+	}
+
+	dev_info(&ubc->dev, "rx msg coming, code=%#x\n", msgetah->code);
+
+	task = message_rx_task_alloc_and_init(ubc, pkt, len, message_rx_work);
+	if (IS_ERR(task))
+		return PTR_ERR(task);
+
+	queue_work(rx_msg_wq[msgetah->msg_code], &task->work);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(message_rx_handler);

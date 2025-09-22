@@ -10,6 +10,7 @@
 #include "debugfs/ubase_debugfs.h"
 #include "ubase_cmd.h"
 #include "ubase_ctrlq.h"
+#include "ubase_err_handle.h"
 #include "ubase_hw.h"
 #include "ubase_mailbox.h"
 #include "ubase_reset.h"
@@ -347,6 +348,7 @@ static void ubase_service_task(struct work_struct *work)
 		container_of(work, struct ubase_delay_work, service_task.work);
 
 	ubase_crq_service_task(ubase_work);
+	ubase_errhandle_service_task(ubase_work);
 	ubase_ctrlq_service_task(ubase_work);
 	ubase_ctrlq_clean_service_task(ubase_work);
 }
@@ -923,6 +925,39 @@ void ubase_virt_unregister(struct auxiliary_device *adev)
 	mutex_unlock(&uadev->virt_lock);
 }
 EXPORT_SYMBOL(ubase_virt_unregister);
+
+void ubase_port_register(struct auxiliary_device *adev,
+			 void (*port_handler)(struct auxiliary_device *adev,
+					      bool link_up))
+{
+	struct ubase_adev *uadev;
+
+	if (!adev || !port_handler)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->port_lock);
+	if (!uadev->port_handler)
+		uadev->port_handler = port_handler;
+	mutex_unlock(&uadev->port_lock);
+}
+EXPORT_SYMBOL(ubase_port_register);
+
+void ubase_port_unregister(struct auxiliary_device *adev)
+{
+	struct ubase_adev *uadev;
+
+	if (!adev)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->port_lock);
+	uadev->port_handler = NULL;
+	mutex_unlock(&uadev->port_lock);
+}
+EXPORT_SYMBOL(ubase_port_unregister);
 
 void ubase_reset_register(struct auxiliary_device *adev,
 			  void (*reset_handler)(struct auxiliary_device *adev,

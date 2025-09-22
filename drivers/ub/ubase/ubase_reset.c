@@ -40,6 +40,13 @@ static void ubase_reset_err_handle(struct ubase_dev *udev)
 	ubase_err(udev, "failed to reset, too many attempts.\n");
 }
 
+void ubase_port_reset(struct ubase_dev *udev)
+{
+	ubase_port_down(udev);
+	ubase_port_up(udev);
+	udev->reset_stat.port_reset_cnt++;
+}
+
 void ubase_reset_service(struct ubase_delay_work *ubase_work)
 {
 	struct ubase_dev *udev = container_of(ubase_work, struct ubase_dev,

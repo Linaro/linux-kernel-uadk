@@ -355,6 +355,11 @@ static inline bool ubase_dev_ta_timer_buf_supported(struct ubase_dev *udev)
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_TA_TIMER_BUF_B);
 }
 
+static inline bool ubase_dev_err_handle_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ERR_HANDLE_B);
+}
+
 static inline bool ubase_dev_ctrlq_supported(struct ubase_dev *udev)
 {
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_CTRLQ_B);

@@ -12,7 +12,8 @@ MODULE_NAME := ubase
 UBASE_OBJS := ubase_main.o ubase_dev.o ubase_hw.o ubase_cmd.o ubase_ctrlq.o \
 	debugfs/ubase_debugfs.o ubase_eq.o ubase_mailbox.o ubase_ubus.o \
 	debugfs/ubase_ctx_debugfs.o debugfs/ubase_qos_debugfs.o \
-	ubase_qos_hw.o ubase_tp.o ubase_ctrlq_tp.o ubase_reset.o
+	ubase_qos_hw.o ubase_tp.o ubase_ctrlq_tp.o ubase_reset.o \
+	ubase_err_handle.o
 
 $(MODULE_NAME)-objs := $(UBASE_OBJS)
 obj-$(CONFIG_UB_UBASE) := ubase.o

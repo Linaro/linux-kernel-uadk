@@ -7,6 +7,6 @@ ubus-y := ubus_driver.o sysfs.o ubus_controller.o msg.o ubus_config.o port.o cc.
 ubus-y += enum.o resource.o ubus_entity.o reset.o cap.o interrupt.o decoder.o omm.o ioctl.o eu.o link.o
 ubus-y += instance.o pool.o
 
-ubus-y += services/ras.o
+ubus-y += services/ras.o services/service.o
 
 obj-$(CONFIG_UB_UBUS_BUS) += ubus.o

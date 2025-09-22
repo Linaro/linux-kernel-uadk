@@ -19,6 +19,8 @@
 #include "ubus_controller.h"
 #include "ubus_inner.h"
 #include "ubus_entity.h"
+#include "services/service.h"
+#include "ubus_driver.h"
 
 bool entity_flex_en;
 module_param(entity_flex_en, bool, 0444);
@@ -619,6 +621,27 @@ void ub_bus_type_uninit(void)
 	ub_bus_type.num_vf = NULL;
 }
 
+static int ub_service_bus_match(struct device *dev, struct device_driver *drv)
+{
+	struct ub_service_device *sdev;
+	struct ub_service_driver *sdrv;
+
+	if (drv->bus != &ub_service_bus_type || dev->bus != &ub_service_bus_type)
+		return 0;
+
+	sdev = to_ub_service_device(dev);
+	sdrv = to_ub_service_driver(drv);
+	if (sdrv->service != sdev->service)
+		return 0;
+
+	return 1;
+}
+
+struct bus_type ub_service_bus_type = {
+	.name  = "ub_service",
+	.match = ub_service_bus_match,
+};
+
 int ub_host_probe(void)
 {
 	int ret;
@@ -628,8 +651,14 @@ int ub_host_probe(void)
 	if (ret)
 		goto ub_cfg_ops_init_fail;
 
+	ret = bus_register(&ub_service_bus_type);
+	if (ret)
+		goto bus_register_fail;
+
 	return 0;
 
+bus_register_fail:
+	unregister_ub_cfg_ops();
 ub_cfg_ops_init_fail:
 	ub_bus_type_uninit();
 	return ret;
@@ -638,6 +667,7 @@ EXPORT_SYMBOL_GPL(ub_host_probe);
 
 void ub_host_remove(void)
 {
+	bus_unregister(&ub_service_bus_type);
 	unregister_ub_cfg_ops();
 	ub_bus_type_uninit();
 }

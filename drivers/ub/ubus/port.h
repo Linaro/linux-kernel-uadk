@@ -27,5 +27,6 @@ void ub_notify_share_port(struct ub_port *port,
 			  enum ub_share_port_notify_type type);
 
 int ub_port_write_dword(struct ub_port *port, u32 pos, u32 val);
+bool ub_port_check_link_up(struct ub_port *port);
 
 #endif /* __PORT_H__ */

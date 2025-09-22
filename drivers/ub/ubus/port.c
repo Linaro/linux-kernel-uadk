@@ -706,3 +706,16 @@ void ub_notify_share_port(struct ub_port *port,
 	}
 	up_read(&ub_share_port_notify_list_rwsem);
 }
+
+bool ub_port_check_link_up(struct ub_port *port)
+{
+	u8 val;
+
+	if (!port)
+		return false;
+
+	if (ub_port_read_byte(port, UB_PORT_PHYSICAL_PORT_LINK_STATUS, &val))
+		return false;
+
+	return !!(val & UB_PORT_LINK_STATE);
+}

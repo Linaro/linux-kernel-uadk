@@ -75,4 +75,11 @@ bool ubhp_card_present(struct ub_slot *slot);
 void ubhp_start_slots(struct ub_entity *uent);
 void ubhp_stop_slots(struct ub_entity *uent);
 
+/* route */
+int ubhp_update_route_link_up(struct ub_slot *slot);
+void ubhp_update_route_link_down(struct ub_slot *slot);
+void ubhp_mark_detached_entities(struct ub_entity *root, struct list_head *dev_list);
+void ubhp_stop_entities(struct list_head *dev_list);
+void ubhp_remove_entities(struct list_head *dev_list);
+
 #endif /* __HOTPLUG_H__ */

@@ -4,6 +4,10 @@
  */
 
 #include "../../ubus.h"
+#include "../../msg.h"
+#include "../../enum.h"
+#include "../../route.h"
+#include "../../port.h"
 #include "../service.h"
 #include "hotplug.h"
 
@@ -223,4 +227,48 @@ void ubhp_service_init(void)
 void ubhp_service_uninit(void)
 {
 	ub_service_driver_unregister(&ubhp_service_driver);
+}
+
+static void ubhp_disconnect_slot(struct ub_slot *slot)
+{
+	struct ub_port *port;
+
+	for_each_slot_port(port, slot)
+		ub_port_disconnect(port);
+
+	slot->r_uent = NULL;
+}
+
+/**
+ * a simple example for link down
+ * for a given topo like
+ * +-------------+         +---------+                 +---------+         +--------+
+ * | controller0 |p0:---:p0| switch0 |p1:---slot0---:p0| switch1 |p1:---:p0| device0|
+ * +-------------+         +---------+                 +---------+         +--------+
+ * when slot0 is calling handle link down
+ * 1. disconnect slot0 so that p1 and p0 is not connected in software
+ * 2. put switch1 and device0 into dev_list, mark them as detached
+ * 3. stop switch1 and device0
+ * 4. remove switch1 and device0
+ * 5. handle route link down at slot0, del route of right(switch1 & device0)
+ *	from left(controller0 & switch0)
+ */
+static void ubhp_handle_link_down(struct ub_slot *slot)
+{
+	struct list_head dev_list;
+	struct ub_entity *r_uent;
+
+	INIT_LIST_HEAD(&dev_list);
+
+	r_uent = slot->r_uent;
+	if (!r_uent) {
+		ub_warn(slot->uent, "link down without remote dev\n");
+		return;
+	}
+
+	ubhp_disconnect_slot(slot);
+	ubhp_mark_detached_entities(r_uent, &dev_list);
+	ubhp_stop_entities(&dev_list);
+	ubhp_remove_entities(&dev_list);
+	ubhp_update_route_link_down(slot);
 }

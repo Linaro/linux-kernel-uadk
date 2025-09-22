@@ -143,7 +143,9 @@ struct ub_port {
 	/* cap cache */
 	DECLARE_BITMAP(cap_map, UB_PORT_CAP_NUM);
 
+	struct work_struct link_work;
 	enum ub_link_state link_state;
+	u8 link_event;
 };
 
 struct ue_map {

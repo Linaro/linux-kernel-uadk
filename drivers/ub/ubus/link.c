@@ -14,6 +14,7 @@
 #include "route.h"
 #include "ubus_entity.h"
 #include "ubus_driver.h"
+#include "services/hotplug/hotplug.h"
 #include "link.h"
 
 static struct ub_entity *ublc_get_port_r_uent(struct ub_port *port)
@@ -158,6 +159,9 @@ static int ublc_handle_new_device_link_up(struct ub_port *port)
 		goto err_route;
 	}
 
+	if (port->slot)
+		port->slot->r_uent = port->r_uent;
+
 	ret = ublc_update_route_link_up(port);
 	if (ret) {
 		ub_err(port->uent, "link up update route failed, ret=%d\n", ret);
@@ -178,6 +182,8 @@ static int ublc_handle_new_device_link_up(struct ub_port *port)
 err_link_up:
 	ublc_update_route_link_down(port);
 	port->r_uent = NULL;
+	if (port->slot)
+		port->slot->r_uent = NULL;
 err_route:
 	ub_enum_clear_ent_list(&dev_list);
 	return ret;
@@ -244,6 +250,10 @@ static void ublc_handle_all_link_down(struct ub_port *port, struct ub_entity *r_
 
 	INIT_LIST_HEAD(&dev_list);
 	ub_port_disconnect(port);
+
+	if (port->slot)
+		port->slot->r_uent = NULL;
+
 	ublc_mark_detached_devices(r_uent, &dev_list);
 	ublc_stop_devices(&dev_list);
 	ublc_remove_devices(&dev_list);
@@ -288,7 +298,14 @@ void ublc_link_up_handle(struct ub_port *port)
 
 	r_uent = ublc_get_port_r_uent(port);
 	if (!r_uent) {
-		ublc_handle_new_device_link_up(port);
+		ret = ublc_handle_new_device_link_up(port);
+		if (ret) {
+			ubhp_handle_power(port->slot, false);
+		} else {
+			ub_info(uent, "port%u link up and create device\n",
+				port->index);
+			ubhp_handle_power(port->slot, true);
+		}
 		goto out;
 	}
 
@@ -348,4 +365,89 @@ void ub_link_change_handler(struct work_struct *work)
 		ublc_link_up_handle(port);
 	else
 		ublc_link_down_handle(port);
+}
+
+static void ub_link_handle_event(struct ub_port *port, enum ub_link_event event)
+{
+	if (event == UB_LINK_UP)
+		ublc_link_up_handle(port);
+	else
+		ublc_link_down_handle(port);
+}
+
+static struct ub_port *ub_link_get_port_from_msg(void *pkt)
+{
+	struct msg_pkt_header *header = (struct msg_pkt_header *)pkt;
+	struct link_msg_payload *payload;
+	struct ub_port *port = NULL;
+	struct ub_entity *uent;
+	u32 seid;
+
+	seid = eid_gen(header->seid_h, header->seid_l);
+	uent = ub_get_ent_by_eid(seid);
+	if (!uent) {
+		pr_warn("get no device by eid %u\n", seid);
+		return NULL;
+	}
+
+	payload = (struct link_msg_payload *)header->payload;
+	if (payload->port_idx >= uent->port_nums) {
+		pr_err("link port idx %u exceeds uent port num %u\n",
+		       payload->port_idx, uent->port_nums);
+		goto out;
+	}
+
+	port = uent->ports + payload->port_idx;
+
+out:
+	ub_entity_put(uent);
+	return port;
+}
+
+static void ub_link_event_handler(struct ub_bus_controller *ubc, void *pkt, u16 len)
+{
+	struct msg_pkt_header *header = (struct msg_pkt_header *)pkt;
+	struct ub_port *port;
+
+	if (len < UB_LINK_MSG_SIZE) {
+		dev_err(&ubc->dev, "lc msg len[%#x] invalid\n", len);
+		return;
+	}
+
+	port = ub_link_get_port_from_msg(pkt);
+	if (!port)
+		return;
+
+	ub_link_handle_event(port,
+			     (enum ub_link_event)header->msgetah.sub_msg_code);
+}
+
+/**
+ * for an incoming msg, the following procedure is performed:
+ * 1. parse relating link event from msg
+ * 2. parse slot/port that has this event
+ * 3. if hotplug event is button pressed, queue a button work; if hotplug event
+ *	is card presence, queue a present work with 0s delay, if the work
+ *	already exists, modify it's delay time to 0s
+ */
+
+static rx_msg_handler_t link_msg_handler[UB_SUB_MSG_CODE_NUM] = {
+	ub_link_event_handler,
+	ub_link_event_handler,
+	ubhp_event_handler,
+	ubhp_event_handler,
+};
+
+void ub_link_msg_handler(struct ub_bus_controller *ubc, void *pkt, u16 len)
+{
+	struct msg_pkt_header *header = (struct msg_pkt_header *)pkt;
+	u8 sub_msg_code = header->msgetah.sub_msg_code;
+	rx_msg_handler_t handler;
+
+	handler = link_msg_handler[sub_msg_code];
+	if (handler)
+		handler(ubc, pkt, len);
+	else
+		dev_err(&ubc->dev, "link sub msg code[%#x] not support\n",
+			sub_msg_code);
 }

@@ -6,6 +6,17 @@
 #ifndef __LINK_H__
 #define __LINK_H__
 
+struct link_msg_payload {
+	/* DW0 */
+	u32 scna : 24;
+	u32 rsv0 : 8;
+	/* DW1 */
+	u32 port_idx : 16;
+	u32 rsv1 : 16;
+};
+
+#define UB_LINK_MSG_SIZE 40
+
 enum ub_link_event {
 	UB_LINK_UP,
 	UB_LINK_DOWN
@@ -14,5 +25,6 @@ enum ub_link_event {
 void ub_link_change_handler(struct work_struct *work);
 void ublc_link_up_handle(struct ub_port *port);
 void ublc_link_down_handle(struct ub_port *port);
+void ub_link_msg_handler(struct ub_bus_controller *ubc, void *pkt, u16 len);
 
 #endif /* __LINK_H__ */

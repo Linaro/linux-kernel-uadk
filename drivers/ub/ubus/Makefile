@@ -9,6 +9,6 @@ ubus-y += instance.o pool.o
 
 ubus-y += services/ras.o services/service.o services/gucd.o
 ubus-y += services/hotplug/hotplug_core.o services/hotplug/hotplug_ctrl.o
-ubus-y += services/hotplug/hotplug_route.o
+ubus-y += services/hotplug/hotplug_route.o services/hotplug/hotplug_msg.o
 
 obj-$(CONFIG_UB_UBUS_BUS) += ubus.o

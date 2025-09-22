@@ -10,6 +10,7 @@
 #include <linux/module.h>
 
 #include "pool.h"
+#include "link.h"
 #include "msg.h"
 
 u8 err_to_msg_rsp(int err)
@@ -166,7 +167,7 @@ static bool msg_rx_flag;
 int message_rx_init(void)
 {
 	const char *msg_name[UB_MSG_CODE_NUM] = {
-		NULL, NULL, NULL, NULL,
+		NULL, "link wq", NULL, NULL,
 		NULL, NULL, "pool wq", NULL
 	};
 	struct workqueue_struct *q;
@@ -259,7 +260,7 @@ static bool msg_rx_code_valid(struct ub_bus_controller *ubc, u8 code)
 
 static rx_msg_handler_t rx_msg_handler[UB_MSG_CODE_NUM] = {
 	NULL,
-	NULL,
+	ub_link_msg_handler,
 	NULL,
 	NULL,
 	NULL,

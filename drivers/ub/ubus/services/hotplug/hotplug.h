@@ -54,6 +54,14 @@ struct ub_slot {
 #define PWR_LED(slot)		((slot)->slot_cap & UB_SLOT_PLPS)
 #define PRESENT(slot)		((slot)->slot_cap & UB_SLOT_PDSS)
 
+struct ubhp_msg_payload {
+	u16 slot_id;
+	u16 rsv0;
+	u32 rsv1;
+};
+
+#define UB_HP_MSG_SIZE 40
+
 enum power_state {
 	POWER_OFF,
 	POWER_ON
@@ -100,6 +108,9 @@ bool ubhp_wait_linkup(struct ub_slot *slot);
 bool ubhp_card_present(struct ub_slot *slot);
 void ubhp_start_slots(struct ub_entity *uent);
 void ubhp_stop_slots(struct ub_entity *uent);
+
+/* msg */
+void ubhp_event_handler(struct ub_bus_controller *ubc, void *pkt, u16 len);
 
 /* core */
 void ubhp_handle_power(struct ub_slot *slot, bool power_on);

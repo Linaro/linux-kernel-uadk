@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 
+#include "services.h"
 #include "sysfs.h"
 #include "ubus.h"
 #include "ubus_config.h"
@@ -655,8 +656,14 @@ int ub_host_probe(void)
 	if (ret)
 		goto bus_register_fail;
 
+	ret = ub_services_init();
+	if (ret)
+		goto ub_services_init_fail;
+
 	return 0;
 
+ub_services_init_fail:
+	bus_unregister(&ub_service_bus_type);
 bus_register_fail:
 	unregister_ub_cfg_ops();
 ub_cfg_ops_init_fail:
@@ -667,6 +674,7 @@ EXPORT_SYMBOL_GPL(ub_host_probe);
 
 void ub_host_remove(void)
 {
+	ub_services_exit();
 	bus_unregister(&ub_service_bus_type);
 	unregister_ub_cfg_ops();
 	ub_bus_type_uninit();

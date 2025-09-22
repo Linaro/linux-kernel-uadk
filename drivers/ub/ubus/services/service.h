@@ -5,6 +5,8 @@
 #ifndef __SERVICES_SERVICE_H__
 #define __SERVICES_SERVICE_H__
 
+#define UB_MAXSERIVCES 3
+
 struct ub_service_device {
 	int irq;
 	struct ub_entity *uent;
@@ -27,6 +29,9 @@ struct ub_service_driver {
 	container_of(d, struct ub_service_device, device)
 #define to_ub_service_driver(d) \
 	container_of(d, struct ub_service_driver, driver)
+
+void ub_ras_init(void);
+void ub_ras_uninit(void);
 
 int ub_service_driver_register(struct ub_service_driver *drv);
 void ub_service_driver_unregister(struct ub_service_driver *drv);

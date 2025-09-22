@@ -690,6 +690,13 @@ int ub_host_probe(void)
 	if (ret)
 		goto cdev_fail;
 
+	if (!manage_subsystem_ops || !manage_subsystem_ops->ras_handler_probe)
+		goto error_register_fail;
+
+	ret = manage_subsystem_ops->ras_handler_probe();
+	if (ret)
+		goto error_register_fail;
+
 	ret = message_rx_init();
 	if (ret)
 		goto message_init_fail;
@@ -697,6 +704,9 @@ int ub_host_probe(void)
 	return 0;
 
 message_init_fail:
+	if (manage_subsystem_ops && manage_subsystem_ops->ras_handler_remove)
+		manage_subsystem_ops->ras_handler_remove();
+error_register_fail:
 	ub_cdev_uninit();
 cdev_fail:
 	ub_services_exit();
@@ -719,6 +729,8 @@ EXPORT_SYMBOL_GPL(ub_host_probe);
 void ub_host_remove(void)
 {
 	message_rx_uninit();
+	if (manage_subsystem_ops && manage_subsystem_ops->ras_handler_remove)
+		manage_subsystem_ops->ras_handler_remove();
 	ub_cdev_uninit();
 	ub_services_exit();
 	bus_unregister(&ub_service_bus_type);

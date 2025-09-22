@@ -64,6 +64,8 @@ struct ub_manage_subsystem_ops {
 	u32 vendor;
 	int (*controller_probe)(struct ub_bus_controller *ubc);
 	void (*controller_remove)(struct ub_bus_controller *ubc);
+	int (*ras_handler_probe)(void);
+	void (*ras_handler_remove)(void);
 };
 int register_ub_manage_subsystem_ops(const struct ub_manage_subsystem_ops *ops);
 void unregister_ub_manage_subsystem_ops(const struct ub_manage_subsystem_ops *ops);

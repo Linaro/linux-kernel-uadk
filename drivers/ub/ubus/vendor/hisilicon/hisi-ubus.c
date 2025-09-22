@@ -7,6 +7,7 @@
 #include <linux/platform_device.h>
 
 #include "../../ubus.h"
+#include "local-ras.h"
 #include "hisi-ubus.h"
 
 #define HISI_VENDOR_ID 0xCC08
@@ -16,6 +17,8 @@ static const struct ub_manage_subsystem_ops hisi_ub_manage_subsystem_ops = {
 	.vendor = HISI_VENDOR_ID,
 	.controller_probe = ub_bus_controller_probe,
 	.controller_remove = ub_bus_controller_remove,
+	.ras_handler_probe = ub_ras_handler_probe,
+	.ras_handler_remove = ub_ras_handler_remove
 };
 
 static const struct of_device_id hisi_ubus_of_match[] = {

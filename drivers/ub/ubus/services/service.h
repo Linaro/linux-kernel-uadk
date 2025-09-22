@@ -5,6 +5,9 @@
 #ifndef __SERVICES_SERVICE_H__
 #define __SERVICES_SERVICE_H__
 
+#define UB_SERVICE_HP_SHIFT 1
+#define UB_SERVICE_HP (1 << UB_SERVICE_HP_SHIFT)
+
 #define UB_MAXSERIVCES 3
 
 struct ub_service_device {
@@ -32,6 +35,8 @@ struct ub_service_driver {
 
 void ub_ras_init(void);
 void ub_ras_uninit(void);
+void ubhp_service_init(void);
+void ubhp_service_uninit(void);
 
 int ub_service_driver_register(struct ub_service_driver *drv);
 void ub_service_driver_unregister(struct ub_service_driver *drv);

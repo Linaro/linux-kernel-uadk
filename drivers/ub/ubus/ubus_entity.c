@@ -49,6 +49,7 @@ struct ub_entity *ub_alloc_ent(void)
 	INIT_LIST_HEAD(&uent->mue_list);
 	INIT_LIST_HEAD(&uent->ue_list);
 	INIT_LIST_HEAD(&uent->cna_list);
+	INIT_LIST_HEAD(&uent->slot_list);
 	INIT_LIST_HEAD(&uent->instance_node);
 
 	uent->dev.type = &ub_dev_type;

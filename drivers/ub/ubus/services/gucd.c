@@ -20,6 +20,15 @@ MODULE_DEVICE_TABLE(ub, component_device_ids);
 static int get_component_service_capability(struct ub_entity *uent)
 {
 	int services = 0;
+	u32 val;
+	int ret;
+
+	ret = ub_cfg_read_dword(uent, UB_CFG0_CAP_BITMAP, &val);
+	if (ret)
+		return services;
+
+	if (val & (1 << UB_SHP_CAP))
+		services |= UB_SERVICE_HP;
 
 	return services;
 }
@@ -188,10 +197,12 @@ static struct ub_driver ub_component_device_driver = {
 static void ub_init_services(void)
 {
 	ub_ras_init();
+	ubhp_service_init();
 }
 
 static void ub_uninit_services(void)
 {
+	ubhp_service_uninit();
 	ub_ras_uninit();
 }
 

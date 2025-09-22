@@ -141,6 +141,8 @@ struct ub_port {
 	guid_t r_guid;
 	struct kobject kobj;
 	DECLARE_BITMAP(cna_maps, UB_MAX_CNA_NUM);
+	/* hotplug info */
+	struct ub_slot *slot;
 	/* cap cache */
 	DECLARE_BITMAP(cap_map, UB_PORT_CAP_NUM);
 
@@ -222,6 +224,9 @@ struct ub_entity {
 
 	/* entity route info */
 	struct list_head cna_list; /* store distance for cna in route table */
+
+	/* entity slot info */
+	struct list_head slot_list; /* store slots under this dev */
 
 	struct dev_message *message;
 

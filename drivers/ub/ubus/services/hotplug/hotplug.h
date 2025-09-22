@@ -1,0 +1,50 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
+/*
+ * Copyright (c) HiSilicon Technologies Co., Ltd. 2025. All rights reserved.
+ */
+
+#ifndef __HOTPLUG_H__
+#define __HOTPLUG_H__
+
+/**
+ * struct ub_slot - UB hotplug slot
+ * @uent: pointer to the ub dev who has this slot
+ * @r_uent: pointer to the ub dev who is plugged in this slot
+ * @ports: port array slice of uent's port array
+ * @kobj: kobject of slot to provide sysfs
+ * @node: node of slot in uent slot_list;
+ *
+ * @slot_id: id of this slot
+ * @port_start: start port_idx of ports belong to this slot
+ * @port_num: number of ports belong to this slot
+ */
+struct ub_slot {
+	/* slot info */
+	struct ub_entity *uent;
+	struct ub_entity *r_uent;
+	struct ub_port *ports;
+	struct kobject kobj;
+	struct list_head node;
+
+	/* cap info */
+	u8 slot_id;
+	u16 port_start;
+	u16 port_num;
+	u32 slot_cap;
+};
+
+#define for_each_slot_port(p, s) \
+	for ((p) = (s)->ports; ((p) - (s)->ports) < (s)->port_num; (p)++)
+
+static inline void ubhp_put_slot(struct ub_slot *slot)
+{
+	if (slot)
+		kobject_put(&slot->kobj);
+}
+
+/* ctrl */
+int ub_slot_read_dword(struct ub_slot *slot, u32 pos, u32 *val);
+void ubhp_start_slots(struct ub_entity *uent);
+void ubhp_stop_slots(struct ub_entity *uent);
+
+#endif /* __HOTPLUG_H__ */

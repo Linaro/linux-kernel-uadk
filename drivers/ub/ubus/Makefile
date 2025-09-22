@@ -8,5 +8,6 @@ ubus-y += enum.o resource.o ubus_entity.o reset.o cap.o interrupt.o decoder.o om
 ubus-y += instance.o pool.o
 
 ubus-y += services/ras.o services/service.o services/gucd.o
+ubus-y += services/hotplug/hotplug_core.o services/hotplug/hotplug_ctrl.o
 
 obj-$(CONFIG_UB_UBUS_BUS) += ubus.o

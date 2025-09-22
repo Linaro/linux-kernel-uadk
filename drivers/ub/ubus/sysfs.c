@@ -8,6 +8,7 @@
 #include "ubus.h"
 #include "sysfs.h"
 #include "ubus_entity.h"
+#include "instance.h"
 
 #define ub_config_attr(field, format_string)	\
 static ssize_t field##_show(struct device *dev, struct device_attribute *attr, char *buf)	\
@@ -133,6 +134,7 @@ const struct attribute_group *ub_entity_groups[] = {
 };
 
 static struct attribute *ub_bus_attrs[] = {
+	&bus_attr_instance.attr,
 	NULL
 };
 

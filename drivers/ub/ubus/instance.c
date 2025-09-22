@@ -20,6 +20,69 @@ static LIST_HEAD(ubi_list);
 static DEFINE_MUTEX(ubi_list_mutex);
 static DEFINE_MUTEX(dynamic_mutex);
 static u32 instance_count;
+static u32 instance_start;
+
+static ssize_t instance_store(const struct bus_type *bus, const char *buf,
+			      size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	mutex_lock(&ubi_list_mutex);
+	if (val >= instance_count) {
+		pr_err("store instance %#lx over %#x\n", val, instance_count);
+		mutex_unlock(&ubi_list_mutex);
+		return -EINVAL;
+	}
+
+	instance_start = val;
+	mutex_unlock(&ubi_list_mutex);
+	return count;
+}
+
+static ssize_t instance_show(const struct bus_type *bus, char *buf)
+{
+	struct ub_bus_instance_info *info;
+	struct ub_bus_instance *bi;
+	u32 show, left, end, i = 0;
+	struct ub_guid *guid;
+	ssize_t len;
+
+#define MAX_DUMP 50
+	mutex_lock(&ubi_list_mutex);
+	left = instance_count - instance_start;
+	show = left > MAX_DUMP ? MAX_DUMP : left;
+	end = instance_start + show;
+	len = sysfs_emit(buf, "count %#x, from %#x, show %#x\n", instance_count,
+			 instance_start, show);
+
+	list_for_each_entry(bi, &ubi_list, node) {
+		if (i < instance_start) {
+			i++;
+			continue;
+		}
+
+		if (i == end)
+			break;
+
+		info = &bi->info;
+		guid = &info->guid;
+		len += sysfs_emit_at(buf, len, "guid:");
+		len += ub_show_guid(guid, buf + len);
+		len += sysfs_emit_at(buf, len, " type:%01x eid:%05x upi:%04x\n",
+				     info->type, info->eid, info->upi);
+		i++;
+	}
+
+	instance_start = 0;
+	mutex_unlock(&ubi_list_mutex);
+	return len;
+}
+BUS_ATTR_RW(instance);
 
 static void ub_unregister_bus_instance(struct ub_bus_instance *bi);
 static void ub_bus_instance_destroy(struct ub_bus_instance *bi)
@@ -565,4 +628,101 @@ void ub_dynamic_bus_instance_drain(void)
 			ub_bus_instance_put(bi);
 
 	mutex_unlock(&dynamic_mutex);
+}
+
+static int
+ub_static_cluster_instance_create(struct ub_bus_controller *ubc, u32 *guid,
+				  u32 eid, u16 upi)
+{
+	struct ub_bus_instance *bi;
+	int ret;
+
+	bi = ub_alloc_bus_instance();
+	if (!bi)
+		return -ENOMEM;
+
+	bi->info.type = UBUS_INSTANCE_STATIC_CLUSTER;
+	guid_copy(&bi->info.guid.id, (guid_t *)guid);
+	bi->info.eid = eid;
+	bi->info.upi = upi;
+	bi->major = ubc;
+
+	ret = ub_register_bus_instance(bi);
+	if (ret)
+		goto put;
+
+	ret = ummu_core_add_eid((guid_t *)&guid_null, bi->info.eid,
+				EID_BYPASS);
+	if (ret) {
+		dev_err(&ubc->dev, "bus instance add eid failed, ret=%d\n", ret);
+		goto unregister;
+	}
+
+	ubc->cluster_bi = bi;
+	return 0;
+
+unregister:
+	ub_unregister_bus_instance(bi);
+put:
+	ub_bus_instance_put(bi);
+	return ret;
+}
+
+int ub_notify_bus_instance_handle(struct ub_bus_controller *ubc, bool flag,
+				  u32 *guid, u32 eid, u16 upi)
+{
+	struct ub_bus_instance *bi;
+	struct ub_guid *tmp;
+	int ret;
+
+	if (!flag) {
+		bi = ub_find_bus_instance(guid_match, guid);
+		if (!bi) {
+			dev_err(&ubc->dev, "notify can't find bus instance\n");
+			return -ENODEV;
+		}
+
+		if (!is_static_cluster(bi) || bi->info.eid != eid ||
+		    bi->info.upi != upi) {
+			dev_err(&ubc->dev, "notify bus instance is invalid\n");
+			ub_bus_instance_put(bi);
+			return -EINVAL;
+		}
+
+		/* May receive the same UBC Notify message */
+		if (ubc->cluster_bi)
+			ub_bus_instance_put(bi);
+		else
+			ubc->cluster_bi = bi;
+
+		return 0;
+	}
+
+	tmp = (struct ub_guid *)guid;
+	if (tmp->bits.type != UB_TYPE_BUS_INSTANCE) {
+		dev_err(&ubc->dev, "notify msg guid type is invalid\n");
+		return -EINVAL;
+	}
+
+	/* BI may have already been created in other UBC Notify messages */
+	ret = ub_static_cluster_instance_create(ubc, guid, eid, upi);
+	if (ret && ret != -EEXIST) {
+		dev_err(&ubc->dev, "create static cluster instance failed\n");
+		return ret;
+	}
+
+	if (!ubc->cluster_bi)
+		ubc->cluster_bi = ub_find_bus_instance(guid_match, guid);
+
+	return 0;
+}
+
+void ub_static_cluster_instance_drain(void)
+{
+	struct ub_bus_controller *ubc;
+
+	list_for_each_entry(ubc, &ubc_list, node) {
+		ub_bus_instance_put(ubc->cluster_bi);
+		ubc->cluster_bi = NULL;
+	}
 }

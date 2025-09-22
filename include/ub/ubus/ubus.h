@@ -173,6 +173,7 @@ struct ub_entity {
 	unsigned int eid;
 	unsigned short entity_idx;
 	u32 uent_num; /* ub dev number */
+	u32 fm_cna;
 	struct mmio_zone zone[MAX_UB_RES_NUM];
 	unsigned int total_funcs;
 	u32 token_id;

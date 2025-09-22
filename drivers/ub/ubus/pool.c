@@ -17,14 +17,45 @@
 #include "ubus_inner.h"
 #include "pool.h"
 
+struct cfg_cpl_notify_pld {
+	u32 flag : 1;
+	u32 rsvd : 31;
+	u32 guid[UB_GUID_DW_NUM];
+	u32 eid[4];
+};
+#define CFG_CPL_NOTIFY_PLD_SIZE 36
+
+struct bi_create_pld {
+	u32 guid[UB_GUID_DW_NUM];
+	u32 eid[4];
+	u32 upi : 15;
+	u32 rsvd1 : 17;
+};
+#define BI_CREATE_PLD_SIZE 36
+
+struct bi_destroy_pld {
+	u32 guid[UB_GUID_DW_NUM];
+};
+#define BI_DESTROY_PLD_SIZE 16
+
 struct pool_msg_pkt {
 	struct msg_pkt_header header;
 	union {
 		struct entity_reg_msg_pld reg;
+		struct entity_rls_msg_pld rls;
+		struct cfg_cpl_notify_pld notify;
+		struct bi_create_pld create;
+		struct bi_destroy_pld destroy;
+		struct port_reset_notify_pld port_reset;
 	};
 };
 
 #define MSG_ENTITY_REG_SIZE (MSG_PKT_HEADER_SIZE + ENTITY_REG_PLD_SIZE)
+#define MSG_ENTITY_RLS_SIZE (MSG_PKT_HEADER_SIZE + ENTITY_RLS_PLD_SIZE)
+#define MSG_BI_CREATE_SIZE (MSG_PKT_HEADER_SIZE + BI_CREATE_PLD_SIZE)
+#define MSG_BI_DESTROY_SIZE (MSG_PKT_HEADER_SIZE + BI_DESTROY_PLD_SIZE)
+#define MSG_CFG_CPL_NOTIFY_SIZE (MSG_PKT_HEADER_SIZE + CFG_CPL_NOTIFY_PLD_SIZE)
+#define MSG_PORT_RESET_SIZE (MSG_PKT_HEADER_SIZE + PORT_RESET_NOTIFY_PLD_SIZE)
 
 static DEFINE_SPINLOCK(ub_fad_lock);
 
@@ -37,6 +68,33 @@ static struct ub_fad_collection ub_fad = {
 	.list = LIST_HEAD_INIT(ub_fad.list),
 	.node = LIST_HEAD_INIT(ub_fad.node),
 };
+
+static struct pool_fad *ub_get_fad(u32 eid)
+{
+	struct pool_fad *fad;
+	unsigned long flags;
+
+	spin_lock_irqsave(&ub_fad_lock, flags);
+	list_for_each_entry(fad, &ub_fad.node, node)
+		if (fad->base.eid[0] == eid)
+			goto out;
+
+	fad = NULL;
+out:
+	spin_unlock_irqrestore(&ub_fad_lock, flags);
+	return fad;
+}
+
+struct ub_entity *ub_get_fad_ent_by_eid(unsigned int eid)
+{
+	struct pool_fad *fad;
+
+	fad = ub_get_fad(eid);
+	if (fad)
+		return fad->uent;
+
+	return NULL;
+}
 
 static int ub_fad_res_init(struct pool_fad *fad, struct ub_entity *uent)
 {
@@ -144,6 +202,12 @@ fail:
 	ub_ubc_put(uent->ubc);
 	kfree(uent);
 	return ret;
+}
+
+static void ub_fad_detach(struct pool_fad *fad)
+{
+	ub_stop_and_remove_ent(fad->uent);
+	fad->uent = NULL;
 }
 
 bool ub_rsp_msg_init(struct msg_pkt_header *header, u8 status, u32 plen)
@@ -256,6 +320,61 @@ static u8 ub_entity_reg_handle(struct ub_bus_controller *ubc,
 	return UB_MSG_RSP_SUCCESS;
 }
 
+static u8
+ub_entity_rls_handle(struct ub_bus_controller *ubc, struct pool_msg_pkt *pkt)
+{
+	struct entity_rls_msg_pld *pld = &pkt->rls;
+	struct pool_fad *fad;
+
+	fad = ub_get_fad(pld->eid[0]);
+	if (!fad)
+		return UB_MSG_RSP_EXEC_ENODEV;
+
+	spin_lock(&ub_fad_lock);
+	list_del(&fad->node);
+	spin_unlock(&ub_fad_lock);
+
+	if (fad->attach) {
+		ub_info(fad->uent, "fad detach, eid=%#x, reason=%#x\n",
+			fad->uent->eid, pld->reason);
+		ub_fad_detach(fad);
+		fad->attach = false;
+	}
+
+	kfree(fad);
+
+	return UB_MSG_RSP_SUCCESS;
+}
+
+static void
+ub_entity_rls_msg_handler(struct ub_bus_controller *ubc, void *msg, u16 p_len)
+{
+	struct pool_msg_pkt *pkt = (struct pool_msg_pkt *)msg;
+	struct msg_pkt_header *header = &pkt->header;
+	struct msg_info info = {};
+	bool local;
+	u8 status;
+	int ret;
+
+	if (p_len != MSG_ENTITY_RLS_SIZE) {
+		dev_err(&ubc->dev, "entity rls msg len is wrong, len=%#x\n",
+			p_len);
+		status = UB_MSG_RSP_CMD_LEN_ERR;
+		goto rsp;
+	}
+
+	status = ub_entity_rls_handle(ubc, pkt);
+
+rsp:
+	local = ub_rsp_msg_init(header, status, 0);
+	message_info_init(&info, local ? ubc->uent : NULL, pkt, NULL,
+			  (MSG_PKT_HEADER_SIZE << MSG_REQ_SIZE_OFFSET));
+
+	ret = message_response(ubc->mdev, &info, header->msgetah.code);
+	if (ret)
+		dev_err(&ubc->dev, "send entity rls rsp, ret=%d\n", ret);
+}
+
 static void
 ub_entity_reg_msg_handler(struct ub_bus_controller *ubc, void *msg, u16 p_len)
 {
@@ -297,8 +416,220 @@ rsp:
 		ub_start_ent(start_fad->uent);
 }
 
+static void ub_cfg_cpl_notify_msg_rsp(struct ub_bus_controller *ubc,
+				 struct msg_pkt_header *header)
+{
+	struct msg_info info = {};
+	u32 tmp_eid, tmp_cna;
+	bool local;
+	int ret;
+
+	tmp_eid = header->deid;
+	header->deid = eid_gen(header->seid_h, header->seid_l);
+	header->seid_h = seid_high(tmp_eid);
+	header->seid_l = seid_low(tmp_eid);
+
+	tmp_cna = header->nth.scna;
+	header->nth.scna = header->nth.dcna;
+	header->nth.dcna = tmp_cna;
+	header->msgetah.type = MSG_RSP;
+	header->msgetah.plen = 0;
+
+	local = (header->nth.scna == header->nth.dcna);
+	message_info_init(&info, local ? ubc->uent : NULL, header, NULL,
+			  (MSG_PKT_HEADER_SIZE << MSG_REQ_SIZE_OFFSET));
+
+	ret = message_response(ubc->mdev, &info, header->msgetah.code);
+	if (ret)
+		dev_err(&ubc->dev, "send notify rsp failed, ret=%d\n", ret);
+}
+
+int ub_fm_flush_ubc_info(struct ub_bus_controller *ubc)
+{
+	struct device *dev = &ubc->dev;
+	int ret = -ENOMEM;
+	u32 eid, fm_cna;
+	char *buf;
+	u16 upi;
+
+	buf = kzalloc(SZ_4K, GFP_KERNEL);
+	if (!buf)
+		goto out;
+
+	ret = ub_cfg_read_word(ubc->uent, UB_UPI, &upi);
+	if (ret) {
+		dev_err(dev, "update cluster upi failed, ret=%d\n", ret);
+		goto free_buf;
+	}
+
+	ubc->uent->upi = upi & UB_UPI_MASK;
+	dev_info(dev, "update cluster ubc upi to %#x\n", ubc->uent->upi);
+
+	ret = ub_cfg_read_dword(ubc->uent, UB_EID_0, &eid);
+	if (ret) {
+		dev_err(dev, "update cluster ubc eid failed, ret=%d\n", ret);
+		goto free_buf;
+	}
+
+	if (eid <= ubc_eid_end) {
+		dev_err(dev, "update cluster ubc wrong, eid=%#x\n", eid);
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	ubc->uent->eid = eid & UB_COMPACT_EID_MASK;
+	dev_info(dev, "update cluster ubc eid to %#x\n", ubc->uent->eid);
+
+	ret = ub_cfg_read_dword(ubc->uent, UB_FM_CNA, &fm_cna);
+	if (ret) {
+		dev_err(dev, "read fm cna failed, ret=%d\n", ret);
+		goto free_buf;
+	}
+
+	ubc->uent->fm_cna = fm_cna & UB_FM_CNA_MASK;
+	dev_info(dev, "update cluster ubc fm cna to %#x\n", ubc->uent->fm_cna);
+
+	ret = ub_query_ent_na(ubc->uent, buf);
+	if (ret) {
+		dev_err(dev, "update cluster ubc cna failed, ret=%d\n", ret);
+		goto free_buf;
+	}
+
+	ret = ub_query_port_na(ubc->uent, buf);
+
+free_buf:
+	kfree(buf);
+out:
+	return ret;
+}
+
+static void ub_cfg_cpl_notify_handler(struct ub_bus_controller *ubc, void *msg,
+				     u16 p_len)
+{
+	struct pool_msg_pkt *pkt = (struct pool_msg_pkt *)msg;
+	struct cfg_cpl_notify_pld *notify = &pkt->notify;
+	struct msg_pkt_header *header = &pkt->header;
+	u8 rsp_status = UB_MSG_RSP_SUCCESS;
+	int ret;
+
+	if (p_len != MSG_CFG_CPL_NOTIFY_SIZE) {
+		dev_err(&ubc->dev, "notify msg len is wrong, len=%#x\n", p_len);
+		rsp_status = UB_MSG_RSP_CMD_LEN_ERR;
+		goto rsp;
+	}
+
+	ret = ub_fm_flush_ubc_info(ubc);
+	if (ret) {
+		rsp_status = err_to_msg_rsp(ret);
+		goto rsp;
+	}
+
+	ret = ub_notify_bus_instance_handle(ubc, notify->flag, notify->guid,
+					    notify->eid[0], ubc->uent->upi);
+	if (ret) {
+		dev_err(&ubc->dev, "handle notify bi failed, ret=%d\n", ret);
+		rsp_status = err_to_msg_rsp(ret);
+	}
+rsp:
+	header->msgetah.rsp_status = rsp_status;
+	ub_cfg_cpl_notify_msg_rsp(ubc, header);
+}
+
+static void ub_pool_bi_handler(struct ub_bus_controller *ubc, void *msg, u16 p_len)
+{
+	struct pool_msg_pkt *pkt = (struct pool_msg_pkt *)msg;
+	u32 size = MSG_PKT_HEADER_SIZE << MSG_REQ_SIZE_OFFSET;
+	struct msg_pkt_header *header = &pkt->header;
+	struct bi_create_pld *pld = &pkt->create;
+	u8 status = UB_MSG_RSP_SUCCESS;
+	struct device *dev = &ubc->dev;
+	struct msg_info info = {};
+	bool local;
+	int ret;
+
+	if (header->msgetah.sub_msg_code == UB_BI_CREATE) {
+		if (p_len != MSG_BI_CREATE_SIZE) {
+			dev_err(dev, "bi create msg len is wrong, len=%#x\n",
+				p_len);
+			status = UB_MSG_RSP_CMD_LEN_ERR;
+			goto rsp;
+		}
+
+		ret = ub_msg_bus_instance_create(ubc, pld->guid, pld->eid[0],
+						 pld->upi, EID_BYPASS);
+	} else {
+		if (p_len != MSG_BI_DESTROY_SIZE) {
+			dev_err(dev, "bi destroy msg len is wrong, len=%#x\n",
+				p_len);
+			status = UB_MSG_RSP_CMD_LEN_ERR;
+			goto rsp;
+		}
+		ret = ub_msg_bus_instance_destroy(ubc, pld->guid);
+	}
+
+	if (ret)
+		status = UB_MSG_RSP_EXEC_ENOEXEC;
+
+rsp:
+	local = ub_rsp_msg_init(header, status, 0);
+	message_info_init(&info, local ? ubc->uent : NULL, pkt, pkt, size);
+
+	ret = message_response(ubc->mdev, &info, header->msgetah.code);
+	if (ret)
+		dev_err(dev, "send bi rsp msg, ret=%d\n", ret);
+}
+
+static void ub_port_reset_notify_handler(struct ub_bus_controller *ubc, void *msg,
+				    u16 p_len)
+{
+	u32 size = MSG_PKT_HEADER_SIZE << MSG_REQ_SIZE_OFFSET;
+	struct pool_msg_pkt *pkt = (struct pool_msg_pkt *)msg;
+	struct msg_pkt_header *header = &pkt->header;
+	struct port_reset_notify_pld *pld;
+	u8 status = UB_MSG_RSP_SUCCESS;
+	struct msg_info info = {};
+	struct ub_port *port = NULL;
+	bool local;
+	int ret;
+
+	pld = &pkt->port_reset;
+	if (p_len != MSG_PORT_RESET_SIZE) {
+		dev_err(&ubc->dev,
+			"ub fm port reset notify msg len is wrong, len=%#x\n",
+			p_len);
+		status = UB_MSG_RSP_CMD_LEN_ERR;
+		goto rsp;
+	}
+
+	if (ub_port_reset_check(ubc->uent, pld->port_index)) {
+		status = UB_MSG_RSP_EXEC_ENOEXEC;
+		goto rsp;
+	}
+
+	port = ubc->uent->ports + pld->port_index;
+	if (port->shareable && port->domain_boundary) {
+		if (pld->type == RESET_PREPARE)
+			ub_notify_share_port(port, RESET_PREPARE);
+		else if (pld->type == RESET_DONE)
+			ub_notify_share_port(port, RESET_DONE);
+	}
+
+rsp:
+	local = ub_rsp_msg_init(header, status, 0);
+	message_info_init(&info, local ? ubc->uent : NULL, header, NULL, size);
+	ret = message_response(ubc->mdev, &info, header->msgetah.code);
+	if (ret)
+		dev_err(&ubc->dev,
+			"send ub fm port reset notify error, ret=%d\n", ret);
+}
+
 static rx_msg_handler_t pool_rx_msg_handler[UB_SUB_MSG_CODE_NUM] = {
 	ub_entity_reg_msg_handler,
+	ub_entity_rls_msg_handler,
+	ub_pool_bi_handler,
+	ub_pool_bi_handler,
+	ub_cfg_cpl_notify_handler,
+	ub_port_reset_notify_handler,
 };
 
 void ub_pool_rx_msg_handler(struct ub_bus_controller *ubc, void *pkt, u16 len)

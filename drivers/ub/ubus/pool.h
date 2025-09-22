@@ -51,6 +51,23 @@ struct entity_reg_msg_pld {
 #define ENTITY_RS_PLD_SIZE 36
 #define ENTITY_REG_PLD_SIZE (ENTITY_BASE_PLD_SIZE + ENTITY_RS_PLD_SIZE)
 
+struct entity_rls_msg_pld {
+	/* DW0~DW3 */
+	u32 eid[4];
+	/* DW4 */
+	u32 reason : 8;
+	u32 rsvd1 : 24;
+};
+#define ENTITY_RLS_PLD_SIZE 20
+
+struct port_reset_notify_pld {
+	u32 type : 1;
+	u32 rsvd0 : 15;
+	u32 port_index : 16;
+};
+#define PORT_RESET_NOTIFY_PLD_SIZE 4
+
+struct ub_entity *ub_get_fad_ent_by_eid(unsigned int eid);
 bool ub_rsp_msg_init(struct msg_pkt_header *header, u8 status, u32 plen);
 void ub_pool_rx_msg_handler(struct ub_bus_controller *ubc, void *pkt, u16 len);
 

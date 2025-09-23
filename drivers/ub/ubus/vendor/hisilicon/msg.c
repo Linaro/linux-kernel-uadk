@@ -13,12 +13,16 @@
 #include "vdm.h"
 #include "hisi-msg.h"
 
+#define MSGQ_INT1 1
+#define to_ub_bus_controller(d) container_of(d, struct ub_bus_controller, dev)
+
 struct hi_msg_sqe_pld {
 	char packet[HI_MSG_SQE_PLD_SIZE];
 };
 
 struct hi_message_device {
 	struct hi_msg_core hmc;
+	struct timer_list poll_timer;
 	struct hi_cqe_state *cqe_state;
 	atomic_t msg_in_flight_cnt;
 	struct message_device mdev;
@@ -40,6 +44,8 @@ static inline void cqe_state_set(struct hi_message_device *hmd, int idx,
 	hmd->cqe_state[idx].state = state;
 }
 #define cqe_state_get(hmd, idx) ((hmd)->cqe_state[idx].state)
+
+#define HI_MSG_CQ_POLL_PERIOD 100
 
 #define MSG_MAX (HI_SQ_CFG_DEPTH - 1)
 #define q_left_cnt(q) ((q)->depth - q_used_cnt((q)) - 1)
@@ -216,6 +222,27 @@ static int hi_msg_sync_wait(struct hi_message_device *hmd, int task_type,
 	return -ETIMEDOUT;
 }
 
+static bool hi_msg_has_rx(struct hi_message_device *hmd, int ci, int pi)
+{
+	struct hi_msg_queue *cq = &hmd->hmc.queue[MSG_CQ];
+	struct hi_msg_core *hmc = &hmd->hmc;
+	struct hi_msg_cqe *cqe;
+	int depth, cnt, i, idx;
+
+	depth = hmc->queue[MSG_CQ].depth;
+	cnt = (pi + depth - ci) % depth;
+
+	for (i = 0; i < cnt; i++) {
+		idx = q_ptr_idx(cq, ci, i);
+		cqe = cq_entry(hmc, idx);
+		if (cqe_state_get(hmd, idx) != CQ_SW_HANDLED &&
+		    cqe->task_type == PROTOCOL_MSG && cqe->type == MSG_REQ)
+			return true;
+	}
+
+	return false;
+}
+
 static void hi_msg_cq_update(struct hi_message_device *hmd)
 {
 	struct hi_msg_queue *cq = &hmd->hmc.queue[MSG_CQ];
@@ -223,6 +250,7 @@ static void hi_msg_cq_update(struct hi_message_device *hmd)
 	int i, cnt, idx, release_cnt = 0;
 	struct hi_msg_cqe *cqe;
 	unsigned long flags;
+	u32 cq_pi;
 
 	spin_lock_irqsave(&cq->lock, flags);
 	if (cq->ci == cq->pi) {
@@ -255,7 +283,98 @@ static void hi_msg_cq_update(struct hi_message_device *hmd)
 	wmb(); /* Ensure the register is written correctly. */
 	hi_msg_reg_write(hmc, CQ_CI, cq->ci);
 	atomic_sub(release_cnt, &hmd->msg_in_flight_cnt);
+
+	if (atomic_read(&hmc->cq_int_mask)) {
+		/* Get newest pi, but not store in cq->pi */
+		cq_pi = hi_msg_reg_read(hmc, CQ_PI);
+		/* Check really need open interrupt */
+		if (cq_pi == cq->ci || hi_msg_has_rx(hmd, cq->ci, cq_pi)) {
+			hi_msg_reg_write(hmc, CQ_INT_STATUS, 0x1);
+			/* spi line interrupt, unmask during _irqsave no impact */
+			hi_msg_reg_write(hmc, CQ_INT_MASK, 0x0);
+			atomic_set(&hmc->cq_int_mask, 0);
+		}
+	}
+
 	spin_unlock_irqrestore(&cq->lock, flags);
+}
+
+static int hi_msg_cq_poller(struct hi_message_device *hmd)
+{
+	struct ub_bus_controller *ubc = to_ub_bus_controller(hmd->hmc.dev);
+	struct hi_msg_queue *cq = &hmd->hmc.queue[MSG_CQ];
+	int cqe_cnt, i, idx, ret, handled_cnt = 0;
+	struct hi_msg_core *hmc = &hmd->hmc;
+	struct hi_msg_cqe *cqe;
+	unsigned long flags;
+
+	spin_lock_irqsave(&cq->lock, flags);
+	cq->pi = hi_msg_reg_read(hmc, CQ_PI);
+	if (cq->pi == cq->ci) {
+		spin_unlock_irqrestore(&cq->lock, flags);
+		return -EAGAIN;
+	}
+
+	cqe_cnt = q_used_cnt(cq);
+	for (i = 0; i < cqe_cnt; i++) {
+		idx = q_ptr_idx(cq, ci, i);
+		cqe = cq_entry(hmc, idx);
+
+		if (cqe_state_get(hmd, idx) == CQ_SW_HANDLED)
+			continue;
+
+		/* Now, just msg type has rx */
+		if (cqe->task_type != PROTOCOL_MSG || cqe->type != MSG_REQ)
+			continue;
+
+		if (cqe->p_len > HI_MSG_RQE_SIZE) {
+			dev_err(hmc->dev, "poller cqe p_len invalid\n");
+			goto handled;
+		}
+
+		ret = message_rx_handler(ubc, rq_entry(hmc, cqe->rq_pi),
+					 cqe->p_len);
+		if (ret)
+			dev_err(hmc->dev, "poller rx msg failed, ret=%d\n", ret);
+handled:
+		cqe_state_set(hmd, idx, CQ_SW_HANDLED);
+		handled_cnt++;
+	}
+
+	spin_unlock_irqrestore(&cq->lock, flags);
+	return handled_cnt;
+}
+
+static void hi_msg_cq_handle_poll_timer(struct timer_list *timer)
+{
+	struct hi_message_device *hmd;
+
+	hmd = container_of(timer, struct hi_message_device, poll_timer);
+	if (hi_msg_cq_poller(hmd) > 0)
+		hi_msg_cq_update(hmd);
+	mod_timer(timer, jiffies + msecs_to_jiffies(HI_MSG_CQ_POLL_PERIOD));
+}
+
+static void hi_msg_cq_poller_init(struct hi_message_device *hmd)
+{
+	if (hmd->hmc.virq)
+		return;
+
+	struct timer_list *poll_timer = &hmd->poll_timer;
+
+	timer_setup(poll_timer, hi_msg_cq_handle_poll_timer, 0);
+	poll_timer->expires = jiffies + msecs_to_jiffies(HI_MSG_CQ_POLL_PERIOD);
+	add_timer(poll_timer);
+}
+
+static void hi_msg_cq_poller_uninit(struct hi_message_device *hmd)
+{
+	if (hmd->hmc.virq)
+		return;
+
+	struct timer_list *poll_timer = &hmd->poll_timer;
+
+	timer_shutdown_sync(poll_timer);
 }
 
 static int hi_msg_queue_init(struct hi_message_device *hmd)
@@ -275,6 +394,9 @@ static int hi_msg_queue_init(struct hi_message_device *hmd)
 		ret = -ENOMEM;
 		goto cqe_state_fail;
 	}
+
+	hi_msg_cq_poller_init(hmd);
+
 	return 0;
 
 cqe_state_fail:
@@ -284,6 +406,7 @@ cqe_state_fail:
 
 static void hi_msg_queue_uninit(struct hi_message_device *hmd)
 {
+	hi_msg_cq_poller_uninit(hmd);
 	kfree(hmd->cqe_state);
 	hi_msg_core_uninit(&hmd->hmc);
 }
@@ -466,6 +589,14 @@ static struct message_ops hi_message_ops = {
 	.send = hi_message_send,
 };
 
+static void hi_bus_drv_msg_irq_handler(struct hi_msg_core *hmc)
+{
+	struct hi_message_device *hmd =
+		container_of(hmc, struct hi_message_device, hmc);
+	if (hi_msg_cq_poller(hmd) > 0)
+		hi_msg_cq_update(hmd);
+}
+
 int hi_msg_device_probe(struct ub_bus_controller *ubc)
 {
 	struct device *dev = &ubc->dev;
@@ -481,6 +612,12 @@ int hi_msg_device_probe(struct ub_bus_controller *ubc)
 	hmc->dev = dev;
 	hmc->q_addr = ubc->attr.queue_addr;
 	hmc->q_size = HI_MSGQ_SIZE;
+	hmc->virq = ubc->queue_virq;
+	hmc->intx = MSGQ_INT1;
+	hmc->irq_handler = hi_bus_drv_msg_irq_handler;
+	snprintf(hmc->queue_name, HI_MSG_INT_NAME_LEN, "hi_msgq%u-%d",
+		 ubc->ctl_no, MSGQ_USER_BUS_DRV);
+
 
 	ret = hi_msg_queue_init(hmd);
 	if (ret) {

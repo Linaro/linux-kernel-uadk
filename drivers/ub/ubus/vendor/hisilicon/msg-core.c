@@ -4,6 +4,7 @@
  */
 
 #include <linux/dma-mapping.h>
+#include <linux/interrupt.h>
 
 #include "../../ubus.h"
 #include "../../msg.h"
@@ -115,6 +116,88 @@ static void hi_msg_reset_queue(struct hi_msg_core *hmc)
 	hi_msg_reg_write(hmc, MSGQ_RST, 0);
 }
 
+static irqreturn_t hi_msg_irq(int irq, void *context)
+{
+	struct hi_msg_core *hmc = (struct hi_msg_core *)context;
+	struct hi_msg_queue *cq = &hmc->queue[MSG_CQ];
+	unsigned long flags;
+	u32 ro;
+
+	ro = hi_msg_reg_read(hmc, CQ_INT_RO);
+	if (!ro)
+		return IRQ_NONE;
+
+	hi_msg_reg_write(hmc, CQ_INT_MASK, 0x1);
+
+	if (hmc->irq_handler)
+		hmc->irq_handler(hmc);
+
+	if (hmc->isr_handler)
+		return IRQ_WAKE_THREAD;
+
+	hi_msg_reg_write(hmc, CQ_INT_STATUS, 0x1);
+
+	spin_lock_irqsave(&cq->lock, flags);
+	if (cq->pi == cq->ci) {
+		hi_msg_reg_write(hmc, CQ_INT_STATUS, 0x1);
+		hi_msg_reg_write(hmc, CQ_INT_MASK, 0x0);
+	} else {
+		atomic_set(&hmc->cq_int_mask, 1);
+	}
+	spin_unlock_irqrestore(&cq->lock, flags);
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t hi_msg_isr(int irq, void *context)
+{
+	struct hi_msg_core *hmc = (struct hi_msg_core *)context;
+
+	hmc->isr_handler(hmc);
+
+	hi_msg_reg_write(hmc, CQ_INT_STATUS, 0x1);
+	hi_msg_reg_write(hmc, CQ_INT_MASK, 0x0);
+
+	return IRQ_HANDLED;
+}
+
+static int hi_msg_queue_irq_init(struct hi_msg_core *hmc)
+{
+	int ret;
+
+	/* Config sq int mask for imp */
+	hi_msg_reg_write(hmc, SQ_INT_MSK, 0x0);
+
+	if (!hmc->virq)
+		return 0;
+
+	ret = request_threaded_irq(hmc->virq, hi_msg_irq, hi_msg_isr,
+					IRQF_ONESHOT | IRQF_SHARED,
+					hmc->queue_name, hmc);
+	if (ret) {
+		dev_err(hmc->dev, "request msgq irq failed\n");
+		return ret;
+	}
+	dev_info(hmc->dev, "request irq[%u] succeeded\n", hmc->virq);
+	hi_msg_reg_write(hmc, MSGQ_INT_SEL, hmc->intx);
+	hi_msg_reg_write(hmc, CQ_INT_STATUS, 0x1);
+	hi_msg_reg_write(hmc, CQ_INT_MASK, 0x0);
+
+	return 0;
+}
+
+static void hi_msg_queue_irq_uninit(struct hi_msg_core *hmc)
+{
+	if (hmc->virq) {
+		hi_msg_reg_write(hmc, CQ_INT_MASK, 0x1);
+		hi_msg_reg_write(hmc, CQ_INT_STATUS, 0x1);
+
+		free_irq(hmc->virq, hmc);
+	}
+
+	hi_msg_reg_write(hmc, SQ_INT_MSK, 0x1);
+}
+
 int hi_msg_core_init(struct hi_msg_core *hmc, int user)
 {
 	int i, j, ret;
@@ -135,6 +218,10 @@ int hi_msg_core_init(struct hi_msg_core *hmc, int user)
 	for (i = 0; i < MSGQ_NUM; i++)
 		hi_msg_queue_hw_init(hmc, i);
 
+	ret = hi_msg_queue_irq_init(hmc);
+	if (ret)
+		goto sw_uninit; /* Now i = MSGQ_NUM */
+
 	return 0;
 sw_uninit:
 	hi_msg_reset_queue(hmc);
@@ -150,6 +237,7 @@ void hi_msg_core_uninit(struct hi_msg_core *hmc)
 {
 	int i;
 
+	hi_msg_queue_irq_uninit(hmc);
 	hi_msg_reset_queue(hmc);
 
 	for (i = 0; i < MSGQ_NUM; i++)

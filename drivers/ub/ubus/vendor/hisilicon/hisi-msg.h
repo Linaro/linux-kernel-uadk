@@ -22,6 +22,7 @@ extern int msg_wait;
 #define SQ_CI		0xc
 #define SQ_DEPTH	0x10
 #define SQ_STATUS	0x14
+#define SQ_INT_MSK	0x18
 #define RQ_ADDR_L	0x40
 #define RQ_ADDR_H	0x44
 #define RQ_PI		0x48
@@ -35,7 +36,11 @@ extern int msg_wait;
 #define CQ_CI		0x7c
 #define CQ_DEPTH	0x80
 #define CQ_STATUS	0x84
+#define CQ_INT_MASK	0x88
+#define CQ_INT_STATUS	0x8c
+#define CQ_INT_RO	0x90
 #define MSGQ_RST	0xB0
+#define MSGQ_INT_SEL	0xC0
 
 #define HI_MSG_RQE_SIZE		0x800 /* 2K */
 #define HI_MSG_SQE_PLD_SIZE	0x800 /* 2K */
@@ -135,12 +140,19 @@ struct hi_msg_queue {
 	spinlock_t lock;
 };
 
+#define HI_MSG_INT_NAME_LEN 32
 struct hi_msg_core {
 	struct device *dev; /* ubc->dev */
 	phys_addr_t q_addr; /* MSGQ ctx's phy addr & size */
 	size_t q_size;
 	void __iomem *reg_base; /* MSGQ context virtual address */
 
+	u32 virq; /* if virq == 0, then use poll mode, else int mode */
+	u32 intx;
+	void (*irq_handler)(struct hi_msg_core *hmc);
+	void (*isr_handler)(struct hi_msg_core *hmc);
+	char queue_name[HI_MSG_INT_NAME_LEN];
+	atomic_t cq_int_mask;
 	int user;
 	struct hi_msg_queue queue[MSGQ_NUM];
 };

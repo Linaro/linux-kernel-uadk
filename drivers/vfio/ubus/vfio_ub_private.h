@@ -52,6 +52,7 @@ struct vfio_ub_core_device {
 	struct vfio_device vdev;
 	struct ub_entity *uent;
 	struct vfio_ub_config vconfig;
+	void __iomem *resmap[MAX_UB_RES_NUM];
 	int num_regions; /* vfio-ub additional regions */
 	int num_ext_irqs; /* vfio-ub additional extended irqs */
 	int num_vendor_regions; /* vfio-ub additional vendor-defined regions */
@@ -66,6 +67,7 @@ struct vfio_ub_core_device {
 };
 
 #define VFIO_UB_OFFSET_SHIFT 40
+#define VFIO_UB_OFFSET_TO_INDEX(off) ((off) >> VFIO_UB_OFFSET_SHIFT)
 #define VFIO_UB_OFFSET_MASK (((u64)(1) << VFIO_UB_OFFSET_SHIFT) - 1)
 
 #define BYTE_SIZE 1
@@ -80,12 +82,20 @@ int vfio_ub_config_init(struct vfio_ub_core_device *vdev);
 void vfio_ub_config_uninit(struct vfio_ub_core_device *vdev);
 ssize_t vfio_ub_config_rw(struct vfio_ub_core_device *vdev, char __user *buf,
 			  size_t count, loff_t *ppos, bool iswrite);
+ssize_t vfio_ub_res_rw(struct vfio_ub_core_device *vdev, char __user *buf,
+		       size_t count, loff_t *ppos, bool iswrite);
 int vfio_ub_core_register_device(struct vfio_ub_core_device *vdev);
 void vfio_ub_core_unregister_device(struct vfio_ub_core_device *vdev);
 int vfio_ub_core_open_device(struct vfio_device *core_vdev);
 void vfio_ub_core_close_device(struct vfio_device *core_vdev);
+ssize_t vfio_ub_core_write(struct vfio_device *core_vdev, const char __user *buf,
+			   size_t count, loff_t *ppos);
+ssize_t vfio_ub_core_read(struct vfio_device *core_vdev, char __user *buf, size_t count,
+			  loff_t *ppos);
+int vfio_ub_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma);
 int vfio_ub_core_init_dev(struct vfio_device *core_vdev);
 void vfio_ub_core_release_dev(struct vfio_device *core_dev);
 void vfio_ub_core_disable_all(struct vfio_ub_core_device *vdev);
+void vfio_ub_unset_resmap(struct vfio_ub_core_device *vdev);
 
 #endif /* __VFIO_UB_PRIVATE_H__ */

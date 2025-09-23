@@ -134,6 +134,7 @@ void vfio_ub_core_close_device(struct vfio_device *core_vdev)
 					   struct vfio_ub_core_device, vdev);
 
 	vfio_ub_disable(vdev);
+	vfio_ub_unset_resmap(vdev);
 
 	mutex_lock(&vdev->igate);
 	if (vdev->req_trigger) {
@@ -141,6 +142,92 @@ void vfio_ub_core_close_device(struct vfio_device *core_vdev)
 		vdev->req_trigger = NULL;
 	}
 	mutex_unlock(&vdev->igate);
+}
+
+static ssize_t vfio_ub_rw(struct vfio_ub_core_device *vdev, char __user *buf, size_t count,
+			  loff_t *ppos, bool iswrite)
+{
+	unsigned int index = VFIO_UB_OFFSET_TO_INDEX(*ppos);
+
+	if (index >= (VFIO_UB_NUM_REGIONS + vdev->num_regions))
+		return -EINVAL;
+
+	switch (index) {
+	case VFIO_UB_CONFIG_REGION_INDEX:
+		return vfio_ub_config_rw(vdev, buf, count, ppos, iswrite);
+	case VFIO_UB_REGION0_INDEX:
+	case VFIO_UB_REGION1_INDEX:
+	case VFIO_UB_REGION2_INDEX:
+		return vfio_ub_res_rw(vdev, buf, count, ppos, iswrite);
+	default:
+		return -EINVAL;
+	}
+}
+
+ssize_t vfio_ub_core_read(struct vfio_device *core_vdev, char __user *buf, size_t count,
+			  loff_t *ppos)
+{
+	struct vfio_ub_core_device *vdev =
+		container_of(core_vdev, struct vfio_ub_core_device, vdev);
+
+	if (!count)
+		return 0;
+
+	return vfio_ub_rw(vdev, buf, count, ppos, false);
+}
+
+ssize_t vfio_ub_core_write(struct vfio_device *core_vdev, const char __user *buf,
+			   size_t count, loff_t *ppos)
+{
+	struct vfio_ub_core_device *vdev =
+		container_of(core_vdev, struct vfio_ub_core_device, vdev);
+
+	if (!count)
+		return 0;
+
+	return vfio_ub_rw(vdev, (char __user *)buf, count, ppos, true);
+}
+
+int vfio_ub_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma)
+{
+	struct vfio_ub_core_device *vdev =
+		container_of(core_vdev, struct vfio_ub_core_device, vdev);
+	u64 phys_len, req_len, pgoff, req_start;
+	struct ub_entity *uent = vdev->uent;
+	unsigned int index;
+
+	if (vma->vm_end < vma->vm_start)
+		return -EINVAL;
+
+	/*
+	 * VM_SHARED means user's changing to mmio can immediately arrive ub device,
+	 * or it is unspecified.
+	 */
+	if ((vma->vm_flags & VM_SHARED) == 0)
+		return -EINVAL;
+
+	index = vma->vm_pgoff >> (VFIO_UB_OFFSET_SHIFT - PAGE_SHIFT);
+
+	if (index > VFIO_UB_REGION2_INDEX)
+		return -EINVAL;
+
+	phys_len = PAGE_ALIGN(ub_resource_len(uent, index));
+	req_len = vma->vm_end - vma->vm_start;
+	pgoff = vma->vm_pgoff & ((1U << (VFIO_UB_OFFSET_SHIFT - PAGE_SHIFT)) - 1);
+	req_start = pgoff << PAGE_SHIFT;
+
+	if (req_start + req_len > phys_len)
+		return -EINVAL;
+
+	vm_flags_set(vma, VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP |
+		     VM_PFNMAP | VM_WIPEONFORK);
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	vma->vm_pgoff = (ub_resource_start(uent, index) >> PAGE_SHIFT) + pgoff;
+	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+		vma->vm_end - vma->vm_start, vma->vm_page_prot))
+		return -EAGAIN;
+
+	return 0;
 }
 
 int vfio_ub_core_init_dev(struct vfio_device *core_vdev)

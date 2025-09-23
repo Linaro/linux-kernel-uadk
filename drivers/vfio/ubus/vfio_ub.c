@@ -27,6 +27,9 @@ static const struct vfio_device_ops vfio_ub_ops = {
 	.release = vfio_ub_core_release_dev,
 	.open_device = vfio_ub_core_open_device,
 	.close_device = vfio_ub_core_close_device,
+	.read = vfio_ub_core_read,
+	.write = vfio_ub_core_write,
+	.mmap = vfio_ub_core_mmap,
 };
 
 static int vfio_ub_probe(struct ub_entity *uent, const struct ub_device_id *id)

@@ -659,6 +659,15 @@ enum {
 	VFIO_PCI_NUM_IRQS
 };
 
+/* UB regions types */
+enum {
+	VFIO_UB_REGION0_INDEX = 0,
+	VFIO_UB_REGION1_INDEX,
+	VFIO_UB_REGION2_INDEX,
+	VFIO_UB_CONFIG_REGION_INDEX,
+	VFIO_UB_NUM_REGIONS
+};
+
 /*
  * The vfio-ccw bus driver makes use of the following fixed region and
  * IRQ index mapping. Unimplemented regions return a size of zero.

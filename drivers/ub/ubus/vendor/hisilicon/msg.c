@@ -20,9 +20,20 @@ struct hi_msg_sqe_pld {
 	char packet[HI_MSG_SQE_PLD_SIZE];
 };
 
+struct timeout_msg_info {
+	struct list_head node;
+	u16 msn;
+	u8 task_type;
+	u8 age;
+};
+#define TIMEOUT_MSG_INFO_SZ sizeof(struct timeout_msg_info)
+
 struct hi_message_device {
 	struct hi_msg_core hmc;
 	struct timer_list poll_timer;
+	struct timer_list timeout_msg_timer;
+	struct list_head timeout_msg_list;
+	spinlock_t timeout_msg_lock;
 	struct hi_cqe_state *cqe_state;
 	atomic_t msg_in_flight_cnt;
 	struct message_device mdev;
@@ -35,6 +46,7 @@ enum hi_cq_sw_state { CQ_SW_INIT, CQ_SW_HANDLED };
 
 struct hi_cqe_state {
 	u8 state;
+	u8 age;
 };
 #define HI_CQE_STATE_SZ sizeof(struct hi_cqe_state)
 
@@ -42,10 +54,15 @@ static inline void cqe_state_set(struct hi_message_device *hmd, int idx,
 				 u8 state)
 {
 	hmd->cqe_state[idx].state = state;
+	hmd->cqe_state[idx].age = 0;
 }
 #define cqe_state_get(hmd, idx) ((hmd)->cqe_state[idx].state)
+#define cqe_age_inc(hmd, idx) (((hmd)->cqe_state[idx].age)++)
+#define cqe_age_get(hmd, idx) ((hmd)->cqe_state[idx].age)
 
-#define HI_MSG_CQ_POLL_PERIOD 100
+#define HI_MSG_CQ_POLL_PERIOD		100
+#define HI_TIMEOUT_MSG_POLL_PERIOD	500
+#define HI_MSG_AGING_PERIOD		2
 
 #define MSG_MAX (HI_SQ_CFG_DEPTH - 1)
 #define q_left_cnt(q) ((q)->depth - q_used_cnt((q)) - 1)
@@ -206,7 +223,9 @@ static int hi_msg_sync_wait(struct hi_message_device *hmd, int task_type,
 #define SLEEP_MIN_US 1000
 #define SLEEP_MAX_US 2000
 	u64 end_time = get_jiffies_64() + duration;
+	struct timeout_msg_info *timeout_msg;
 	struct hi_msg_core *hmc = &hmd->hmc;
+	unsigned long flags;
 	int idx;
 
 	while (!time_after64(get_jiffies_64(), end_time)) {
@@ -218,6 +237,15 @@ static int hi_msg_sync_wait(struct hi_message_device *hmd, int task_type,
 			usleep_range(SLEEP_MIN_US, SLEEP_MAX_US);
 	}
 
+	timeout_msg = kzalloc(TIMEOUT_MSG_INFO_SZ, GFP_ATOMIC);
+	if (!timeout_msg)
+		return -ENOMEM;
+
+	timeout_msg->task_type = task_type;
+	timeout_msg->msn = msn;
+	spin_lock_irqsave(&hmd->timeout_msg_lock, flags);
+	list_add_tail(&timeout_msg->node, &hmd->timeout_msg_list);
+	spin_unlock_irqrestore(&hmd->timeout_msg_lock, flags);
 	dev_err(hmc->dev, "task %d msn %#x wait cqe timeout\n", task_type, msn);
 	return -ETIMEDOUT;
 }
@@ -597,6 +625,156 @@ static void hi_bus_drv_msg_irq_handler(struct hi_msg_core *hmc)
 		hi_msg_cq_update(hmd);
 }
 
+static void hi_timeout_msg_ageing(struct hi_message_device *hmd)
+{
+	struct timeout_msg_info *msg, *tmp;
+
+	list_for_each_entry_safe(msg, tmp, &hmd->timeout_msg_list, node) {
+		if (msg->age >= HI_MSG_AGING_PERIOD) {
+			hi_msn_put(msg->task_type, msg->msn);
+			atomic_sub(1, &hmd->msg_in_flight_cnt);
+			list_del(&msg->node);
+			dev_err(hmd->hmc.dev,
+				"release aged timeout type=%u msn=%#x\n",
+				msg->task_type, msg->msn);
+			kfree(msg);
+			continue;
+		}
+		msg->age++;
+	}
+}
+
+static bool hi_cqe_ageing(struct hi_message_device *hmd, int idx)
+{
+	struct hi_msg_core *hmc = &hmd->hmc;
+	struct ub_bus_controller *ubc;
+	struct hi_msg_cqe *cqe;
+	int ret;
+
+	if (cqe_state_get(hmd, idx) == CQ_SW_HANDLED)
+		return false;
+
+	if (cqe_age_get(hmd, idx) < HI_MSG_AGING_PERIOD) {
+		cqe_age_inc(hmd, idx);
+		return false;
+	}
+
+	cqe = cq_entry(hmc, idx);
+	if (cqe->task_type == PROTOCOL_MSG && cqe->type == MSG_REQ) {
+		ubc = to_ub_bus_controller(hmc->dev);
+
+		if (cqe->p_len > HI_MSG_RQE_SIZE) {
+			dev_err(hmc->dev, "ageing cqe p_len invalid\n");
+			return true;
+		}
+
+		ret = message_rx_handler(ubc, rq_entry(hmc, cqe->rq_pi),
+					 cqe->p_len);
+		if (ret)
+			dev_err(hmc->dev, "rx msg failed, ret=%d\n", ret);
+
+		dev_warn(hmc->dev, "interrupt dont up, process unhandled cqe, idx=%d type=%u msn=%#x opcode=%#x\n",
+			 idx, cqe->task_type, cqe->msn, cqe->opcode);
+	} else {
+		dev_err(hmc->dev, "reset unhandled cqe, idx=%d type=%u msn=%#x\n",
+			idx, cqe->task_type, cqe->msn);
+	}
+
+	return true;
+}
+
+static bool hi_is_timeout_msg(struct hi_message_device *hmd, int idx)
+{
+	struct timeout_msg_info *msg, *tmp;
+	struct hi_msg_core *hmc = &hmd->hmc;
+	struct hi_msg_cqe *cqe;
+
+	cqe = cq_entry(hmc, idx);
+
+	list_for_each_entry_safe(msg, tmp, &hmd->timeout_msg_list, node) {
+		if (cqe->msn == msg->msn && cqe->task_type == msg->task_type &&
+		    (cqe->task_type != PROTOCOL_MSG || cqe->type == MSG_RSP)) {
+			list_del(&msg->node);
+			dev_err(hmc->dev,
+				"Timeout Message Processed, task=%u msn=%#x\n",
+				msg->task_type, msg->msn);
+			kfree(msg);
+			return true;
+		}
+	}
+	return false;
+}
+
+static int hi_msg_timeout_poller(struct hi_message_device *hmd)
+{
+	unsigned long cq_flags, timeout_msg_flags;
+	struct hi_msg_queue *cq;
+	int handled_cnt = 0;
+	int cqe_cnt, i, idx;
+
+	cq = &hmd->hmc.queue[MSG_CQ];
+	spin_lock_irqsave(&cq->lock, cq_flags);
+	spin_lock_irqsave(&hmd->timeout_msg_lock, timeout_msg_flags);
+	cq->pi = hi_msg_reg_read(&hmd->hmc, CQ_PI);
+
+	hi_timeout_msg_ageing(hmd);
+
+	if (cq->pi == cq->ci) {
+		spin_unlock_irqrestore(&hmd->timeout_msg_lock,
+				       timeout_msg_flags);
+		spin_unlock_irqrestore(&cq->lock, cq_flags);
+		return 0;
+	}
+
+	cqe_cnt = q_used_cnt(cq);
+	for (i = 0; i < cqe_cnt; i++) {
+		idx = q_ptr_idx(cq, ci, i);
+		if (hi_cqe_ageing(hmd, idx) || hi_is_timeout_msg(hmd, idx)) {
+			cqe_state_set(hmd, idx, CQ_SW_HANDLED);
+			handled_cnt++;
+		}
+	}
+
+	spin_unlock_irqrestore(&hmd->timeout_msg_lock, timeout_msg_flags);
+	spin_unlock_irqrestore(&cq->lock, cq_flags);
+	return handled_cnt;
+}
+
+static void hi_timeout_msg_handle(struct timer_list *timer)
+{
+	struct hi_message_device *hmd;
+
+	hmd = container_of(timer, struct hi_message_device, timeout_msg_timer);
+	if (hi_msg_timeout_poller(hmd) > 0)
+		hi_msg_cq_update(hmd);
+	mod_timer(timer,
+		  jiffies + msecs_to_jiffies(HI_TIMEOUT_MSG_POLL_PERIOD));
+}
+
+static void hi_timeout_msg_poller_init(struct hi_message_device *hmd)
+{
+	struct timer_list *timer = &hmd->timeout_msg_timer;
+
+	INIT_LIST_HEAD(&hmd->timeout_msg_list);
+	spin_lock_init(&hmd->timeout_msg_lock);
+	timer_setup(timer, hi_timeout_msg_handle, 0);
+	timer->expires = jiffies + msecs_to_jiffies(HI_TIMEOUT_MSG_POLL_PERIOD);
+	add_timer(timer);
+}
+
+static void hi_timeout_msg_poller_uninit(struct hi_message_device *hmd)
+{
+	struct timer_list *timer = &hmd->timeout_msg_timer;
+	struct timeout_msg_info *time_out_msg, *tmp;
+
+	timer_shutdown_sync(timer);
+	list_for_each_entry_safe(time_out_msg, tmp, &hmd->timeout_msg_list,
+				 node) {
+		list_del(&time_out_msg->node);
+		kfree(time_out_msg);
+	}
+}
+
 int hi_msg_device_probe(struct ub_bus_controller *ubc)
 {
 	struct device *dev = &ubc->dev;
@@ -625,6 +803,8 @@ int hi_msg_device_probe(struct ub_bus_controller *ubc)
 		goto queue_init_fail;
 	}
 
+	hi_timeout_msg_poller_init(hmd);
+
 	message_device_set_ops(&hmd->mdev, &hi_message_ops);
 	message_device_set_fwnode(&hmd->mdev, dev->fwnode);
 
@@ -639,6 +819,7 @@ int hi_msg_device_probe(struct ub_bus_controller *ubc)
 	return 0;
 
 mdev_reg_fail:
+	hi_timeout_msg_poller_uninit(hmd);
 	hi_msg_queue_uninit(hmd);
 queue_init_fail:
 	kfree(hmd);
@@ -651,6 +832,7 @@ void hi_msg_device_remove(struct ub_bus_controller *ubc)
 
 	ubc->mdev = NULL;
 	message_device_unregister(&hmd->mdev);
+	hi_timeout_msg_poller_uninit(hmd);
 	hi_msg_queue_uninit(hmd);
 	kfree(hmd);
 }

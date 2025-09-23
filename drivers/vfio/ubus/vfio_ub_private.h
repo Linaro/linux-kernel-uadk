@@ -78,6 +78,7 @@ struct vfio_ub_core_device {
 
 #define VFIO_UB_OFFSET_SHIFT 40
 #define VFIO_UB_OFFSET_TO_INDEX(off) ((off) >> VFIO_UB_OFFSET_SHIFT)
+#define VFIO_UB_INDEX_TO_OFFSET(index) ((u64)(index) << VFIO_UB_OFFSET_SHIFT)
 #define VFIO_UB_OFFSET_MASK (((u64)(1) << VFIO_UB_OFFSET_SHIFT) - 1)
 
 #define irq_is(vdev, type) ((vdev)->irq_type == (type))
@@ -102,6 +103,7 @@ int vfio_ub_core_register_device(struct vfio_ub_core_device *vdev);
 void vfio_ub_core_unregister_device(struct vfio_ub_core_device *vdev);
 int vfio_ub_core_open_device(struct vfio_device *core_vdev);
 void vfio_ub_core_close_device(struct vfio_device *core_vdev);
+long vfio_ub_core_ioctl(struct vfio_device *core_vdev, unsigned int cmd, unsigned long arg);
 ssize_t vfio_ub_core_write(struct vfio_device *core_vdev, const char __user *buf,
 			   size_t count, loff_t *ppos);
 ssize_t vfio_ub_core_read(struct vfio_device *core_vdev, char __user *buf, size_t count,
@@ -109,7 +111,11 @@ ssize_t vfio_ub_core_read(struct vfio_device *core_vdev, char __user *buf, size_
 int vfio_ub_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma);
 int vfio_ub_core_init_dev(struct vfio_device *core_vdev);
 void vfio_ub_core_release_dev(struct vfio_device *core_dev);
+void vfio_ub_core_request(struct vfio_device *core_vdev, unsigned int count);
 void vfio_ub_core_disable_all(struct vfio_ub_core_device *vdev);
+int vfio_ub_iommufd_physical_attach_ioas(struct vfio_device *vdev, u32 *pt_id);
+void vfio_ub_iommufd_physical_detach_ioas(struct vfio_device *vdev);
+void vfio_ub_iommufd_physical_unbind(struct vfio_device *core_vdev);
 void vfio_ub_unset_resmap(struct vfio_ub_core_device *vdev);
 
 #endif /* __VFIO_UB_PRIVATE_H__ */

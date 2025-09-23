@@ -29,7 +29,13 @@ static const struct vfio_device_ops vfio_ub_ops = {
 	.close_device = vfio_ub_core_close_device,
 	.read = vfio_ub_core_read,
 	.write = vfio_ub_core_write,
+	.ioctl = vfio_ub_core_ioctl,
 	.mmap = vfio_ub_core_mmap,
+	.request = vfio_ub_core_request,
+	.bind_iommufd = vfio_iommufd_physical_bind,
+	.unbind_iommufd = vfio_ub_iommufd_physical_unbind,
+	.attach_ioas = vfio_ub_iommufd_physical_attach_ioas,
+	.detach_ioas = vfio_ub_iommufd_physical_detach_ioas,
 };
 
 static int vfio_ub_probe(struct ub_entity *uent, const struct ub_device_id *id)

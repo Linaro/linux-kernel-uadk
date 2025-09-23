@@ -146,6 +146,187 @@ void vfio_ub_core_close_device(struct vfio_device *core_vdev)
 	mutex_unlock(&vdev->igate);
 }
 
+static int vfio_ub_get_device_info(struct vfio_ub_core_device *vdev, unsigned long arg)
+{
+	unsigned long minsz = offsetofend(struct vfio_device_info, num_irqs);
+	struct vfio_device_info info;
+
+	if (copy_from_user(&info, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (info.argsz < minsz)
+		return -EINVAL;
+
+	info.flags = VFIO_DEVICE_FLAGS_UB;
+
+	if (vdev->reset_works)
+		info.flags |= VFIO_DEVICE_FLAGS_RESET;
+
+	info.num_regions = VFIO_UB_NUM_REGIONS + vdev->num_regions +
+			   vdev->num_vendor_regions;
+	info.num_irqs = VFIO_UB_NUM_IRQS + vdev->num_ext_irqs +
+			vdev->num_vendor_irqs;
+
+	return copy_to_user((void __user *)arg, &info, minsz) ?
+		-EFAULT : 0;
+}
+
+static int vfio_ub_get_region_info(struct vfio_ub_core_device *vdev, unsigned long arg)
+{
+	unsigned long minsz = offsetofend(struct vfio_region_info, offset);
+	struct ub_entity *uent = vdev->uent;
+	struct vfio_region_info info;
+
+	if (copy_from_user(&info, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if ((info.argsz < minsz) ||
+	    (info.index >= (VFIO_UB_NUM_REGIONS + vdev->num_regions)))
+		return -EINVAL;
+
+	switch (info.index) {
+	case VFIO_UB_REGION0_INDEX:
+	case VFIO_UB_REGION1_INDEX:
+	case VFIO_UB_REGION2_INDEX:
+		info.offset = VFIO_UB_INDEX_TO_OFFSET(info.index);
+		info.size = ub_resource_len(uent, info.index);
+		if (!info.size) {
+			info.flags = 0;
+			break;
+		}
+
+		info.flags = VFIO_REGION_INFO_FLAG_READ |
+			     VFIO_REGION_INFO_FLAG_WRITE |
+			     VFIO_REGION_INFO_FLAG_MMAP;
+		break;
+	case VFIO_UB_CONFIG_REGION_INDEX:
+		info.offset = VFIO_UB_INDEX_TO_OFFSET(info.index);
+		info.flags = VFIO_REGION_INFO_FLAG_READ |
+			     VFIO_REGION_INFO_FLAG_WRITE;
+		info.size = 0;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return copy_to_user((void __user *)arg, &info, minsz) ?
+		-EFAULT : 0;
+}
+
+static int vfio_ub_entity_reset(struct vfio_ub_core_device *vdev)
+{
+	if (!vdev->reset_works)
+		return -EINVAL;
+
+	return ub_reset_entity(vdev->uent);
+}
+
+static int vfio_ub_get_irq_count(struct vfio_ub_core_device *vdev, int irq_type)
+{
+	struct ub_entity *uent = vdev->uent;
+
+	if (irq_type == VFIO_UB_INTR_IRQ_INDEX) {
+		if (!(uent->no_intr == 0 && uent->intr_type1 == 0))
+			return 0;
+		return ub_intr_vec_count(vdev->uent);
+	} else if (irq_type == VFIO_UB_REQ_IRQ_INDEX) {
+		return 1;
+	}
+
+	return 0;
+}
+
+static int vfio_ub_get_irq_info(struct vfio_ub_core_device *vdev, unsigned long arg)
+{
+	unsigned long minsz = offsetofend(struct vfio_irq_info, count);
+	struct vfio_irq_info info;
+	int ret;
+
+	if (copy_from_user(&info, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if ((info.argsz < minsz) ||
+	    (info.index >= (VFIO_UB_NUM_IRQS + vdev->num_ext_irqs)))
+		return -EINVAL;
+
+	info.flags = VFIO_IRQ_INFO_EVENTFD | VFIO_IRQ_INFO_NORESIZE;
+
+	switch (info.index) {
+	case VFIO_UB_INTR_IRQ_INDEX:
+		ret = vfio_ub_get_irq_count(vdev, info.index);
+		if (ret < 0)
+			return -EFAULT;
+
+		info.count = (u32)ret;
+		break;
+	case VFIO_UB_REQ_IRQ_INDEX:
+		info.count = (u32)vfio_ub_get_irq_count(vdev, info.index);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return copy_to_user((void __user *)arg, &info, minsz) ?
+		-EFAULT : 0;
+}
+
+static int vfio_ub_set_irqs(struct vfio_ub_core_device *vdev, unsigned long arg)
+{
+	struct vfio_irq_set hdr;
+	u32 sz = sizeof(hdr);
+	size_t data_size = 0;
+	u8 *data = NULL;
+	int max;
+	int ret;
+
+	if (copy_from_user(&hdr, (void __user *)arg, sz))
+		return -EFAULT;
+
+	max = vfio_ub_get_irq_count(vdev, hdr.index);
+	if (max <= 0)
+		return -EINVAL;
+
+	ret = vfio_set_irqs_validate_and_prepare(&hdr, max,
+		VFIO_UB_NUM_IRQS + vdev->num_ext_irqs, &data_size);
+	if (ret)
+		return ret;
+
+	if (data_size) {
+		data = (u8 *)memdup_user((void __user *)(arg + sz), data_size);
+		if (IS_ERR(data))
+			return PTR_ERR(data);
+	}
+
+	mutex_lock(&vdev->igate);
+	ret = vfio_ub_set_irqs_ioctl(vdev, hdr.flags, hdr.index, hdr.start,
+				     hdr.count, data);
+	mutex_unlock(&vdev->igate);
+	kfree(data);
+
+	return ret;
+}
+
+long vfio_ub_core_ioctl(struct vfio_device *core_vdev, unsigned int cmd, unsigned long arg)
+{
+	struct vfio_ub_core_device *vdev = container_of(core_vdev,
+					   struct vfio_ub_core_device, vdev);
+
+	switch (cmd) {
+	case VFIO_DEVICE_GET_INFO:
+		return vfio_ub_get_device_info(vdev, arg);
+	case VFIO_DEVICE_GET_REGION_INFO:
+		return vfio_ub_get_region_info(vdev, arg);
+	case VFIO_DEVICE_GET_IRQ_INFO:
+		return vfio_ub_get_irq_info(vdev, arg);
+	case VFIO_DEVICE_SET_IRQS:
+		return vfio_ub_set_irqs(vdev, arg);
+	case VFIO_DEVICE_RESET:
+		return vfio_ub_entity_reset(vdev);
+	default:
+		return -ENOTTY;
+	}
+}
+
 static ssize_t vfio_ub_rw(struct vfio_ub_core_device *vdev, char __user *buf, size_t count,
 			  loff_t *ppos, bool iswrite)
 {
@@ -251,10 +432,62 @@ void vfio_ub_core_release_dev(struct vfio_device *core_vdev)
 	mutex_destroy(&vdev->igate);
 }
 
+void vfio_ub_core_request(struct vfio_device *core_vdev, unsigned int count)
+{
+	struct vfio_ub_core_device *vdev =
+		container_of(core_vdev, struct vfio_ub_core_device, vdev);
+
+	mutex_lock(&vdev->igate);
+
+	if (vdev->req_trigger) {
+		if (!(count % 10))
+			dev_notice_ratelimited(&vdev->uent->dev,
+				"Relaying device request to user #%u\n", count);
+		eventfd_signal(vdev->req_trigger, 1);
+	} else if (count == 0) {
+		ub_warn(vdev->uent,
+			"No device request channel registered, blocked until released by user\n");
+	}
+
+	mutex_unlock(&vdev->igate);
+}
+
+void vfio_ub_iommufd_physical_unbind(struct vfio_device *core_vdev)
+{
+	struct vfio_ub_core_device *vdev =
+		container_of(core_vdev, struct vfio_ub_core_device, vdev);
+
+	vfio_iommufd_physical_unbind(core_vdev);
+
+	/* Now, valid tid are allocated at attach_ioas interface,
+	 * but tid free at this unbind interface.
+	 * detach_ioas interface are not called at vfio_compt mode.
+	 */
+	ub_unset_user_info(vdev->uent);
+}
+
 void vfio_ub_core_disable_all(struct vfio_ub_core_device *vdev)
 {
 	struct ub_entity *uent = vdev->uent;
 
 	if (!list_empty(&uent->ue_list))
 		ub_disable_entities(uent);
+}
+
+int vfio_ub_iommufd_physical_attach_ioas(struct vfio_device *core_vdev, u32 *pt_id)
+{
+	struct vfio_ub_core_device *vdev =
+		container_of(core_vdev, struct vfio_ub_core_device, vdev);
+	int ret;
+
+	ret = vfio_iommufd_physical_attach_ioas(core_vdev, pt_id);
+	if (!ret)
+		ub_set_user_info(vdev->uent);
+
+	return ret;
+}
+
+void vfio_ub_iommufd_physical_detach_ioas(struct vfio_device *core_vdev)
+{
+	vfio_iommufd_physical_detach_ioas(core_vdev);
 }

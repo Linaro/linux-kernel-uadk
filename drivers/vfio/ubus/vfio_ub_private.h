@@ -19,9 +19,36 @@
 #include <linux/irqbypass.h>
 #include <ub/ubus/ubus.h>
 
+#define UB_CFG1_MAX_CAP 511 /* cfg1 cap start from 256 */
+
+struct vfio_ub_core_device;
+struct perm_bits {
+	u8 *virt;
+	u8 *write;
+	u8 *ent0eo;
+	u8 *exist;
+	int (*readfn)(struct vfio_ub_core_device *vdev, u64 pos, int count,
+		      __le32 *val);
+	int (*writefn)(struct vfio_ub_core_device *vdev, u64 pos, int count,
+		       __le32 val);
+};
+
+struct vfio_ub_slice {
+	u8 *cfg;
+	u32 cap_id;
+	int used_size;
+};
+
+struct vfio_ub_config {
+	struct vfio_ub_slice *slice;
+	int nums;
+	int map[UB_CFG1_MAX_CAP + 1];
+};
+
 struct vfio_ub_core_device {
 	struct vfio_device vdev;
 	struct ub_entity *uent;
+	struct vfio_ub_config vconfig;
 	int num_regions; /* vfio-ub additional regions */
 	int num_ext_irqs; /* vfio-ub additional extended irqs */
 	int num_vendor_regions; /* vfio-ub additional vendor-defined regions */
@@ -35,6 +62,17 @@ struct vfio_ub_core_device {
 	struct mutex igate;
 };
 
+#define VFIO_UB_OFFSET_SHIFT 40
+#define VFIO_UB_OFFSET_MASK (((u64)(1) << VFIO_UB_OFFSET_SHIFT) - 1)
+
+#define BYTE_SIZE 1
+#define WORD_SIZE 2
+#define DWORD_SIZE 4
+#define DWORD_BITS 32
+#define BYTE_BITS 8
+
+ssize_t vfio_ub_config_rw(struct vfio_ub_core_device *vdev, char __user *buf,
+			  size_t count, loff_t *ppos, bool iswrite);
 int vfio_ub_core_register_device(struct vfio_ub_core_device *vdev);
 void vfio_ub_core_unregister_device(struct vfio_ub_core_device *vdev);
 int vfio_ub_core_open_device(struct vfio_device *core_vdev);

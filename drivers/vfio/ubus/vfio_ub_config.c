@@ -570,6 +570,238 @@ static int init_ub_cfg0_cap_perm(struct perm_bits *perm)
 	return 0;
 }
 
+static int vfio_ub_cfg1_basic_read(struct vfio_ub_core_device *vdev, u64 pos,
+				   int count, __le32 *val)
+{
+	count = vfio_ub_default_config_read(vdev, pos, count, val);
+
+	return count;
+}
+
+static int vfio_ub_cfg1_basic_write(struct vfio_ub_core_device *vdev, u64 pos,
+				    int count, __le32 val)
+{
+	u8 *elr;
+	u8 *buf;
+
+	count = vfio_ub_default_config_write(vdev, pos, count, val);
+	if (count < 0)
+		return count;
+
+	buf = vfio_ub_find_cfg_buf(vdev, UB_CFG1_BASIC_CAP);
+	if (!buf)
+		return -EFAULT;
+
+	elr = buf + UB_ELR - UB_CFG1_BASIC;
+	if (*elr & UB_ELR_BIT) {
+		*elr = *elr & (u8)~UB_ELR_BIT;
+		if (ub_reset_entity(vdev->uent))
+			ub_warn(vdev->uent, "do elr reset failed\n");
+	}
+
+	return count;
+}
+
+static void init_ub_cfg1_basic_operation_perm(struct perm_bits *perm)
+{
+	p_setd(perm, UB_CFG1_BASIC_SLICE - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	init_ub_cfg_chunk_perms(perm, UB_CFG1_CAP_BITMAP - UB_CFG1_BASIC,
+				UB_CFG_BITMAP_SIZE / DWORD_SIZE,
+				ALL_VIRT, NO_WRITE);
+	init_ub_cfg_chunk_perms(perm, UB_CFG1_SUPPORT_FEATURE_L - UB_CFG1_BASIC,
+				UB_CFG1_SUPPORT_FEATURE_SIZE / DWORD_SIZE,
+				ALL_VIRT, NO_WRITE);
+
+	p_setd(perm, UB_ERS0_SS - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS1_SS - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS2_SS - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS0_SA_L - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS0_SA_H - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS1_SA_L - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS1_SA_H - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS2_SA_L - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS2_SA_H - UB_CFG1_BASIC, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_ERS0_UBBA_L - UB_CFG1_BASIC, ALL_VIRT, ALL_WRITE);
+	p_setd(perm, UB_ERS0_UBBA_H - UB_CFG1_BASIC, ALL_VIRT, ALL_WRITE);
+	p_setd(perm, UB_ERS1_UBBA_L - UB_CFG1_BASIC, ALL_VIRT, ALL_WRITE);
+	p_setd(perm, UB_ERS1_UBBA_H - UB_CFG1_BASIC, ALL_VIRT, ALL_WRITE);
+	p_setd(perm, UB_ERS2_UBBA_L - UB_CFG1_BASIC, ALL_VIRT, ALL_WRITE);
+	p_setd(perm, UB_ERS2_UBBA_H - UB_CFG1_BASIC, ALL_VIRT, ALL_WRITE);
+
+	p_setd(perm, UB_ELR - UB_CFG1_BASIC, ALL_VIRT, UB_ELR_BIT);
+	p_setd(perm, UB_ELR_DONE - UB_CFG1_BASIC, ~UB_ELR_DONE_BIT, NO_WRITE);
+	p_setd(perm, UB_SYS_PGS - UB_CFG1_BASIC, ALL_VIRT, UB_SYS_PGS_SIZE);
+
+	p_setd(perm, UB_ENTITY_TOKEN_ID - UB_CFG1_BASIC, NO_VIRT, UB_TOKEN_ID_MASK);
+	p_setd(perm, UB_BUS_ACCESS_EN - UB_CFG1_BASIC, NO_VIRT,
+	       UB_BUS_ACCESS_EN_BIT);
+	p_setd(perm, UB_ENTITY_RS_ACCESS_EN - UB_CFG1_BASIC, NO_VIRT,
+	       UB_BUS_ACCESS_EN_BIT);
+}
+
+static void init_ub_cfg1_basic_attr_perm(struct perm_bits *perm)
+{
+	p_attr_setd(perm, UB_ERS0_SA_L - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    IDEV_NO_EXIST);
+	p_attr_setd(perm, UB_ERS0_SA_H - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    IDEV_NO_EXIST);
+
+	p_attr_setd(perm, UB_ERS1_SA_L - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    IDEV_NO_EXIST);
+	p_attr_setd(perm, UB_ERS1_SA_H - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    IDEV_NO_EXIST);
+
+	p_attr_setd(perm, UB_ERS2_SA_L - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    IDEV_NO_EXIST);
+	p_attr_setd(perm, UB_ERS2_SA_H - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    IDEV_NO_EXIST);
+
+	p_attr_setd(perm, UB_ERS0_UBBA_L - UB_CFG1_BASIC, NO_ENTITY0_EO, ENTITYN_RO,
+		    UDEV_NO_EXIST);
+	p_attr_setd(perm, UB_ERS0_UBBA_H - UB_CFG1_BASIC, NO_ENTITY0_EO, ENTITYN_RO,
+		    UDEV_NO_EXIST);
+
+	p_attr_setd(perm, UB_ERS1_UBBA_L - UB_CFG1_BASIC, NO_ENTITY0_EO, ENTITYN_RO,
+		    UDEV_NO_EXIST);
+	p_attr_setd(perm, UB_ERS1_UBBA_H - UB_CFG1_BASIC, NO_ENTITY0_EO, ENTITYN_RO,
+		    UDEV_NO_EXIST);
+
+	p_attr_setd(perm, UB_ERS2_UBBA_L - UB_CFG1_BASIC, NO_ENTITY0_EO, ENTITYN_RO,
+		    UDEV_NO_EXIST);
+	p_attr_setd(perm, UB_ERS2_UBBA_H - UB_CFG1_BASIC, NO_ENTITY0_EO, ENTITYN_RO,
+		    UDEV_NO_EXIST);
+
+	p_attr_setd(perm, UB_SYS_PGS - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    FUNC_NO_EXIST);
+	p_attr_setd(perm, UB_EU_TBA_L - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    FUNC_NO_EXIST);
+	p_attr_setd(perm, UB_EU_TBA_H - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    FUNC_NO_EXIST);
+	p_attr_setd(perm, UB_EU_TEN - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    FUNC_NO_EXIST);
+	p_attr_setd(perm, UB_CLASS_CODE - UB_CFG1_BASIC, NO_ENTITY0_EO, NO_ENTITYN_RO,
+		    FUNC_EXIST);
+}
+
+static int init_ub_cfg1_basic_perm(struct perm_bits *perm)
+{
+	if (alloc_perm_bits(perm, UB_SLICE_SZ))
+		return -ENOMEM;
+
+	perm->readfn = vfio_ub_cfg1_basic_read;
+	perm->writefn = vfio_ub_cfg1_basic_write;
+
+	init_ub_cfg1_basic_operation_perm(perm);
+	init_ub_cfg1_basic_attr_perm(perm);
+
+	return 0;
+}
+
+static int vfio_ub_int_type2_cap_read(struct vfio_ub_core_device *vdev, u64 pos,
+				int count, __le32 *val)
+{
+	count = vfio_ub_default_config_read(vdev, pos, count, val);
+
+	return count;
+}
+
+static int vfio_ub_int_type2_cap_write(struct vfio_ub_core_device *vdev, u64 pos,
+				 int count, __le32 val)
+{
+	count = vfio_ub_default_config_write(vdev, pos, count, val);
+
+	return count;
+}
+
+static int init_ub_cfg1_int_cap_perm(struct perm_bits *perm)
+{
+	if (alloc_perm_bits(perm, UB_SLICE_SZ))
+		return -ENOMEM;
+
+	perm->readfn = vfio_ub_int_type2_cap_read;
+	perm->writefn = vfio_ub_int_type2_cap_write;
+
+	p_setd(perm, UB_INT_CAP_SLICE - UB_CFG1_CAP_INT_CAP, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_INFO - UB_CFG1_CAP_INT_CAP, ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_VECTOR_TBL_SA_L - UB_CFG1_CAP_INT_CAP,
+	       ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_VECTOR_TBL_SA_H - UB_CFG1_CAP_INT_CAP,
+	       ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_ADDR_TBL_SA_L - UB_CFG1_CAP_INT_CAP,
+	       ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_ADDR_TBL_SA_H - UB_CFG1_CAP_INT_CAP,
+	       ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_PENDING_TBL_SA_L - UB_CFG1_CAP_INT_CAP,
+	       ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_PENDING_TBL_SA_H - UB_CFG1_CAP_INT_CAP,
+	       ALL_VIRT, NO_WRITE);
+	p_setd(perm, UB_INT_ID - UB_CFG1_CAP_INT_CAP, ALL_VIRT, ALL_WRITE);
+	p_setd(perm, UB_INT_MASK - UB_CFG1_CAP_INT_CAP, UB_INT_MASK_BIT,
+	       UB_INT_MASK_BIT);
+
+	p_setd(perm, UB_INT_EN - UB_CFG1_CAP_INT_CAP, UB_INT_EN_BIT,
+	       UB_INT_EN_BIT);
+
+	return 0;
+}
+
+static int init_ub_cfg1_cap_perm(struct perm_bits *perm)
+{
+	return init_ub_cfg1_int_cap_perm(&perm[UB_INT_TYPE2_CAP]);
+}
+
+static int vfio_ub_port_basic_read(struct vfio_ub_core_device *vdev, u64 pos,
+				   int count, __le32 *val)
+{
+	count = vfio_ub_default_config_read(vdev, pos, count, val);
+
+	return count;
+}
+
+static int vfio_ub_port_basic_write(struct vfio_ub_core_device *vdev, u64 pos,
+				    int count, __le32 val)
+{
+	count = vfio_ub_default_config_write(vdev, pos, count, val);
+
+	return count;
+}
+
+static int init_ub_port_basic_perm(struct perm_bits *perm)
+{
+	if (alloc_perm_bits(perm, UB_SLICE_SZ))
+		return -ENOMEM;
+
+	perm->readfn = vfio_ub_port_basic_read;
+	perm->writefn = vfio_ub_port_basic_write;
+
+	p_setd(perm, UB_CFG0_PORT_SLICE, ALL_VIRT, NO_WRITE);
+	p_attr_setd(perm, UB_CFG0_PORT_SLICE, ENTITY0_EO, NO_ENTITYN_RO, FUNC_EXIST);
+
+	init_ub_cfg_chunk_perms(perm, UB_CFG0_PORT_BITMAP,
+				UB_CFG_BITMAP_SIZE / DWORD_SIZE,
+				ALL_VIRT, NO_WRITE);
+	init_ub_cfg_chunk_attrs(perm, UB_CFG0_PORT_BITMAP,
+				UB_CFG_BITMAP_SIZE / DWORD_SIZE,
+				ENTITY0_EO, NO_ENTITYN_RO, FUNC_EXIST);
+
+	p_setd(perm, UB_PORT_INFO, ALL_VIRT, NO_WRITE);
+	p_attr_setd(perm, UB_PORT_INFO, ENTITY0_EO, NO_ENTITYN_RO, FUNC_EXIST);
+
+	init_ub_cfg_chunk_perms(perm, UB_NEIGHBOR_PORT_INFO,
+				UB_UB_NEIGHBOR_PORT_INFO_SIZE / DWORD_SIZE,
+				ALL_VIRT, NO_WRITE);
+	init_ub_cfg_chunk_attrs(perm, UB_NEIGHBOR_PORT_INFO,
+				UB_UB_NEIGHBOR_PORT_INFO_SIZE / DWORD_SIZE,
+				ENTITY0_EO, NO_ENTITYN_RO, FUNC_EXIST);
+
+	p_setd(perm, UB_PORT_NET_ADDR, UB_PORT_NET_ADDR_MASK, UB_PORT_NET_ADDR_MASK);
+	p_attr_setd(perm, UB_PORT_NET_ADDR, ENTITY0_EO, NO_ENTITYN_RO, FUNC_EXIST);
+	p_setd(perm, UB_PORT_RST, ALL_VIRT, UB_PORT_RST_BIT);
+	p_attr_setd(perm, UB_PORT_RST, ENTITY0_EO, NO_ENTITYN_RO, FUNC_EXIST);
+
+	return 0;
+}
+
 static u8 vfio_slice_supported[UB_CFG1_MAX_CAP + 1];
 static void vfio_ub_init_slice_supported(void)
 {
@@ -586,6 +818,11 @@ int __init vfio_ub_init_perm_bits(void)
 
 	ret = init_ub_cfg0_basic_perm(&cap_perms[UB_CFG0_BASIC_CAP]);
 	ret |= init_ub_cfg0_cap_perm(cap_perms);
+
+	ret |= init_ub_cfg1_basic_perm(&cap_perms[UB_CFG1_BASIC_CAP]);
+	ret |= init_ub_cfg1_cap_perm(cap_perms);
+
+	ret |= init_ub_port_basic_perm(&port_basic_perms);
 
 	if (ret)
 		vfio_ub_uninit_perm_bits();

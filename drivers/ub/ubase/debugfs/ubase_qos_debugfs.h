@@ -16,6 +16,7 @@ int ubase_dbg_dump_ets_tcg_info(struct seq_file *s, void *data);
 int ubase_dbg_dump_ets_port_info(struct seq_file *s, void *data);
 int ubase_dbg_dump_rack_vl_bitmap(struct seq_file *s, void *data);
 int ubase_dbg_dump_adev_qos_info(struct seq_file *s, void *data);
+int ubase_dbg_dump_fsv_fvt_rqmt(struct seq_file *s, void *data);
 int ubase_dbg_dump_tm_queue_info(struct seq_file *s, void *data);
 int ubase_dbg_dump_tm_qset_info(struct seq_file *s, void *data);
 int ubase_dbg_dump_tm_pri_info(struct seq_file *s, void *data);

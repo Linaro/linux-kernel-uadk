@@ -6,6 +6,8 @@
 #include <linux/dma-mapping.h>
 
 #include "../../ubus.h"
+#include "../../msg.h"
+#include "../../enum.h"
 #include "hisi-msg.h"
 
 #define HI_MSG_RQE_SIZE_128 0x80
@@ -272,4 +274,33 @@ void hi_msg_rq_update(struct hi_msg_core *hmc, int cq_idx)
 		 rq->depth;
 	wmb(); /* Ensure the register is written correctly. */
 	hi_msg_reg_write(hmc, RQ_CI, rq->ci);
+}
+
+void hi_msg_set_pkt_msn(struct msg_info *info, int task_type, u16 msn,
+			u8 msgq_id)
+{
+	struct enum_topo_query_req *req;
+	struct msg_pkt_header *header;
+	void *pkt = info->req_packet;
+	size_t header_sz;
+
+	switch (task_type) {
+	case PROTOCOL_ENUM:
+		header_sz = ENUM_PKT_HEADER_SIZE +
+			    calc_enum_pld_header_size(
+				    (struct enum_pld_scan_header
+					     *)(pkt + ENUM_PKT_HEADER_SIZE),
+				    true);
+		req = (struct enum_topo_query_req *)(pkt + header_sz);
+		req->common.msn = msn;
+		req->common.msgq_id = msgq_id;
+		break;
+	case PROTOCOL_MSG:
+		header = (struct msg_pkt_header *)pkt;
+		header->src_tassn = msn;
+		header->msgq_id = msgq_id;
+		break;
+	default:
+		return;
+	}
 }

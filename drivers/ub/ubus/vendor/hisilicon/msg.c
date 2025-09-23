@@ -9,6 +9,8 @@
 
 #include "../../ubus.h"
 #include "../../msg.h"
+#include "../../enum.h"
+#include "vdm.h"
 #include "hisi-msg.h"
 
 struct hi_msg_sqe_pld {
@@ -49,6 +51,84 @@ static inline void cqe_state_set(struct hi_message_device *hmd, int idx,
 	 (HI_MSG_SQE_PLD_SIZE * (idx)))
 
 #define MSGQ_TIMEOUT (HZ * msg_wait / 1000)
+
+#define MSN_SIZE 65535
+DEFINE_SPINLOCK(msn_msg_lock);
+DECLARE_BITMAP(msn_msg, MSN_SIZE);
+DEFINE_SPINLOCK(msn_enum_lock);
+DECLARE_BITMAP(msn_enum, MSN_SIZE);
+DEFINE_SPINLOCK(msn_private_lock);
+DECLARE_BITMAP(msn_private, MSN_SIZE);
+
+/* Return 0 represents failure, return 1-65535 represents success */
+static u16 hi_msn_get(int type)
+{
+	unsigned long flags, find, tmp, size, *addr;
+	static u16 msn[TASK_TYPE_NUM] = {};
+	spinlock_t *lock;
+	u16 ret;
+
+	find = msn[type];
+
+	if (type == PROTOCOL_MSG) {
+		addr = msn_msg;
+		lock = &msn_msg_lock;
+	} else if (type == PROTOCOL_ENUM) {
+		addr = msn_enum;
+		lock = &msn_enum_lock;
+	} else { /* hisi private */
+		addr = msn_private;
+		lock = &msn_private_lock;
+	}
+
+	spin_lock_irqsave(lock, flags);
+	if (unlikely(test_bit(find, addr))) {
+		size = MSN_SIZE;
+		tmp = find;
+		find = find_next_zero_bit(addr, size, find);
+		if (unlikely(find == size)) {
+			size = tmp;
+			find = find_next_zero_bit(addr, size, 0);
+			if (unlikely(find == size)) {
+				ret = 0;
+				goto out;
+			}
+		}
+	}
+
+	set_bit(find, addr);
+	msn[type] = (find + 1) % MSN_SIZE;
+	ret = find + 1; /* find bit is 0~65534, ret use 1~65535 */
+out:
+	spin_unlock_irqrestore(lock, flags);
+	return ret;
+}
+
+static void hi_msn_put(int type, u16 msn)
+{
+	unsigned long flags, *addr;
+	spinlock_t *lock;
+
+	if (msn == 0 || type >= TASK_TYPE_NUM) {
+		pr_warn("invalid msn or type\n");
+		return;
+	}
+
+	if (type == PROTOCOL_MSG) {
+		addr = msn_msg;
+		lock = &msn_msg_lock;
+	} else if (type == PROTOCOL_ENUM) {
+		addr = msn_enum;
+		lock = &msn_enum_lock;
+	} else { /* hisi private */
+		addr = msn_private;
+		lock = &msn_private_lock;
+	}
+
+	spin_lock_irqsave(lock, flags);
+	clear_bit(msn - 1, addr);
+	spin_unlock_irqrestore(lock, flags);
+}
 
 static int hi_msg_get_sq_idle_num(struct hi_message_device *hmd, int num,
 				  bool tx)
@@ -157,8 +237,10 @@ static void hi_msg_cq_update(struct hi_message_device *hmd)
 			break;
 
 		cqe = cq_entry(hmc, idx);
-		if (cqe->task_type != PROTOCOL_MSG || cqe->type == MSG_RSP)
+		if (cqe->task_type != PROTOCOL_MSG || cqe->type == MSG_RSP) {
+			hi_msn_put(cqe->task_type, cqe->msn);
 			release_cnt++;
+		}
 
 		cqe_state_set(hmd, idx, CQ_SW_INIT);
 	}
@@ -206,7 +288,183 @@ static void hi_msg_queue_uninit(struct hi_message_device *hmd)
 	hi_msg_core_uninit(&hmd->hmc);
 }
 
-static struct message_ops hi_message_ops = {};
+static int hi_message_probe_dev(struct ub_entity *uent)
+{
+	return 0;
+}
+
+static void hi_message_remove_dev(struct ub_entity *uent)
+{
+}
+
+static bool pkt_plen_valid(void *pkt, u16 pkt_size, int task_type)
+{
+	struct msg_pkt_header *header = (struct msg_pkt_header *)pkt;
+
+	if (pkt_size > HI_MSG_SQE_PLD_SIZE) {
+		pr_err("pkt_size %#x over\n", pkt_size);
+		return false;
+	}
+
+	if (task_type == PROTOCOL_MSG &&
+	    ((pkt_size < MSG_PKT_HEADER_SIZE) ||
+	     (header->msgetah.plen > PLD_SIZE_MAX) ||
+	     (header->msgetah.plen != (pkt_size - MSG_PKT_HEADER_SIZE)))) {
+		pr_err("msg plen %#x, pkt_size %#x invalid\n",
+		       header->msgetah.plen, pkt_size);
+		return false;
+	}
+
+	if (task_type == PROTOCOL_ENUM &&
+	    ((pkt_size < ENUM_PKT_HEADER_SIZE) ||
+	     (pkt_size - ENUM_PKT_HEADER_SIZE > PLD_SIZE_MAX))) {
+		pr_err("enum pkt_size %#x invalid\n", pkt_size);
+		return false;
+	}
+
+	return true;
+}
+
+static int hi_message_sync(struct message_device *mdev, struct msg_info *info,
+			   int task_type, u8 code, bool flag)
+{
+	struct hi_message_device *hmd = to_hi_message_device(mdev);
+	struct hi_msg_core *hmc = &hmd->hmc;
+	struct hi_msg_sqe sqe = {};
+	struct hi_msg_cqe *cqe;
+	int ret, msn, cnt;
+	int cq_idx;
+
+	if (!pkt_plen_valid(info->req_packet, info->req_pkt_size, task_type))
+		return -EINVAL;
+
+	msn = hi_msn_get(task_type);
+	if (msn == 0) {
+		dev_err(hmc->dev, "task type %d alloc msn failed\n", task_type);
+		return -ENOSPC;
+	}
+
+	hi_msg_sqe_init(&sqe, msn, info, task_type, code);
+	hi_msg_set_pkt_msn(info, task_type, msn, hmc->user);
+
+	cnt = hi_msg_sq_submit(
+		hmd, &sqe, (struct hi_msg_sqe_pld *)info->req_packet, 1, true);
+	if (cnt != 1) {
+		dev_err(hmc->dev, "sq submit failed\n");
+		hi_msn_put(task_type, msn);
+		return -ENOSPC;
+	}
+
+	cq_idx = hi_msg_sync_wait(hmd, task_type, msn, MSGQ_TIMEOUT, flag);
+	if (cq_idx < 0) {
+		if (cq_idx == -ENOMEM)
+			hi_msn_put(task_type, msn);
+		return cq_idx;
+	}
+
+	cqe = cq_entry(hmc, cq_idx);
+	ret = hi_message_cqe_check(hmc->dev, &sqe, cqe, info->rsp_pkt_size);
+	if (!ret) {
+		hi_msg_rqe_get(hmc, info->rsp_packet, cqe);
+		info->actual_rsp_size = cqe->p_len;
+	}
+
+	cqe_state_set(hmd, cq_idx, CQ_SW_HANDLED);
+	hi_msg_cq_update(hmd);
+	return ret;
+}
+
+int hi_message_sync_request(struct message_device *mdev, struct msg_info *info,
+			    u8 code)
+{
+	return hi_message_sync(mdev, info, PROTOCOL_MSG, code, false);
+}
+
+static int hi_message_sync_enum(struct message_device *mdev,
+				struct msg_info *info, u8 cmd)
+{
+	return hi_message_sync(mdev, info, PROTOCOL_ENUM, cmd, false);
+}
+
+static int hi_message_response(struct message_device *mdev,
+			       struct msg_info *info, u8 code)
+{
+	struct hi_message_device *hmd = to_hi_message_device(mdev);
+	struct hi_msg_sqe sqe = {};
+	struct msg_pkt_header *header;
+	void *pkt = info->req_packet;
+	int cnt;
+
+	if (!pkt_plen_valid(info->req_packet, info->req_pkt_size, PROTOCOL_MSG))
+		return -EINVAL;
+
+	header = (struct msg_pkt_header *)pkt;
+	hi_msg_sqe_init(&sqe, header->src_tassn, info, PROTOCOL_MSG, code);
+
+	cnt = hi_msg_sq_submit(
+		hmd, &sqe, (struct hi_msg_sqe_pld *)info->req_packet, 1, false);
+	if (cnt != 1) {
+		dev_err(hmd->hmc.dev, "async sq submit failed\n");
+		return -ENOSPC;
+	}
+
+	return 0;
+}
+
+static int hi_message_send(struct message_device *mdev, struct msg_info *info,
+			   u8 code)
+{
+	struct hi_message_device *hmd = to_hi_message_device(mdev);
+	struct hi_msg_core *hmc = &hmd->hmc;
+	struct hi_msg_sqe sqe = {};
+	int msn, cnt;
+	int ret = 0;
+
+	if (!pkt_plen_valid(info->req_packet, info->req_pkt_size, PROTOCOL_MSG))
+		return -EINVAL;
+
+	msn = hi_msn_get(PROTOCOL_MSG);
+	if (msn == 0) {
+		dev_err(hmc->dev, "alloc msn failed\n");
+		return -ENOSPC;
+	}
+
+	hi_msg_sqe_init(&sqe, msn, info, PROTOCOL_MSG, code);
+	hi_msg_set_pkt_msn(info, PROTOCOL_MSG, msn, hmc->user);
+
+	cnt = hi_msg_sq_submit(
+		hmd, &sqe, (struct hi_msg_sqe_pld *)info->req_packet, 1, false);
+	if (cnt != 1) {
+		dev_err(hmc->dev, "sq submit failed\n");
+		ret = -ENOSPC;
+	}
+
+	hi_msn_put(PROTOCOL_MSG, msn);
+	return ret;
+}
+
+/* For some special message need sleep, work in non-atomic context */
+int hi_message_sync_request_sched(struct message_device *mdev,
+				  struct msg_info *info, u8 code)
+{
+	return hi_message_sync(mdev, info, PROTOCOL_MSG, code, true);
+}
+
+int hi_message_private(struct message_device *mdev, struct msg_info *info,
+		       u8 opcode)
+{
+	return hi_message_sync(mdev, info, HISI_PRIVATE, opcode, false);
+}
+
+static struct message_ops hi_message_ops = {
+	.probe_dev = hi_message_probe_dev,
+	.remove_dev = hi_message_remove_dev,
+	.sync_request = hi_message_sync_request,
+	.response = hi_message_response,
+	.sync_enum = hi_message_sync_enum,
+	.vdm_rx_handler = hi_vdm_rx_msg_handler,
+	.send = hi_message_send,
+};
 
 int hi_msg_device_probe(struct ub_bus_controller *ubc)
 {

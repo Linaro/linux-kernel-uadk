@@ -155,6 +155,8 @@ int hi_msg_cq_poll(struct hi_msg_core *hmc, int task_type, u16 msn);
 void hi_msg_rq_update(struct hi_msg_core *hmc, int cq_idx);
 void hi_msg_sqe_init(struct hi_msg_sqe *sqe, int msn, struct msg_info *info,
 		     int task_type, u8 code);
+void hi_msg_set_pkt_msn(struct msg_info *info, int task_type, u16 msn,
+			u8 msgq_id);
 int hi_message_cqe_check(struct device *dev, struct hi_msg_sqe *sqe,
 			 struct hi_msg_cqe *cqe, u16 rsp_pkt_size);
 void hi_msg_rqe_get(struct hi_msg_core *hmc, void *buf, struct hi_msg_cqe *cqe);
@@ -164,5 +166,11 @@ int hi_msg_core_init(struct hi_msg_core *hmc, int user);
 void hi_msg_core_uninit(struct hi_msg_core *hmc);
 int hi_msg_device_probe(struct ub_bus_controller *ubc);
 void hi_msg_device_remove(struct ub_bus_controller *ubc);
+int hi_message_sync_request(struct message_device *mdev,
+			    struct msg_info *info, u8 opcode);
+int hi_message_sync_request_sched(struct message_device *mdev,
+				  struct msg_info *info, u8 opcode);
+int hi_message_private(struct message_device *mdev, struct msg_info *info,
+		       u8 opcode);
 
 #endif /* __HISI_MSG_H__ */

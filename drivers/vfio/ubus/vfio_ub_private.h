@@ -22,6 +22,13 @@
 #define UB_CFG0_MAX_CAP 255
 #define UB_CFG1_MAX_CAP 511 /* cfg1 cap start from 256 */
 
+struct vfio_ub_irq_ctx {
+	struct eventfd_ctx *trigger;
+	char *name;
+	bool masked;
+	struct irq_bypass_producer producer;
+};
+
 struct vfio_ub_core_device;
 struct perm_bits {
 	u8 *virt;
@@ -53,6 +60,9 @@ struct vfio_ub_core_device {
 	struct ub_entity *uent;
 	struct vfio_ub_config vconfig;
 	void __iomem *resmap[MAX_UB_RES_NUM];
+	int num_ctx; /* num of enabled irqs */
+	int irq_type; /* interrupt type of this uent */
+	struct vfio_ub_irq_ctx *ctx;
 	int num_regions; /* vfio-ub additional regions */
 	int num_ext_irqs; /* vfio-ub additional extended irqs */
 	int num_vendor_regions; /* vfio-ub additional vendor-defined regions */
@@ -70,6 +80,7 @@ struct vfio_ub_core_device {
 #define VFIO_UB_OFFSET_TO_INDEX(off) ((off) >> VFIO_UB_OFFSET_SHIFT)
 #define VFIO_UB_OFFSET_MASK (((u64)(1) << VFIO_UB_OFFSET_SHIFT) - 1)
 
+#define irq_is(vdev, type) ((vdev)->irq_type == (type))
 #define BYTE_SIZE 1
 #define WORD_SIZE 2
 #define DWORD_SIZE 4
@@ -84,6 +95,9 @@ ssize_t vfio_ub_config_rw(struct vfio_ub_core_device *vdev, char __user *buf,
 			  size_t count, loff_t *ppos, bool iswrite);
 ssize_t vfio_ub_res_rw(struct vfio_ub_core_device *vdev, char __user *buf,
 		       size_t count, loff_t *ppos, bool iswrite);
+int vfio_ub_set_irqs_ioctl(struct vfio_ub_core_device *vdev, uint32_t flags,
+			   unsigned int index, unsigned int start,
+			   unsigned int count, void *data);
 int vfio_ub_core_register_device(struct vfio_ub_core_device *vdev);
 void vfio_ub_core_unregister_device(struct vfio_ub_core_device *vdev);
 int vfio_ub_core_open_device(struct vfio_device *core_vdev);

@@ -114,6 +114,8 @@ static int vfio_ub_enable(struct vfio_ub_core_device *vdev)
 static void vfio_ub_disable(struct vfio_ub_core_device *vdev)
 {
 	vfio_ub_config_uninit(vdev);
+	vfio_ub_set_irqs_ioctl(vdev, VFIO_IRQ_SET_DATA_NONE | VFIO_IRQ_SET_ACTION_TRIGGER,
+			       vdev->irq_type, 0, 0, NULL);
 
 	/* clear device caches when vm exit or crash */
 	if (vdev->reset_works)
@@ -236,6 +238,7 @@ int vfio_ub_core_init_dev(struct vfio_device *core_vdev)
 		container_of(core_vdev, struct vfio_ub_core_device, vdev);
 
 	vdev->uent = to_ub_entity(core_vdev->dev);
+	vdev->irq_type = VFIO_UB_NUM_IRQS;
 	mutex_init(&vdev->igate);
 	return 0;
 }

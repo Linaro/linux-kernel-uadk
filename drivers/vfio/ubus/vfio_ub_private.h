@@ -26,6 +26,7 @@ struct vfio_ub_core_device;
 struct perm_bits {
 	u8 *virt;
 	u8 *write;
+	u8 *entnro;
 	u8 *ent0eo;
 	u8 *exist;
 	int (*readfn)(struct vfio_ub_core_device *vdev, u64 pos, int count,
@@ -73,6 +74,8 @@ struct vfio_ub_core_device {
 #define DWORD_BITS 32
 #define BYTE_BITS 8
 
+int vfio_ub_init_perm_bits(void);
+void vfio_ub_uninit_perm_bits(void);
 int vfio_ub_config_init(struct vfio_ub_core_device *vdev);
 void vfio_ub_config_uninit(struct vfio_ub_core_device *vdev);
 ssize_t vfio_ub_config_rw(struct vfio_ub_core_device *vdev, char __user *buf,

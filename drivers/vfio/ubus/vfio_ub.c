@@ -83,6 +83,10 @@ static int __init vfio_ub_init(void)
 {
 	int ret;
 
+	ret = vfio_ub_init_perm_bits();
+	if (ret)
+		return ret;
+
 	ret = ub_register_driver(&vfio_ub_driver);
 	if (ret)
 		goto out_driver;
@@ -90,12 +94,14 @@ static int __init vfio_ub_init(void)
 	return 0;
 
 out_driver:
+	vfio_ub_uninit_perm_bits();
 	return ret;
 }
 
 static void __exit vfio_ub_exit(void)
 {
 	ub_unregister_driver(&vfio_ub_driver);
+	vfio_ub_uninit_perm_bits();
 }
 
 module_init(vfio_ub_init);

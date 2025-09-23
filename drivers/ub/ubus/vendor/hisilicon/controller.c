@@ -15,6 +15,7 @@
 
 static struct ub_bus_controller_ops hi_ubc_ops = {
 	.register_decoder_base_addr = hi_register_decoder_base_addr,
+	.entity_enable = hi_send_entity_enable_msg,
 };
 
 void hi_register_decoder_base_addr(struct ub_bus_controller *ubc, u64 *cmd_queue,

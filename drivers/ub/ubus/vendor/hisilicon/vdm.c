@@ -10,6 +10,7 @@
 #include "../../pool.h"
 #include "../../instance.h"
 #include "../../ubus_entity.h"
+#include "hisi-msg.h"
 #include "hisi-ubus.h"
 #include "vdm.h"
 
@@ -468,4 +469,71 @@ void hi_vdm_rx_msg_handler(struct ub_bus_controller *ubc, void *pkt, u16 len)
 
 	if (status)
 		ub_vdm_msg_rsp(ubc, (struct vdm_msg_pkt *)pkt, status);
+}
+
+static struct ub_entity *ub_get_primary_ent(struct ub_entity *uent)
+{
+	if (is_primary(uent))
+		return uent;
+
+	return uent->is_mue ? uent->pue : uent->pue->pue;
+}
+
+/*
+ * hi_send_entity_enable_msg - send entity enable message
+ */
+int hi_send_entity_enable_msg(struct ub_entity *uent, u8 enable)
+{
+	struct entity_enable_pld *enable_pld;
+	struct vdm_msg_pkt pkt = {};
+	struct msg_info info = {};
+	struct msg_pkt_dw0 *pld_dw0;
+	struct ub_entity *pue;
+	u8 status;
+	int ret;
+
+	if (!uent->ubc->cluster)
+		return 0;
+
+	ub_msg_pkt_header_init(&pkt.header, uent, ENTITY_ENABLE_PLD_SIZE,
+			       code_gen(UB_MSG_CODE_VDM, UB_VENDOR_MSG,
+					MSG_REQ), true);
+
+	pkt.guid_high = *(u64 *)(&uent->ubc->uent->guid.dw[SZ_2]);
+	pld_dw0 = &pkt.pld_dw0;
+	pld_dw0->opcode = VDM_OPCODE_UB2FM_COMM_MSG;
+	pld_dw0->sub_opcode = VDM_SUB_OPCODE_ENTITY_ENABLE;
+	enable_pld = &pkt.enable_pld;
+	enable_pld->enable = enable;
+	if (is_device(uent)) {
+		enable_pld->entity_type = ENTITY_TYPE_DEV;
+		enable_pld->eid[0] = uent->eid;
+	} else { /* idev */
+		enable_pld->entity_type = ENTITY_TYPE_IDEV;
+		pue = ub_get_primary_ent(uent);
+		memcpy(enable_pld->guid, pue->guid.dw,
+		       sizeof(u32) * UB_GUID_DW_NUM);
+		enable_pld->entity_idx = uent->entity_idx;
+	}
+
+	message_info_init(&info, uent->ubc->uent, &pkt, &pkt,
+			  (ENTITY_ENABLE_MSG_PKT_SIZE << MSG_REQ_SIZE_OFFSET) |
+			  ENTITY_ENABLE_MSG_PKT_SIZE);
+
+	ub_info(uent, "Sync request entity enable msg, enable=%u\n", enable);
+
+	ret = hi_message_sync_request_sched(uent->message->mdev, &info,
+					    pkt.header.msgetah.code);
+	if (ret) {
+		ub_err(uent, "msg sync request ret=%d\n", ret);
+		return ret;
+	}
+
+	status = pkt.header.msgetah.rsp_status;
+	if (status != UB_MSG_RSP_SUCCESS) {
+		ub_err(uent, "msg rsp status=%#02x\n", status);
+		return -EINVAL;
+	}
+
+	return 0;
 }

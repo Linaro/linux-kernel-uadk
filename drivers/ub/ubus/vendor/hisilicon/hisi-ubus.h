@@ -34,6 +34,7 @@ struct hi_ubc_private_data {
 
 void hi_register_decoder_base_addr(struct ub_bus_controller *ubc, u64 *cmd_queue,
 				   u64 *event_queue);
+int hi_send_entity_enable_msg(struct ub_entity *uent, u8 enable);
 
 int ub_bus_controller_probe(struct ub_bus_controller *ubc);
 void ub_bus_controller_remove(struct ub_bus_controller *ubc);

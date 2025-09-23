@@ -5,10 +5,14 @@
 
 #include <linux/dma-mapping.h>
 
+#include "../../ubus.h"
 #include "hisi-msg.h"
 
 #define HI_MSG_RQE_SIZE_128 0x80
 #define hi_msg_rqe_size_hw(sz_sw) (ilog2((sz_sw) / (HI_MSG_RQE_SIZE_128)))
+
+enum hi_sqe_ent_type { TYPE_BUS_CONTROLLER = 0, TYPE_IDEV = 1 };
+enum hi_cqe_status { CQE_SUCCESS, CQE_FAIL };
 
 struct hi_msgq_reg {
 	u32 pi;
@@ -150,4 +154,122 @@ void hi_msg_core_uninit(struct hi_msg_core *hmc)
 		hi_msg_queue_sw_uninit(hmc, i);
 
 	iounmap(hmc->reg_base);
+}
+
+void hi_msg_sqe_init(struct hi_msg_sqe *sqe, int msn, struct msg_info *info,
+		     int task_type, u8 code)
+{
+	bool idev_flag = false;
+
+	sqe->task_type = (u8)task_type;
+	/* ub bus controller & idev 's local is 1 */
+	if (info->uent) {
+		if (info->ubc != info->uent &&
+		    uent_type(info->uent) == UB_TYPE_ICONTROLLER)
+			idev_flag = true;
+
+		sqe->local = (info->ubc == info->uent || idev_flag) ? 1 : 0;
+		if (sqe->local)
+			sqe->dev_type = idev_flag ? TYPE_IDEV : TYPE_BUS_CONTROLLER;
+	}
+
+	/* only msg need icrc */
+	sqe->icrc = (task_type == PROTOCOL_MSG) ? 1 : 0;
+	sqe->opcode = code;
+	sqe->p_len = info->req_pkt_size;
+	sqe->msn = (u16)msn;
+	/* p_addr init inside submit */
+}
+
+int hi_msg_cq_poll(struct hi_msg_core *hmc, int task_type, u16 msn)
+{
+	struct hi_msg_queue *cq = &hmc->queue[MSG_CQ];
+	struct hi_msg_cqe *cqe;
+	unsigned long flags;
+	int i, cnt, idx;
+
+	spin_lock_irqsave(&cq->lock, flags);
+	cq->pi = hi_msg_reg_read(hmc, CQ_PI);
+	if (cq->pi == cq->ci) {
+		spin_unlock_irqrestore(&cq->lock, flags);
+		return -EAGAIN;
+	}
+
+	cnt = q_used_cnt(cq);
+	for (i = 0; i < cnt; i++) {
+		idx = q_ptr_idx(cq, ci, i);
+		cqe = cq_entry(hmc, idx);
+		if (cqe->msn == msn && cqe->task_type == (u8)task_type &&
+		    (task_type != PROTOCOL_MSG || cqe->type == MSG_RSP)) {
+			spin_unlock_irqrestore(&cq->lock, flags);
+			return idx;
+		}
+	}
+	spin_unlock_irqrestore(&cq->lock, flags);
+	return -EAGAIN;
+}
+
+int hi_message_cqe_check(struct device *dev, struct hi_msg_sqe *sqe,
+			 struct hi_msg_cqe *cqe, u16 rsp_pkt_size)
+{
+	if (cqe->status != CQE_SUCCESS) {
+		dev_err(dev, "cqe fail status=%u\n", cqe->status);
+		return -EINVAL;
+	}
+
+	if (cqe->p_len > rsp_pkt_size || cqe->p_len > HI_MSG_RQE_SIZE) {
+		dev_err(dev, "cqe p_len %#x invalid, rsp_pkt_size %#x\n",
+			cqe->p_len, rsp_pkt_size);
+		return -EINVAL;
+	}
+
+	if (sqe->task_type == PROTOCOL_MSG) {
+		if (cqe->p_len < MSG_PKT_HEADER_SIZE) {
+			dev_err(dev, "cqe p_len %u is less than msg pkt header size.\n",
+				cqe->p_len);
+			return -EINVAL;
+		}
+		if ((sqe->opcode >> 1) == (cqe->opcode >> 1))
+			return 0;
+	} else {
+		if (sqe->opcode == cqe->opcode)
+			return 0;
+	}
+
+	dev_err(dev, "opcode sqe %#x != cqe %#x\n", sqe->opcode, cqe->opcode);
+	return -EINVAL;
+}
+
+void hi_msg_rqe_get(struct hi_msg_core *hmc, void *buf, struct hi_msg_cqe *cqe)
+{
+	u16 rqe_end_index, rqe_high_size, rqe_low_size, pi, depth;
+	u32 p_len;
+
+	depth = hmc->queue[MSG_RQ].depth;
+	pi = cqe->rq_pi;
+	p_len = cqe->p_len;
+
+	rqe_end_index = pi + DIV_ROUND_UP(p_len, HI_MSG_RQE_SIZE);
+	if (rqe_end_index <= depth) {
+		memcpy(buf, rq_entry(hmc, pi), p_len);
+		return;
+	}
+
+	/* overlap scenario */
+	rqe_high_size = (depth - pi) * HI_MSG_RQE_SIZE;
+	rqe_low_size = p_len - rqe_high_size;
+	memcpy(buf, rq_entry(hmc, pi), rqe_high_size);
+	memcpy(buf + rqe_high_size, rq_entry(hmc, 0), rqe_low_size);
+}
+
+void hi_msg_rq_update(struct hi_msg_core *hmc, int cq_idx)
+{
+	struct hi_msg_queue *rq = &hmc->queue[MSG_RQ];
+	struct hi_msg_cqe *cqe;
+
+	cqe = cq_entry(hmc, cq_idx);
+	rq->ci = (cqe->rq_pi + DIV_ROUND_UP(cqe->p_len, HI_MSG_RQE_SIZE)) %
+		 rq->depth;
+	wmb(); /* Ensure the register is written correctly. */
+	hi_msg_reg_write(hmc, RQ_CI, rq->ci);
 }

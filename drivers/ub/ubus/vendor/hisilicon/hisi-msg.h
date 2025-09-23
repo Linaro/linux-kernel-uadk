@@ -12,6 +12,8 @@
 
 #include "../../msg.h"
 
+extern int msg_wait;
+
 /* Hardware register context */
 #define HI_MSGQ_SIZE	0x120
 #define SQ_ADDR_L	0x0
@@ -43,6 +45,13 @@
 #define HI_MSG_SQE_SIZE		16
 #define HI_MSG_CQE_SIZE		16
 
+enum hi_task_type {
+	PROTOCOL_MSG = 0,
+	PROTOCOL_ENUM = 1,
+	HISI_PRIVATE = 2,
+	TASK_TYPE_NUM
+};
+
 enum hi_msgq_user {
 	MSGQ_USER_BUS_DRV = 0,
 	MSGQ_USER_NUMS
@@ -53,6 +62,58 @@ enum hi_msgq_idx {
 	MSG_RQ = 1,
 	MSG_CQ = 2,
 	MSGQ_NUM
+};
+
+struct hi_msg_sqe {
+	/* DW0 */
+	u32 task_type : 2;
+	u32 rsvd0 : 2;
+	u32 local : 1;
+	u32 dev_type : 2;
+	u32 icrc : 1;
+	union {
+		struct {
+			u8 type : 1;
+			u8 msg_code : 3;
+			u8 sub_msg_code : 4;
+		};
+		u8 opcode;
+	};
+	u32 p_len : 12;
+	u32 rsvd1 : 4;
+	/* DW1 */
+	u32 msn : 16;
+	u32 rsvd3 : 16;
+	/* DW2 */
+	u32 p_addr;
+	/* DW3 */
+	u32 rsvd2;
+};
+
+struct hi_msg_cqe {
+	/* DW0 */
+	u32 task_type : 2;
+	u32 rsvd0 : 6;
+	union {
+		struct {
+			u8 type : 1;
+			u8 msg_code : 3;
+			u8 sub_msg_code : 4;
+		};
+		u8 opcode;
+	};
+	u32 p_len : 12;
+	u32 rsvd1 : 4;
+	/* DW1 */
+	u32 msn : 16;
+	u32 rsvd5 : 16;
+	/* DW2 */
+	u32 rq_pi : 10;
+	u32 rsvd2 : 6;
+	u32 status : 8;
+	u32 rsvd3 : 8;
+	/* DW3 */
+	u32 rsvd4;
 };
 
 struct hi_msg_queue {
@@ -84,6 +145,19 @@ struct hi_msg_core {
 	struct hi_msg_queue queue[MSGQ_NUM];
 };
 
+#define q_used_cnt(q) (((q)->pi + (q)->depth - (q)->ci) % (q)->depth)
+#define q_ptr_idx(q, p, i) (((q)->p + (i)) % (q)->depth)
+#define cq_entry(hmc, idx) (&((hmc)->queue[MSG_CQ].cqe[idx]))
+#define rq_entry(hmc, idx) \
+	((hmc)->queue[MSG_RQ].rqe + (HI_MSG_RQE_SIZE * (idx)))
+
+int hi_msg_cq_poll(struct hi_msg_core *hmc, int task_type, u16 msn);
+void hi_msg_rq_update(struct hi_msg_core *hmc, int cq_idx);
+void hi_msg_sqe_init(struct hi_msg_sqe *sqe, int msn, struct msg_info *info,
+		     int task_type, u8 code);
+int hi_message_cqe_check(struct device *dev, struct hi_msg_sqe *sqe,
+			 struct hi_msg_cqe *cqe, u16 rsp_pkt_size);
+void hi_msg_rqe_get(struct hi_msg_core *hmc, void *buf, struct hi_msg_cqe *cqe);
 u32 hi_msg_reg_read(struct hi_msg_core *hmc, u16 offset);
 void hi_msg_reg_write(struct hi_msg_core *hmc, u16 offset, u32 val);
 int hi_msg_core_init(struct hi_msg_core *hmc, int user);

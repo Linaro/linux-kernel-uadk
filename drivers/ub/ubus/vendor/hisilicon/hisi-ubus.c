@@ -10,6 +10,10 @@
 #include "local-ras.h"
 #include "hisi-ubus.h"
 
+int msg_wait = 1024;
+module_param(msg_wait, int, 0444);
+MODULE_PARM_DESC(msg_wait, "message wait timeout, default: 1024ms");
+
 #define HISI_VENDOR_ID 0xCC08
 #define HISI_UBUS_DRV_NAME "hisi_ubus"
 

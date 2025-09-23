@@ -10,6 +10,7 @@
 #include "ubase_cmd.h"
 #include "ubase_dev.h"
 #include "ubase_mailbox.h"
+#include "ubase_reset.h"
 #include "ubase_tp.h"
 #include "ubase_trace.h"
 #include "ubase_eq.h"
@@ -121,15 +122,36 @@ void ubase_enable_misc_vector(struct ubase_dev *udev, bool enable)
 			enable ? 0 : 1);
 }
 
+static void ubase_save_ras_type(struct ubase_dev *udev, u32 reg)
+{
+	if (ubase_dev_ubl_supported(udev)) {
+		set_bit(UBASE_STATE_PORT_RESETTING_B, &udev->state_bits);
+		return;
+	}
+
+	if (reg & BIT(UBASE_SW_HANDSHAKE_0_HIMAC_RESET_B))
+		set_bit(UBASE_STATE_HIMAC_RESETTING_B, &udev->state_bits);
+	else if (reg & BIT(UBASE_SW_HANDSHAKE_0_PORT_RESET_B))
+		set_bit(UBASE_STATE_PORT_RESETTING_B, &udev->state_bits);
+}
+
 static unsigned long ubase_check_event_cause(struct ubase_dev *udev)
 {
 	unsigned long event_cause = 0;
+	u32 sw_handshake_0_reg;
 	u32 ctrlq_src_reg;
 	u32 cmdq_src_reg;
 
 	cmdq_src_reg = ubase_read_dev(&udev->hw, UBASE_VECTOR0_CMDQ_SRC_REG);
 	if (cmdq_src_reg & BIT(UBASE_VECTOR0_RX_CMDQ_INT_B))
 		event_cause |= BIT(UBASE_ASYNC_EVENT_CRQ_B);
+
+	sw_handshake_0_reg = ubase_read_dev(&udev->hw,
+					    UBASE_SW_HANDSHAKE_0_REG);
+	if (sw_handshake_0_reg & BIT(UBASE_SW_HANDSHAKE_0_RAS_B)) {
+		ubase_save_ras_type(udev, sw_handshake_0_reg);
+		event_cause |= BIT(UBASE_ASYNC_EVENT_RAS_B);
+	}
 
 	ctrlq_src_reg = ubase_read_dev(&udev->hw, UBASE_VECTOR0_CTRLQ_SRC_REG);
 	if (ctrlq_src_reg & BIT(UBASE_VECTOR0_RX_CTRLQ_INT_B))
@@ -141,9 +163,22 @@ static unsigned long ubase_check_event_cause(struct ubase_dev *udev)
 static void ubase_clear_event_cause(struct ubase_dev *udev,
 				    unsigned long event_cause)
 {
+	u32 sw_handshake_0_reg;
+
 	if (test_bit(UBASE_ASYNC_EVENT_CRQ_B, &event_cause))
 		ubase_write_dev(&udev->hw, UBASE_VECTOR0_CMDQ_SRC_REG,
 				BIT(UBASE_VECTOR0_RX_CMDQ_INT_B));
+
+	if (test_bit(UBASE_ASYNC_EVENT_RAS_B, &event_cause)) {
+		sw_handshake_0_reg = ubase_read_dev(&udev->hw,
+						    UBASE_SW_HANDSHAKE_0_REG);
+		sw_handshake_0_reg &= ~(BIT(UBASE_SW_HANDSHAKE_0_RAS_B) |
+					BIT(UBASE_SW_HANDSHAKE_0_PORT_RESET_B) |
+					BIT(UBASE_SW_HANDSHAKE_0_HIMAC_RESET_B));
+		ubase_write_dev(&udev->hw, UBASE_SW_HANDSHAKE_0_REG,
+				sw_handshake_0_reg);
+	}
+
 	if (test_bit(UBASE_ASYNC_EVENT_CTRLQ_B, &event_cause))
 		ubase_write_dev(&udev->hw, UBASE_VECTOR0_CTRLQ_SRC_REG,
 				BIT(UBASE_VECTOR0_RX_CTRLQ_INT_B));
@@ -153,6 +188,7 @@ static void ubase_clear_all_event_cause(struct ubase_dev *udev)
 {
 	ubase_clear_event_cause(udev,
 				BIT(UBASE_ASYNC_EVENT_CRQ_B) |
+				BIT(UBASE_ASYNC_EVENT_RAS_B) |
 				BIT(UBASE_ASYNC_EVENT_CTRLQ_B));
 }
 
@@ -164,6 +200,14 @@ static void ubase_crq_task_schedule(struct ubase_dev *udev)
 		mod_delayed_work(udev->ubase_wq,
 				 &udev->service_task.service_task, 0);
 	}
+}
+
+static void ubase_errhandle_task_schedule(struct ubase_dev *udev)
+{
+	if (!test_and_set_bit(UBASE_SERVICE_STATE_ERR_SCHED,
+			      &udev->service_task.state))
+		mod_delayed_work(udev->ubase_wq,
+				 &udev->service_task.service_task, 0);
 }
 
 static void ubase_ctrlq_task_schedule(struct ubase_dev *udev)
@@ -186,12 +230,54 @@ static int ubase_reg_event_handler(struct ubase_dev *udev)
 	if (test_bit(UBASE_ASYNC_EVENT_CRQ_B, &event_cause))
 		ubase_crq_task_schedule(udev);
 
+	if (test_bit(UBASE_ASYNC_EVENT_RAS_B, &event_cause))
+		ubase_errhandle_task_schedule(udev);
+
 	if (test_bit(UBASE_ASYNC_EVENT_CTRLQ_B, &event_cause))
 		ubase_ctrlq_task_schedule(udev);
+
 	ubase_clear_event_cause(udev, event_cause);
 	ubase_enable_misc_vector(udev, true);
 
 	return event_cause ? IRQ_HANDLED : IRQ_NONE;
+}
+
+static bool ubase_is_udma_queue_id(u32 queue_id, struct ubase_res_caps *caps)
+{
+	u32 end = caps->start_idx + caps->max_cnt;
+	u32 begin = caps->start_idx;
+
+	return begin <= queue_id && queue_id < end;
+}
+
+static inline bool ubase_is_public_or_rsvd_jetty(u32 queue_id,
+						 struct ubase_caps *caps)
+{
+	return queue_id < caps->public_jetty_cnt + caps->rsvd_jetty_cnt;
+}
+
+static bool ubase_is_udma_ras_event(struct ubase_dev *udev, u32 queue_id,
+				    u8 sub_type)
+{
+	switch (sub_type) {
+	case UBASE_SUBEVENT_TYPE_JFS_CHECK_ERROR:
+		return ubase_is_public_or_rsvd_jetty(queue_id,
+						     &udev->caps.dev_caps) ||
+		       ubase_is_udma_queue_id(queue_id,
+					      &udev->caps.udma_caps.jfs);
+	case UBASE_SUBEVENT_TYPE_JFR_CHECK_ERROR:
+		return ubase_is_udma_queue_id(queue_id,
+					      &udev->caps.udma_caps.jfr);
+	case UBASE_SUBEVENT_TYPE_JFC_CHECK_ERROR:
+		return ubase_is_udma_queue_id(queue_id,
+					      &udev->caps.udma_caps.jfc);
+	case UBASE_SUBEVENT_TYPE_JETTY_GROUP_CHECK_ERROR:
+		return true;
+	default:
+		break;
+	}
+
+	return false;
 }
 
 static bool ubase_is_udma_tp_event(struct ubase_dev *udev, u32 tpn)
@@ -227,7 +313,13 @@ static bool ubase_is_udma_event(struct ubase_dev *udev, u8 event_type,
 	case UBASE_EVENT_TYPE_CHECK_TOKEN:
 		return true;
 	case UBASE_EVENT_TYPE_TP_FLUSH_DONE:
+	case UBASE_EVENT_TYPE_TP_LEVEL_ERROR:
 		return ubase_is_udma_tp_event(udev, queue_id);
+	case UBASE_EVENT_TYPE_JFR_LIMIT_REACHED:
+		return ubase_is_udma_queue_id(queue_id,
+					      &udev->caps.udma_caps.jfr);
+	case UBASE_EVENT_TYPE_JETTY_LEVEL_ERROR:
+		return ubase_is_udma_ras_event(udev, queue_id, sub_type);
 	default:
 		break;
 	}
@@ -998,6 +1090,23 @@ void ubase_comp_unregister(struct auxiliary_device *adev)
 }
 EXPORT_SYMBOL(ubase_comp_unregister);
 
+static int ubase_ae_entity_level_error(struct notifier_block *nb,
+				       unsigned long event, void *data)
+{
+	struct ubase_event_nb *ev_nb = container_of(nb,
+						    struct ubase_event_nb, nb);
+	struct ubase_aeq_notify_info *info = data;
+	struct ubase_dev *udev = ev_nb->back;
+
+	ubase_err(udev,
+		  "ubase async event for ue level error, event_type=0x%x, sub_type=0x%x.\n",
+		  info->event_type, info->sub_type);
+
+	__ubase_reset_event(udev, UBASE_UE_RESET);
+
+	return 0;
+}
+
 static void __ubase_unregister_ae_event(struct ubase_dev *udev, int num)
 {
 	int i;
@@ -1023,6 +1132,16 @@ int ubase_register_ae_event(struct ubase_dev *udev)
 			UBASE_DRV_UNIC,
 			UBASE_EVENT_TYPE_TP_FLUSH_DONE,
 			{ ubase_ae_tp_flush_done },
+			udev
+		}, {
+			UBASE_DRV_UNIC,
+			UBASE_EVENT_TYPE_TP_LEVEL_ERROR,
+			{ ubase_ae_tp_level_error },
+			udev
+		}, {
+			UBASE_DRV_UNIC,
+			UBASE_EVENT_TYPE_ENTITY_LEVEL_ERROR,
+			{ ubase_ae_entity_level_error },
 			udev
 		}
 	};

@@ -26,6 +26,8 @@ struct ubase_tpg {
 
 int ubase_ae_tp_flush_done(struct notifier_block *nb, unsigned long event,
 			   void *data);
+int ubase_ae_tp_level_error(struct notifier_block *nb, unsigned long event,
+			    void *data);
 int ubase_dev_init_tp_tpg(struct ubase_dev *udev);
 void ubase_dev_uninit_tp_tpg(struct ubase_dev *udev);
 

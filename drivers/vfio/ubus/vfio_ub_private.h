@@ -19,6 +19,7 @@
 #include <linux/irqbypass.h>
 #include <ub/ubus/ubus.h>
 
+#define UB_CFG0_MAX_CAP 255
 #define UB_CFG1_MAX_CAP 511 /* cfg1 cap start from 256 */
 
 struct vfio_ub_core_device;
@@ -42,6 +43,7 @@ struct vfio_ub_slice {
 struct vfio_ub_config {
 	struct vfio_ub_slice *slice;
 	int nums;
+	u8 final_slice_supported[UB_CFG1_MAX_CAP + 1]; /* do not incude port basic && port cap */
 	int map[UB_CFG1_MAX_CAP + 1];
 };
 
@@ -71,6 +73,8 @@ struct vfio_ub_core_device {
 #define DWORD_BITS 32
 #define BYTE_BITS 8
 
+int vfio_ub_config_init(struct vfio_ub_core_device *vdev);
+void vfio_ub_config_uninit(struct vfio_ub_core_device *vdev);
 ssize_t vfio_ub_config_rw(struct vfio_ub_core_device *vdev, char __user *buf,
 			  size_t count, loff_t *ppos, bool iswrite);
 int vfio_ub_core_register_device(struct vfio_ub_core_device *vdev);

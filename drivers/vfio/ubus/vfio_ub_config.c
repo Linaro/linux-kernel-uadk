@@ -16,6 +16,7 @@
 #define pr_fmt(fmt) "vfio ub: " fmt
 
 #include <linux/vfio.h>
+#include <linux/slab.h>
 #include <linux/uaccess.h>
 
 #include "vfio_ub_private.h"
@@ -211,6 +212,416 @@ static int vfio_ub_default_config_read(struct vfio_ub_core_device *vdev,
 	}
 
 	return count;
+}
+
+static u8 vfio_slice_supported[UB_CFG1_MAX_CAP + 1];
+
+static int vfio_ub_fill_slice_vconfig(struct vfio_ub_core_device *vdev,
+				      int num, u32 pos, u32 size)
+{
+	__le32 *dwordp;
+	u32 val = 0;
+	int ret;
+	u32 cap_id;
+	u32 start = 0;
+
+	cap_id = UB_CFG_POS_TO_CAP(pos);
+
+	for (u32 i = 0; i < size; i += DWORD_SIZE) {
+		ret = vfio_ub_user_config_read(vdev->uent, pos + i, &val, DWORD_SIZE);
+		if (ret) {
+			ub_info(vdev->uent, "read cfgspace pos[%#x] failed, used default val 0\n",
+				pos + i);
+			val = 0;
+		}
+		dwordp = (__le32 *)(&vdev->vconfig.slice[num].cfg[i + start]);
+		*dwordp = cpu_to_le32(val);
+	}
+
+	/* vfio-ub support no port caps for userspace */
+	if (cap_id >= UB_PORT0_BASIC_CAP)
+		memset(&vdev->vconfig.slice[num].cfg[UB_CFG0_PORT_BITMAP], 0, UB_CFG_BITMAP_SIZE);
+
+	return 0;
+}
+
+static struct ub_entity *ub_get_primary_ent(struct ub_entity *uent)
+{
+	if (uent->entity_idx == 0)
+		return uent;
+
+	return uent->is_mue ? uent->pue : uent->pue->pue;
+}
+
+static int vfio_ub_init_slice_config_info(struct vfio_ub_core_device *vdev,
+					  u32 cap_id)
+{
+	struct vfio_ub_slice *pslice, *realloc_slice, *cur_slice;
+	struct ub_entity *primary_dev;
+	int used_size;
+	u32 pos;
+	int ret;
+	u32 val;
+
+	pos = UB_CFG_CAP_TO_POS(cap_id);
+	if (cap_id != UB_PORT0_BASIC_CAP) {
+		ret = ub_cfg_read_dword(vdev->uent, pos, &val);
+	} else {
+		primary_dev = ub_get_primary_ent(vdev->uent);
+		ret = ub_cfg_read_dword(primary_dev, pos, &val);
+	}
+
+	if (ret) {
+		ub_err(vdev->uent, "get cap[%#x] slice header failed\n", cap_id);
+		return ret;
+	}
+	used_size = (val >> SZ_4) << SZ_2;
+
+	if (used_size == 0 || used_size > UB_SLICE_SZ) {
+		ub_err(vdev->uent, "invalid cap_id[%#x] used_size[%#x]\n", cap_id, used_size);
+		return -EINVAL;
+	}
+
+	pslice = vdev->vconfig.slice;
+	realloc_slice = (struct vfio_ub_slice *)krealloc(vdev->vconfig.slice,
+				(vdev->vconfig.nums + 1) *
+				sizeof(struct vfio_ub_slice), GFP_KERNEL);
+	if (realloc_slice == NULL)
+		return -ENOMEM;
+
+	vdev->vconfig.slice = realloc_slice;
+
+	cur_slice = vdev->vconfig.slice + vdev->vconfig.nums;
+	cur_slice->cfg = kzalloc(used_size, GFP_KERNEL);
+	if (cur_slice->cfg == NULL) {
+		if (pslice == NULL) {
+			kfree(vdev->vconfig.slice);
+			vdev->vconfig.slice = NULL;
+		}
+		return -ENOMEM;
+	}
+
+	cur_slice->used_size = used_size;
+	cur_slice->cap_id = cap_id;
+	ret = vfio_ub_fill_slice_vconfig(vdev, vdev->vconfig.nums, pos, used_size);
+	if (ret) {
+		kfree(cur_slice->cfg);
+		if (pslice == NULL) {
+			kfree(vdev->vconfig.slice);
+			vdev->vconfig.slice = NULL;
+		}
+		return ret;
+	}
+
+	if (cap_id <= UB_CFG1_MAX_CAP)
+		vdev->vconfig.map[cap_id] = vdev->vconfig.nums;
+	vdev->vconfig.nums++;
+
+	return 0;
+}
+
+static int vfio_ub_find_cfg_cap(struct vfio_ub_core_device *vdev, u32 cap_id)
+{
+	int idx;
+
+	for (idx = 0; idx < vdev->vconfig.nums; idx++) {
+		if (vdev->vconfig.slice[idx].cap_id == cap_id)
+			return idx;
+	}
+
+	return CFG_MAP_INVALID;
+}
+
+static void vfio_ub_uninit_slice_config_info(struct vfio_ub_core_device *vdev,
+					     u32 cap_id)
+{
+	u32 tmp_cap;
+	int num;
+
+	if (cap_id <= UB_CFG1_MAX_CAP) {
+		num = vdev->vconfig.map[cap_id];
+		vdev->vconfig.map[cap_id] = CFG_MAP_INVALID;
+	} else {
+		num = vfio_ub_find_cfg_cap(vdev, cap_id);
+	}
+
+	if (num == CFG_MAP_INVALID)
+		return;
+
+	kfree(vdev->vconfig.slice[num].cfg);
+	for (int i = num; i < vdev->vconfig.nums - 1; i++) {
+		memcpy(vdev->vconfig.slice + i, vdev->vconfig.slice + i + 1,
+		       sizeof(struct vfio_ub_slice));
+		tmp_cap = vdev->vconfig.slice[i].cap_id;
+		if (tmp_cap <= UB_CFG1_MAX_CAP)
+			vdev->vconfig.map[tmp_cap] = i;
+	}
+
+	vdev->vconfig.nums--;
+}
+
+static int vfio_ub_init_cfg0_basic_info(struct vfio_ub_core_device *vdev)
+{
+	u8 *cfg0_bitmap_buf;
+	int cfg0_basic_idx;
+	int i, j, cap_idx = 0;
+	int ret;
+
+	ret = vfio_ub_init_slice_config_info(vdev, UB_CFG0_BASIC_CAP);
+	if (ret)
+		return ret;
+
+	cfg0_basic_idx = vdev->vconfig.map[UB_CFG0_BASIC_CAP];
+	cfg0_bitmap_buf = vdev->vconfig.slice[cfg0_basic_idx].cfg
+				+ UB_CFG0_CAP_BITMAP;
+
+	for (i = 0; i < UB_CFG_BITMAP_SIZE; i++) {
+		for (j = 0; j < BITS_PER_BYTE; j++) {
+			if (((cfg0_bitmap_buf[i] >> j) & 1) &&
+			    vfio_slice_supported[cap_idx]) {
+				vdev->vconfig.final_slice_supported[cap_idx] = 1;
+			} else if (((cfg0_bitmap_buf[i] >> j) & 1) &&
+				   vfio_slice_supported[cap_idx] == 0) {
+				cfg0_bitmap_buf[i] = cfg0_bitmap_buf[i] &
+						     ~(1 << j);
+			}
+			cap_idx++;
+		}
+	}
+
+	return 0;
+}
+
+static void vfio_ub_uninit_cfg0_basic_info(struct vfio_ub_core_device *vdev)
+{
+	u32 cap_id;
+
+	for (cap_id = 0; cap_id <= UB_CFG0_MAX_CAP; cap_id++) {
+		if (vdev->vconfig.final_slice_supported[cap_id] == 1)
+			vdev->vconfig.final_slice_supported[cap_id] = 0;
+	}
+
+	vfio_ub_uninit_slice_config_info(vdev, UB_CFG0_BASIC_CAP);
+}
+
+static int vfio_ub_init_cfg0_cap_info(struct vfio_ub_core_device *vdev)
+{
+	int cap_id;
+	int ret;
+
+	for (cap_id = 1; cap_id <= UB_CFG0_MAX_CAP; cap_id++) {
+		if (vdev->vconfig.final_slice_supported[cap_id]) {
+			ret = vfio_ub_init_slice_config_info(vdev, (u32)cap_id);
+			if (ret)
+				goto cfg0_cap_init_err;
+		}
+	}
+
+	return 0;
+
+cfg0_cap_init_err:
+	for (cap_id = cap_id - 1; cap_id >= 1; cap_id--)
+		vfio_ub_uninit_slice_config_info(vdev, cap_id);
+	return ret;
+}
+
+static void vfio_ub_uninit_cfg0_cap_info(struct vfio_ub_core_device *vdev)
+{
+	u32 cap_id;
+
+	for (cap_id = 1; cap_id <= UB_CFG0_MAX_CAP; cap_id++) {
+		if (vdev->vconfig.final_slice_supported[cap_id])
+			vfio_ub_uninit_slice_config_info(vdev, cap_id);
+	}
+}
+
+static int vfio_ub_init_cfg1_basic_info(struct vfio_ub_core_device *vdev)
+{
+	u32 cap_idx = UB_CFG1_BASIC_CAP;
+	u8 *cfg1_bitmap_buf;
+	int cfg1_basic_idx;
+	int i, j;
+	int ret;
+
+	ret = vfio_ub_init_slice_config_info(vdev, UB_CFG1_BASIC_CAP);
+	if (ret)
+		return ret;
+
+	cfg1_basic_idx = vdev->vconfig.map[UB_CFG1_BASIC_CAP];
+	cfg1_bitmap_buf = vdev->vconfig.slice[cfg1_basic_idx].cfg +
+			  UB_CFG1_CAP_BITMAP - UB_CFG1_BASIC;
+
+	for (i = 0; i < UB_CFG_BITMAP_SIZE; i++) {
+		for (j = 0; j < BITS_PER_BYTE; j++) {
+			if (((cfg1_bitmap_buf[i] >> j) & 1) &&
+			    vfio_slice_supported[cap_idx]) {
+				vdev->vconfig.final_slice_supported[cap_idx] = 1;
+			} else if (((cfg1_bitmap_buf[i] >> j) & 1) &&
+				   vfio_slice_supported[cap_idx] == 0) {
+				cfg1_bitmap_buf[i] = cfg1_bitmap_buf[i] &
+						     ~(1 << j);
+			}
+			cap_idx++;
+		}
+	}
+
+	return 0;
+}
+
+static void vfio_ub_uninit_cfg1_basic_info(struct vfio_ub_core_device *vdev)
+{
+	u32 cap_id;
+
+	for (cap_id = UB_DECODER_CAP; cap_id <= UB_CFG1_MAX_CAP; cap_id++) {
+		if (vdev->vconfig.final_slice_supported[cap_id] == 1)
+			vdev->vconfig.final_slice_supported[cap_id] = 0;
+	}
+
+	vfio_ub_uninit_slice_config_info(vdev, UB_CFG1_BASIC_CAP);
+}
+
+static int vfio_ub_init_cfg1_cap_info(struct vfio_ub_core_device *vdev)
+{
+	u32 cap_id;
+	int ret;
+
+	for (cap_id = UB_DECODER_CAP; cap_id <= UB_CFG1_MAX_CAP; cap_id++) {
+		if (vdev->vconfig.final_slice_supported[cap_id]) {
+			ret = vfio_ub_init_slice_config_info(vdev, cap_id);
+			if (ret)
+				goto cfg1_cap_init_err;
+		}
+	}
+
+	return 0;
+
+cfg1_cap_init_err:
+	for (cap_id = cap_id - 1; cap_id >= UB_DECODER_CAP; cap_id--)
+		vfio_ub_uninit_slice_config_info(vdev, cap_id);
+	return ret;
+}
+
+static void vfio_ub_uninit_cfg1_cap_info(struct vfio_ub_core_device *vdev)
+{
+	u32 cap_id;
+
+	for (cap_id = UB_DECODER_CAP; cap_id <= UB_CFG1_MAX_CAP; cap_id++) {
+		if (vdev->vconfig.final_slice_supported[cap_id])
+			vfio_ub_uninit_slice_config_info(vdev, cap_id);
+	}
+}
+
+static void vfio_ub_init_port_cap_bitmap(struct vfio_ub_core_device *vdev, int idx)
+{
+	/* now we do not support any port cap */
+	memset(vdev->vconfig.slice[idx].cfg + UB_CFG0_PORT_BITMAP,
+	       0, UB_CFG_BITMAP_SIZE);
+}
+
+static int vfio_ub_init_port_basic_info(struct vfio_ub_core_device *vdev)
+{
+	int cfg0_basic_idx = vdev->vconfig.map[UB_CFG0_BASIC_CAP];
+	u16 total_port_nums;
+	__le16 *wordp;
+	int ret;
+	int idx;
+
+	wordp = (__le16 *)(vdev->vconfig.slice[cfg0_basic_idx].cfg +
+			   UB_TOTAL_NUMBER_PORT);
+	total_port_nums = le16_to_cpu(*wordp);
+
+	for (idx = 0; idx < total_port_nums; idx++) {
+		ret = vfio_ub_init_slice_config_info(vdev, UB_PORT0_BASIC_CAP +
+						     idx * UB_PORT_CAP_GAP);
+		if (ret)
+			goto port_basic_init_err;
+		vfio_ub_init_port_cap_bitmap(vdev, vdev->vconfig.nums - 1);
+	}
+
+	return 0;
+
+port_basic_init_err:
+	for (idx = idx - 1; idx >= 0; idx--)
+		vfio_ub_uninit_slice_config_info(vdev, UB_PORT0_BASIC_CAP +
+						 idx * UB_PORT_CAP_GAP);
+	return ret;
+}
+
+static void vfio_ub_uninit_port_basic_info(struct vfio_ub_core_device *vdev)
+{
+	int cfg0_basic_idx = vdev->vconfig.map[UB_CFG0_BASIC_CAP];
+	u16 total_port_nums;
+	u16 idx;
+	__le16 *wordp;
+
+	wordp = (__le16 *)(vdev->vconfig.slice[cfg0_basic_idx].cfg +
+			  UB_TOTAL_NUMBER_PORT);
+	total_port_nums = le16_to_cpu(*wordp);
+	for (idx = 0; idx < total_port_nums; idx++)
+		vfio_ub_uninit_slice_config_info(vdev, UB_PORT0_BASIC_CAP +
+						 idx * UB_PORT_CAP_GAP);
+}
+
+int vfio_ub_config_init(struct vfio_ub_core_device *vdev)
+{
+	int ret;
+
+	memset(vdev->vconfig.map, CFG_MAP_INVALID,
+	       (UB_CFG1_MAX_CAP + 1) * sizeof(int));
+
+	ret = vfio_ub_init_cfg0_basic_info(vdev);
+	if (ret)
+		return ret;
+
+	ret = vfio_ub_init_cfg0_cap_info(vdev);
+	if (ret)
+		goto out_uninit_cfg0_basic;
+
+	ret = vfio_ub_init_cfg1_basic_info(vdev);
+	if (ret)
+		goto out_uninit_cfg0_cap;
+
+	ret = vfio_ub_init_cfg1_cap_info(vdev);
+	if (ret)
+		goto out_uninit_cfg1_basic;
+
+	ret = vfio_ub_init_port_basic_info(vdev);
+	if (ret)
+		goto out_uninit_cfg1_cap;
+
+	return 0;
+
+out_uninit_cfg1_cap:
+	vfio_ub_uninit_cfg1_cap_info(vdev);
+out_uninit_cfg1_basic:
+	vfio_ub_uninit_cfg1_basic_info(vdev);
+out_uninit_cfg0_cap:
+	vfio_ub_uninit_cfg0_cap_info(vdev);
+out_uninit_cfg0_basic:
+	vfio_ub_uninit_cfg0_basic_info(vdev);
+
+	memset(vdev->vconfig.map, CFG_MAP_INVALID, (UB_CFG1_MAX_CAP + 1) * sizeof(int));
+	kfree(vdev->vconfig.slice);
+	vdev->vconfig.slice = NULL;
+	vdev->vconfig.nums = 0;
+	return ret;
+}
+
+void vfio_ub_config_uninit(struct vfio_ub_core_device *vdev)
+{
+	if (vdev->vconfig.slice == NULL)
+		return;
+
+	vfio_ub_uninit_port_basic_info(vdev);
+	vfio_ub_uninit_cfg1_cap_info(vdev);
+	vfio_ub_uninit_cfg1_basic_info(vdev);
+	vfio_ub_uninit_cfg0_cap_info(vdev);
+	vfio_ub_uninit_cfg0_basic_info(vdev);
+
+	memset(vdev->vconfig.map, CFG_MAP_INVALID, (UB_CFG1_MAX_CAP + 1) * sizeof(int));
+	kfree(vdev->vconfig.slice);
+	vdev->vconfig.slice = NULL;
+	vdev->vconfig.nums = 0;
 }
 
 static int vfio_ub_find_valid_cap(struct vfio_ub_core_device *vdev, u32 cap_id)

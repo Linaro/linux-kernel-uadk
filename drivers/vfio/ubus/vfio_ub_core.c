@@ -96,17 +96,25 @@ static int vfio_usi_info_init(struct vfio_ub_core_device *vdev)
 
 static int vfio_ub_enable(struct vfio_ub_core_device *vdev)
 {
+	int ret;
+
 	vdev->num_ext_irqs = 0;
 	vdev->num_regions = 0;
 	vdev->num_vendor_irqs = 0;
 	vdev->num_vendor_regions = 0;
 	vdev->reset_works = 1; /* we assume ub support ELR for now. */
 
-	return vfio_usi_info_init(vdev);
+	ret = vfio_usi_info_init(vdev);
+	if (ret)
+		return ret;
+
+	return vfio_ub_config_init(vdev);
 }
 
 static void vfio_ub_disable(struct vfio_ub_core_device *vdev)
 {
+	vfio_ub_config_uninit(vdev);
+
 	/* clear device caches when vm exit or crash */
 	if (vdev->reset_works)
 		ub_reset_entity(vdev->uent);

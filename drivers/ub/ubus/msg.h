@@ -252,6 +252,25 @@ static inline void message_info_init(struct msg_info *info, struct ub_entity *ue
 	info->rsp_pkt_size = (u16)size;
 }
 
+static inline void __message_device_set_ops(struct message_device *mdev,
+					    const struct message_ops *ops)
+{
+	mdev->ops = ops;
+}
+
+#define message_device_set_ops(mdev, ops)                               \
+do {                                                                    \
+	struct message_ops *__ops = (struct message_ops *)(ops);        \
+	__ops->owner = THIS_MODULE;                                     \
+	__message_device_set_ops(mdev, __ops);                          \
+} while (0)
+
+static inline void message_device_set_fwnode(struct message_device *mdev,
+					     struct fwnode_handle *fwnode)
+{
+	mdev->fwnode = fwnode;
+}
+
 void ub_msg_pkt_header_init(struct msg_pkt_header *header, struct ub_entity *uent,
 			    u16 plen, u8 code, bool flag);
 

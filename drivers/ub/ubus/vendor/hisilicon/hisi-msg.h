@@ -1,0 +1,94 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
+/*
+ * Copyright (c) HiSilicon Technologies Co., Ltd. 2025. All rights reserved.
+ */
+
+#ifndef __HISI_MSG_H__
+#define __HISI_MSG_H__
+
+#include <linux/spinlock.h>
+#include <linux/device.h>
+#include <ub/ubus/ubus.h>
+
+#include "../../msg.h"
+
+/* Hardware register context */
+#define HI_MSGQ_SIZE	0x120
+#define SQ_ADDR_L	0x0
+#define SQ_ADDR_H	0x4
+#define SQ_PI		0x8
+#define SQ_CI		0xc
+#define SQ_DEPTH	0x10
+#define SQ_STATUS	0x14
+#define RQ_ADDR_L	0x40
+#define RQ_ADDR_H	0x44
+#define RQ_PI		0x48
+#define RQ_CI		0x4c
+#define RQ_DEPTH	0x50
+#define RQ_ENTRY_SIZE	0x54
+#define RQ_STATUS	0x58
+#define CQ_ADDR_L	0x70
+#define CQ_ADDR_H	0x74
+#define CQ_PI		0x78
+#define CQ_CI		0x7c
+#define CQ_DEPTH	0x80
+#define CQ_STATUS	0x84
+#define MSGQ_RST	0xB0
+
+#define HI_MSG_RQE_SIZE		0x800 /* 2K */
+#define HI_MSG_SQE_PLD_SIZE	0x800 /* 2K */
+#define HI_SQ_CFG_DEPTH		0x400
+#define HI_RQ_CFG_DEPTH		0x400
+#define HI_CQ_CFG_DEPTH		0x400
+#define HI_MSG_SQE_SIZE		16
+#define HI_MSG_CQE_SIZE		16
+
+enum hi_msgq_user {
+	MSGQ_USER_BUS_DRV = 0,
+	MSGQ_USER_NUMS
+};
+
+enum hi_msgq_idx {
+	MSG_SQ = 0,
+	MSG_RQ = 1,
+	MSG_CQ = 2,
+	MSGQ_NUM
+};
+
+struct hi_msg_queue {
+	union {
+		struct hi_msg_sqe *sqe;
+		void *rqe;
+		struct hi_msg_cqe *cqe;
+		void *entry;
+	};
+
+	dma_addr_t dma_addr;
+
+	u16 ci;
+	u16 pi;
+	u16 depth;
+	u16 entry_size;
+	size_t total_size;
+
+	spinlock_t lock;
+};
+
+struct hi_msg_core {
+	struct device *dev; /* ubc->dev */
+	phys_addr_t q_addr; /* MSGQ ctx's phy addr & size */
+	size_t q_size;
+	void __iomem *reg_base; /* MSGQ context virtual address */
+
+	int user;
+	struct hi_msg_queue queue[MSGQ_NUM];
+};
+
+u32 hi_msg_reg_read(struct hi_msg_core *hmc, u16 offset);
+void hi_msg_reg_write(struct hi_msg_core *hmc, u16 offset, u32 val);
+int hi_msg_core_init(struct hi_msg_core *hmc, int user);
+void hi_msg_core_uninit(struct hi_msg_core *hmc);
+int hi_msg_device_probe(struct ub_bus_controller *ubc);
+void hi_msg_device_remove(struct ub_bus_controller *ubc);
+
+#endif /* __HISI_MSG_H__ */

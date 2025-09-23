@@ -32,6 +32,9 @@ struct hi_ubc_private_data {
 	u8 reserved2[HI_UBC_PRIVATE_DATA_RESERVED2];
 };
 
+int hi_eu_table_init(struct ub_bus_controller *ubc);
+void hi_eu_table_uninit(struct ub_bus_controller *ubc);
+int hi_eu_cfg(struct ub_bus_controller *ubc, bool add, u32 eid, u16 upi);
 void hi_register_decoder_base_addr(struct ub_bus_controller *ubc, u64 *cmd_queue,
 				   u64 *event_queue);
 int hi_send_entity_enable_msg(struct ub_entity *uent, u8 enable);

@@ -57,6 +57,10 @@ enum hi_task_type {
 	TASK_TYPE_NUM
 };
 
+enum hi_msgq_private_opcode {
+	EU_TABLE_CFG_CMD = 2,
+};
+
 enum hi_msgq_user {
 	MSGQ_USER_BUS_DRV = 0,
 	MSGQ_USER_NUMS

@@ -153,6 +153,27 @@ static void hi_msn_put(int type, u16 msn)
 	spin_unlock_irqrestore(lock, flags);
 }
 
+static void hi_msgq_hw_status(struct hi_msg_core *hmc)
+{
+	dev_err_ratelimited(
+		hmc->dev, "sq pi=%#04x, ci=%#04x\ncq pi=%#04x, ci=%#04x\nrq pi=%#04x, ci=%#04x\n",
+		hi_msg_reg_read(hmc, SQ_PI), hi_msg_reg_read(hmc, SQ_CI),
+		hi_msg_reg_read(hmc, CQ_PI), hi_msg_reg_read(hmc, CQ_CI),
+		hi_msg_reg_read(hmc, RQ_PI), hi_msg_reg_read(hmc, RQ_CI));
+}
+
+static void hi_msgq_sw_status(struct hi_message_device *hmd)
+{
+	dev_err_ratelimited(hmd->hmc.dev, "sq in flight msg:%d\n",
+			    atomic_read(&hmd->msg_in_flight_cnt));
+}
+
+static void hi_msgq_status(struct hi_message_device *hmd)
+{
+	hi_msgq_hw_status(&hmd->hmc);
+	hi_msgq_sw_status(hmd);
+}
+
 static int hi_msg_get_sq_idle_num(struct hi_message_device *hmd, int num,
 				  bool tx)
 {
@@ -357,13 +378,16 @@ static int hi_msg_cq_poller(struct hi_message_device *hmd)
 
 		if (cqe->p_len > HI_MSG_RQE_SIZE) {
 			dev_err(hmc->dev, "poller cqe p_len invalid\n");
+			ub_msg_dump_cq(cqe, NULL);
 			goto handled;
 		}
 
 		ret = message_rx_handler(ubc, rq_entry(hmc, cqe->rq_pi),
 					 cqe->p_len);
-		if (ret)
+		if (ret) {
 			dev_err(hmc->dev, "poller rx msg failed, ret=%d\n", ret);
+			ub_msg_dump_cq(cqe, rq_entry(hmc, cqe->rq_pi));
+		}
 handled:
 		cqe_state_set(hmd, idx, CQ_SW_HANDLED);
 		handled_cnt++;
@@ -502,6 +526,7 @@ static int hi_message_sync(struct message_device *mdev, struct msg_info *info,
 		hmd, &sqe, (struct hi_msg_sqe_pld *)info->req_packet, 1, true);
 	if (cnt != 1) {
 		dev_err(hmc->dev, "sq submit failed\n");
+		hi_msgq_status(hmd);
 		hi_msn_put(task_type, msn);
 		return -ENOSPC;
 	}
@@ -510,6 +535,7 @@ static int hi_message_sync(struct message_device *mdev, struct msg_info *info,
 	if (cq_idx < 0) {
 		if (cq_idx == -ENOMEM)
 			hi_msn_put(task_type, msn);
+		ub_msg_dump_sq(&sqe, info->req_packet);
 		return cq_idx;
 	}
 
@@ -518,6 +544,9 @@ static int hi_message_sync(struct message_device *mdev, struct msg_info *info,
 	if (!ret) {
 		hi_msg_rqe_get(hmc, info->rsp_packet, cqe);
 		info->actual_rsp_size = cqe->p_len;
+	} else {
+		ub_msg_dump_sq(&sqe, info->req_packet);
+		ub_msg_dump_cq(cqe, NULL);
 	}
 
 	cqe_state_set(hmd, cq_idx, CQ_SW_HANDLED);
@@ -555,7 +584,7 @@ static int hi_message_response(struct message_device *mdev,
 	cnt = hi_msg_sq_submit(
 		hmd, &sqe, (struct hi_msg_sqe_pld *)info->req_packet, 1, false);
 	if (cnt != 1) {
-		dev_err(hmd->hmc.dev, "async sq submit failed\n");
+		dev_err(hmd->hmc.dev, "rsp sq submit failed\n");
 		return -ENOSPC;
 	}
 
@@ -587,6 +616,7 @@ static int hi_message_send(struct message_device *mdev, struct msg_info *info,
 		hmd, &sqe, (struct hi_msg_sqe_pld *)info->req_packet, 1, false);
 	if (cnt != 1) {
 		dev_err(hmc->dev, "sq submit failed\n");
+		hi_msgq_status(hmd);
 		ret = -ENOSPC;
 	}
 
@@ -665,19 +695,23 @@ static bool hi_cqe_ageing(struct hi_message_device *hmd, int idx)
 
 		if (cqe->p_len > HI_MSG_RQE_SIZE) {
 			dev_err(hmc->dev, "ageing cqe p_len invalid\n");
+			ub_msg_dump_cq(cqe, NULL);
 			return true;
 		}
 
 		ret = message_rx_handler(ubc, rq_entry(hmc, cqe->rq_pi),
 					 cqe->p_len);
-		if (ret)
+		if (ret) {
 			dev_err(hmc->dev, "rx msg failed, ret=%d\n", ret);
+			ub_msg_dump_cq(cqe, rq_entry(hmc, cqe->rq_pi));
+		}
 
 		dev_warn(hmc->dev, "interrupt dont up, process unhandled cqe, idx=%d type=%u msn=%#x opcode=%#x\n",
 			 idx, cqe->task_type, cqe->msn, cqe->opcode);
 	} else {
 		dev_err(hmc->dev, "reset unhandled cqe, idx=%d type=%u msn=%#x\n",
 			idx, cqe->task_type, cqe->msn);
+		ub_msg_dump_cq(cqe, rq_entry(hmc, cqe->rq_pi));
 	}
 
 	return true;

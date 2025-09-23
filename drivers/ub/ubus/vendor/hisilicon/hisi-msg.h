@@ -184,5 +184,9 @@ int hi_message_sync_request_sched(struct message_device *mdev,
 				  struct msg_info *info, u8 opcode);
 int hi_message_private(struct message_device *mdev, struct msg_info *info,
 		       u8 opcode);
+void hi_msg_debugfs_init(struct hi_msg_core *hmc);
+void hi_msg_debugfs_uninit(struct hi_msg_core *hmc);
+void ub_msg_dump_sq(struct hi_msg_sqe *sqe, void *sq_pld);
+void ub_msg_dump_cq(struct hi_msg_cqe *cqe, void *rqe);
 
 #endif /* __HISI_MSG_H__ */

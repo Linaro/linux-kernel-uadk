@@ -222,6 +222,8 @@ int hi_msg_core_init(struct hi_msg_core *hmc, int user)
 	if (ret)
 		goto sw_uninit; /* Now i = MSGQ_NUM */
 
+	hi_msg_debugfs_init(hmc);
+
 	return 0;
 sw_uninit:
 	hi_msg_reset_queue(hmc);
@@ -237,6 +239,7 @@ void hi_msg_core_uninit(struct hi_msg_core *hmc)
 {
 	int i;
 
+	hi_msg_debugfs_uninit(hmc);
 	hi_msg_queue_irq_uninit(hmc);
 	hi_msg_reset_queue(hmc);
 

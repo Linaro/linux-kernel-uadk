@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# UBL configuration
+#
+
+config UB_UBL
+	default n
+	tristate "UB link support"
+	help
+	  This enables UB link support which is
+	  used to replace traditional ethernet layer.
+	  Say 'Y' or 'm' if your device works
+	  in UB mode.

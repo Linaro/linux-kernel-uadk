@@ -744,6 +744,13 @@ void __ub_write_msi_msg(struct msi_desc *entry, struct msi_msg *msg);
 int ub_interrupt_id_alloc(struct ub_entity *uent);
 void ub_interrupt_id_free(struct ub_entity *uent);
 bool ub_setup_usi_device_domain(struct ub_entity *uent, unsigned int hwsize);
+void __iomem *ub_vector_desc_addr(struct msi_desc *desc);
+u32 ub_intr_addr_count(struct ub_entity *uent);
+u32 ub_intr_vec_count(struct ub_entity *uent);
+int usi_setup_interrupts(struct ub_entity *uent,
+			 struct ub_usi_entry *entries, int nvec,
+			 struct irq_affinity *affd);
+int ub_setup_msi_context(struct ub_entity *uent);
 #endif /* CONFIG_UB_UBUS_USI */
 
 #endif /* LINUX_MSI_H */

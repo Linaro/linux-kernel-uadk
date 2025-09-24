@@ -469,6 +469,33 @@ int ub_reset_entity(struct ub_entity *ent);
  */
 int ub_device_reset(struct ub_entity *ent);
 
+/* Only for ubus module */
+unsigned int ub_irq_calc_affinity_vectors(unsigned int minvec,
+					  unsigned int maxvec,
+					  const struct irq_affinity *affd);
+
+/**
+ * ub_disable_intr() - Free entity interrupt vectors.
+ * @uent: UB entity.
+ *
+ * Free interrupt vectors of the device.
+ *
+ * Context: Any context.
+ */
+void ub_disable_intr(struct ub_entity *uent);
+
+/**
+ * ub_intr_vec_count() - Interrupt Vectors Supported by a entity.
+ * @uent: UB entity.
+ *
+ * Querying the Number of Interrupt Vectors Supported by a entity.
+ * For interrupt type 2.
+ *
+ * Context: Any context.
+ * Return: Number of Interrupts Supported if success, or 0 if failed.
+ */
+u32 ub_intr_vec_count(struct ub_entity *uent);
+
 /**
  * ub_cfg_read_byte() - 1 byte configuration access read.
  * @uent: UB entity.
@@ -656,6 +683,15 @@ static inline int ub_reset_entity(struct ub_entity *uent)
 { return -ENODEV; }
 static inline int ub_device_reset(struct ub_entity *uent)
 { return -ENODEV; }
+static inline unsigned int
+ub_irq_calc_affinity_vectors(unsigned int minvec, unsigned int maxvec,
+			     const struct irq_affinity *affd)
+{
+	return maxvec;
+}
+static inline void ub_disable_intr(struct ub_entity *uent) {}
+static inline u32 ub_intr_vec_count(struct ub_entity *uent)
+{ return 0; }
 static inline int
 __ub_register_driver(struct ub_driver *drv, struct module *owner,
 		     const char *mod_name)

@@ -14,6 +14,15 @@ struct ub_bus_controller_ops {
 	void (*register_decoder_base_addr)(struct ub_bus_controller *ubc,
 					   u64 *cmd_queue, u64 *event_queue);
 	int (*entity_enable)(struct ub_entity *uent, u8 enable);
+
+	KABI_RESERVE(1)
+	KABI_RESERVE(2)
+	KABI_RESERVE(3)
+	KABI_RESERVE(4)
+	KABI_RESERVE(5)
+	KABI_RESERVE(6)
+	KABI_RESERVE(7)
+	KABI_RESERVE(8)
 };
 
 struct ub_bus_controller *ub_find_bus_controller_by_cna(u32 cna);

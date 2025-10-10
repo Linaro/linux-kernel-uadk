@@ -406,6 +406,11 @@ static void unic_destroy_jetty(struct unic_dev *unic_dev, u32 num)
 	unic_destroy_rx(unic_dev, num);
 }
 
+static inline int unic_init_rss(struct unic_dev *unic_dev)
+{
+	return unic_set_rss_tc_mode(unic_dev, UNIC_RSS_TC_VALID);
+}
+
 static int __unic_init_channels(struct unic_dev *unic_dev, u32 channels_num)
 {
 	struct auxiliary_device *adev = unic_dev->comdev.adev;
@@ -429,7 +434,19 @@ static int __unic_init_channels(struct unic_dev *unic_dev, u32 channels_num)
 		netif_napi_add(unic_dev->comdev.netdev, &channels->c[i].napi,
 			       unic_napi_poll);
 
+	ret = unic_init_rss(unic_dev);
+	if (ret) {
+		dev_err(adev->dev.parent,
+			"failed to init rss, ret = %d.\n", ret);
+		goto err_init_rss;
+	}
+
 	return 0;
+
+err_init_rss:
+	for (; i > 0; i--)
+		netif_napi_del(&channels->c[i - 1].napi);
+	unic_destroy_jetty(unic_dev, channels->num);
 
 err_init_jetty:
 	kfree(channels->c);
@@ -453,10 +470,17 @@ int unic_init_channels(struct unic_dev *unic_dev, u32 channels_num)
 	return ret;
 }
 
+static inline void unic_uninit_rss(struct unic_dev *unic_dev)
+{
+	unic_set_rss_tc_mode(unic_dev, UNIC_RSS_TC_INVALID);
+}
+
 static void __unic_uninit_channels(struct unic_dev *unic_dev)
 {
 	struct unic_channels *channels = &unic_dev->channels;
 	u32 i;
+
+	unic_uninit_rss(unic_dev);
 
 	if (!channels->c)
 		return;

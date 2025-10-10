@@ -43,6 +43,7 @@ static const struct unic_dbg_cap_bit_info {
 	{"\tsupport_ubl: %u\n", &unic_dev_ubl_supported},
 	{"\tsupport_ets: %u\n", &unic_dev_ets_supported},
 	{"\tsupport_fec: %u\n", &unic_dev_fec_supported},
+	{"\tsupport_rss: %u\n", &unic_dev_rss_supported},
 	{"\tsupport_tc_speed_limit: %u\n", &unic_dev_tc_speed_limit_supported},
 	{"\tsupport_tx_csum_offload: %u\n", &unic_dev_tx_csum_offload_supported},
 	{"\tsupport_rx_csum_offload: %u\n", &unic_dev_rx_csum_offload_supported},
@@ -136,6 +137,36 @@ out:
 	return ret;
 }
 
+static int unic_dbg_dump_rss_cfg_hw(struct seq_file *s, void *data)
+{
+#define UNIC_RSS_CFG_ITEMS_NUM	6
+
+	struct unic_dev *unic_dev = dev_get_drvdata(s->private);
+	struct unic_cfg_rss_cmd resp = {0};
+	u16 jfr_cnt;
+	u16 i = 0;
+	int ret;
+
+	if (__unic_resetting(unic_dev))
+		return -EBUSY;
+
+	seq_puts(s, "TC_VAILD  TC_MODE  JFR_0  JFR_1  JFR_2  JFR_3\n");
+
+	ret = unic_query_rss_cfg(unic_dev, &resp);
+	if (ret)
+		return ret;
+
+	seq_printf(s, "%-10u", resp.tc_vaild);
+	seq_printf(s, "%-9u", resp.tc_mode);
+	jfr_cnt = min(le16_to_cpu(resp.jfr_reg_num), UNIC_RSS_MAX_CNT);
+	jfr_cnt = min(UNIC_RSS_CFG_ITEMS_NUM, jfr_cnt);
+	for (i = 0; i < jfr_cnt; i++)
+		seq_printf(s, "%-7u", le16_to_cpu(resp.jfr_idx[i]));
+	seq_puts(s, "\n");
+
+	return 0;
+}
+
 static int unic_dbg_dump_promisc_cfg_hw(struct seq_file *s, void *data)
 {
 	struct unic_dev *unic_dev = dev_get_drvdata(s->private);
@@ -197,6 +228,13 @@ static struct ubase_dbg_cmd_info unic_dbg_cmd[] = {
 		.support = unic_dbg_dentry_support,
 		.init = ubase_dbg_seq_file_init,
 		.read_func = unic_dbg_dump_page_pool_info,
+	}, {
+		.name = "rss_cfg_hw",
+		.dentry_index = UNIC_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_rss_cfg_hw,
 	}, {
 		.name = "promisc_cfg_hw",
 		.dentry_index = UNIC_DBG_DENTRY_ROOT,

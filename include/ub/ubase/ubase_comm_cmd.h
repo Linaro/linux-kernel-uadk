@@ -49,6 +49,7 @@ enum ubase_opcode_type {
 	/* TP commands */
 	UBASE_OPC_TP_TIMER_VA_CONFIG	= 0x3007,
 	UBASE_OPC_TP_EXTDB_VA_CONFIG	= 0x3008,
+	UBASE_OPC_TP_RSS_CONFIG		= 0x300B,
 	UBASE_OPC_QUERY_CTP_VL_OFFSET	= 0x3112,
 
 	/* TA commands */

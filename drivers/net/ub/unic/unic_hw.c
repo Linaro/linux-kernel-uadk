@@ -758,3 +758,101 @@ err_send_cmd:
 	clear_bit(UNIC_STATE_FEC_STATS_UPDATING, &unic_dev->state);
 	return ret;
 }
+
+static void unic_set_rss_tc0_param(struct unic_channels *channels,
+				   u16 jfr_cnt, __le16 *jfr_idx)
+{
+	struct unic_vl *vl = &channels->vl;
+	u16 jfr_index;
+	u16 i;
+
+	if (!vl->queue_count[0])
+		return;
+
+	for (i = 0; i < jfr_cnt; i++) {
+		jfr_index = vl->queue_offset[0] +
+			    i % vl->queue_count[0];
+		jfr_idx[i] = cpu_to_le16(jfr_index);
+	}
+}
+
+static void unic_set_rss_multi_tc_param(struct auxiliary_device *adev,
+					struct unic_channels *channels,
+					u16 jfr_cnt, __le16 *jfr_idx)
+{
+	struct ubase_adev_caps *unic_caps = ubase_get_unic_caps(adev);
+	struct unic_vl *vl = &channels->vl;
+	u16 jfr_index;
+	u16 queue_num;
+	u16 j, k = 0;
+	u16 i;
+
+	queue_num = (u16)unic_caps->jfr.max_cnt / channels->rss_vl_num;
+	for (i = 0; i < channels->rss_vl_num; i++) {
+		if (!vl->queue_count[i])
+			return;
+		for (j = 0; j < queue_num && k < jfr_cnt; j++, k++) {
+			jfr_index = vl->queue_offset[i] +
+				    j % vl->queue_count[i];
+			jfr_idx[k] = cpu_to_le16(jfr_index);
+		}
+	}
+}
+
+int unic_set_rss_tc_mode(struct unic_dev *unic_dev, u8 tc_vaild)
+{
+	struct auxiliary_device *adev = unic_dev->comdev.adev;
+	struct unic_channels *channels = &unic_dev->channels;
+	enum ubase_reset_stage reset_stage;
+	struct ubase_adev_caps *unic_caps;
+	struct unic_cfg_rss_cmd req = {0};
+	struct ubase_cmd_buf in;
+	int ret;
+
+	reset_stage = ubase_get_reset_stage(adev);
+	if (reset_stage == UBASE_RESET_STAGE_UNINIT)
+		return -EBUSY;
+
+	unic_caps = ubase_get_unic_caps(adev);
+
+	req.tc_vaild = tc_vaild;
+	req.tc_mode = channels->rss_vl_num <= 1 ? UNIC_RSS_TC_MODE0 :
+		      UNIC_RSS_TC_MODE1;
+	req.jfr_reg_num = min(unic_caps->jfr.max_cnt, UNIC_RSS_MAX_CNT);
+	if (req.tc_vaild) {
+		if (req.tc_mode == UNIC_RSS_TC_MODE0)
+			unic_set_rss_tc0_param(channels, req.jfr_reg_num,
+					       req.jfr_idx);
+		else
+			unic_set_rss_multi_tc_param(adev, channels,
+						    req.jfr_reg_num,
+						    req.jfr_idx);
+	}
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_TP_RSS_CONFIG, false, sizeof(req),
+			     &req);
+	ret = ubase_cmd_send_in(adev, &in);
+	if (ret)
+		dev_err(adev->dev.parent, "failed to set rss tc mode. ret = %d.\n",
+			ret);
+
+	return ret;
+}
+
+int unic_query_rss_cfg(struct unic_dev *unic_dev, struct unic_cfg_rss_cmd *resp)
+{
+	struct unic_cfg_rss_cmd req = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_TP_RSS_CONFIG, true, sizeof(req),
+			     &req);
+	ubase_fill_inout_buf(&out, UBASE_OPC_TP_RSS_CONFIG, true, sizeof(*resp),
+			     resp);
+	ret = ubase_cmd_send_inout(unic_dev->comdev.adev, &in, &out);
+	if (ret)
+		unic_err(unic_dev,
+			 "failed to query rss cfg hw, ret = %d.\n", ret);
+
+	return ret;
+}

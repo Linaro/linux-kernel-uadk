@@ -269,6 +269,11 @@ static inline bool unic_dev_fec_supported(struct unic_dev *unic_dev)
 	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_FEC_B);
 }
 
+static inline bool unic_dev_rss_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_RSS_B);
+}
+
 static inline bool unic_dev_tc_speed_limit_supported(struct unic_dev *unic_dev)
 {
 	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_TC_SPEED_LIMIT_B);

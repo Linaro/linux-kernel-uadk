@@ -8,6 +8,7 @@
 #include <linux/string_choices.h>
 
 #include "ubus.h"
+#include "reset.h"
 #include "port.h"
 
 struct ub_port_attribute {
@@ -147,6 +148,26 @@ static ssize_t asy_link_width_show(struct ub_port *port, char *buf)
 		return sysfs_emit(buf, "Not Support\n");
 }
 UB_PORT_ATTR_RO(asy_link_width);
+
+static ssize_t port_reset_store(struct ub_port *port, const char *buf,
+				size_t count)
+{
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret || (val != 1)) {
+		ub_err(port->uent, "Invalid val for port reset\n");
+		return -EINVAL;
+	}
+
+	ret = ub_port_reset_function(port);
+	if (ret < 0)
+		return ret;
+
+	return count;
+}
+UB_PORT_ATTR_WO(port_reset);
 
 static ssize_t glb_qdlws_show(struct ub_port *port, char *buf)
 {
@@ -310,6 +331,7 @@ static struct attribute *ub_port_default_attrs[] = {
 	&ub_port_attr_neighbor_port_idx.attr,
 	&ub_port_attr_neighbor_guid.attr,
 	&ub_port_attr_neighbor.attr,
+	&ub_port_attr_port_reset.attr,
 	NULL
 };
 
@@ -508,6 +530,7 @@ static void ub_port_init(struct ub_entity *uent, struct ub_port *port)
 	port->type = PHYSICAL;
 	port->cna = 0;
 	port->r_uent = NULL;
+	port->link_state = LINK_STATE_NORMAL;
 	port->r_index = 0;
 	port->r_guid = guid_null;
 	bitmap_zero(port->cna_maps, UB_MAX_CNA_NUM);

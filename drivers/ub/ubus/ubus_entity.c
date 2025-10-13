@@ -335,6 +335,8 @@ void ub_entity_add(struct ub_entity *uent, void *ctx)
 	dma_set_max_seg_size(&uent->dev, UB_DEFAULT_MAX_SEG_SIZE);
 	dma_set_seg_boundary(&uent->dev, GENMASK(31, 0));
 
+	uent->state_saved = false;
+
 	if (is_primary(uent) || is_p_device(uent)) {
 		ubc = (struct ub_bus_controller *)ctx;
 		node = ub_ubc_to_node(ubc);

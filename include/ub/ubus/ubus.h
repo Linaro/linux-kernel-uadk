@@ -105,6 +105,12 @@ enum ub_port_type {
 #define UB_MAX_CNA_NUM SZ_64K
 #define UB_PORT_CAP_NUM SZ_256
 
+enum ub_link_state {
+	LINK_STATE_NORMAL = 0,
+	LINK_STATE_RESETING = 1,
+	LINK_STATE_DONE = 2,
+};
+
 struct ub_port {
 	struct ub_entity *uent;
 	u16 index;
@@ -119,6 +125,8 @@ struct ub_port {
 	DECLARE_BITMAP(cna_maps, UB_MAX_CNA_NUM);
 	/* cap cache */
 	DECLARE_BITMAP(cap_map, UB_PORT_CAP_NUM);
+
+	enum ub_link_state link_state;
 };
 
 struct ue_map {
@@ -167,9 +175,14 @@ struct ub_entity {
 	u16 port_nums;
 	struct ub_port *ports;
 
+	unsigned int state_saved : 1;
+
 	/* entity DMA info */
 	u64 dma_mask;
 	struct device_dma_parameters dma_parms;
+
+	/* UB reset info */
+	unsigned int reset_fn : 1;
 
 	/* entity route info */
 	struct list_head cna_list; /* store distance for cna in route table */
@@ -179,9 +192,19 @@ struct ub_entity {
 	/* UB entity TID */
 	u32 tid;
 
+	/* UB saved config space */
+	u32 saved_config_space[24]; /* Config space saved at reset time */
+
 	u32 support_feature;
 
 	u16 upi;
+};
+
+/* UB bus error event callbacks */
+struct ub_error_handlers {
+	/* UB function reset prepare or completed */
+	void (*ub_reset_prepare)(struct ub_entity *uent);
+	void (*ub_reset_done)(struct ub_entity *uent);
 };
 
 struct ub_dynids {
@@ -218,6 +241,7 @@ struct ub_dynids {
  *		context, so it can sleep.
  * @shutdown:	Hook into reboot_notifier_list (kernel/sys.c).
  *		Intended to stop any idling operations.
+ * @err_handler: Error handling callbacks.
  * @groups:	Sysfs attribute groups.
  * @dev_groups: Attributes attached to the device that will be
  *		created once it is bound to the driver.
@@ -240,6 +264,7 @@ struct ub_driver {
 	/* entity removed (NULL if not a hot-plug capable driver) */
 	void (*remove)(struct ub_entity *uent);
 	void (*shutdown)(struct ub_entity *uent);
+	const struct ub_error_handlers *err_handler;
 	const struct attribute_group **groups;
 	const struct attribute_group **dev_groups;
 	struct device_driver driver;
@@ -400,6 +425,33 @@ int ub_register_share_port(struct ub_entity *uent, u16 port_id,
  */
 void ub_unregister_share_port(struct ub_entity *uent, u16 port_id,
 			      struct ub_share_port_ops *ops);
+
+/**
+ * ub_reset_entity() - Function entity level reset.
+ * @ent: UB entity.
+ *
+ * Reset a single entity without affecting other entities, If you want to reuse
+ * the entity after reset, you need to re-initialize it.
+ *
+ * Context: Any context
+ * Return: 0 if success, or %-EINVAL if entity not support elr,
+ * or %-ENOTTY if entity can't be reset safely,
+ * or -EBUSY if can't get device_trylock(), or other failed negative values.
+ */
+int ub_reset_entity(struct ub_entity *ent);
+
+/**
+ * ub_device_reset() - Device level reset.
+ * @ent: UB entity.
+ *
+ * Reset Device, include all entities under the device, If you want to reuse
+ * the device after reset, you need to re-initialize it.
+ *
+ * Context: Any context
+ * Return: 0 if success, or %-EINVAL if parameters invalid,
+ * or %-EIO if device can't reset now, can try later.
+ */
+int ub_device_reset(struct ub_entity *ent);
 
 /**
  * ub_cfg_read_byte() - 1 byte configuration access read.
@@ -584,6 +636,10 @@ static inline int ub_register_share_port(struct ub_entity *uent, u16 port_id,
 { return -ENODEV; }
 static inline void ub_unregister_share_port(struct ub_entity *uent, u16 port_id,
 					    struct ub_share_port_ops *ops) {}
+static inline int ub_reset_entity(struct ub_entity *uent)
+{ return -ENODEV; }
+static inline int ub_device_reset(struct ub_entity *uent)
+{ return -ENODEV; }
 static inline int
 __ub_register_driver(struct ub_driver *drv, struct module *owner,
 		     const char *mod_name)

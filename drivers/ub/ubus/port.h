@@ -23,5 +23,9 @@ int ub_ports_add(struct ub_entity *uent);
 void ub_ports_del(struct ub_entity *uent);
 int ub_ports_setup(struct ub_entity *uent);
 void ub_ports_unset(struct ub_entity *uent);
+void ub_notify_share_port(struct ub_port *port,
+			  enum ub_share_port_notify_type type);
+
+int ub_port_write_dword(struct ub_port *port, u32 pos, u32 val);
 
 #endif /* __PORT_H__ */

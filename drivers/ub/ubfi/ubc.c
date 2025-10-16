@@ -14,11 +14,19 @@
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
 #include <linux/types.h>
+#include <ub/ubfi/ubfi.h>
 #include <ub/ubus/ubus.h>
 
 #include "ubrt.h"
 #include "ub_fi.h"
 #include "ubc.h"
+
+#define UB_MSGQ_INT_TRIGGER_MASK BIT(0)
+#define UB_MSGQ_INT_POLARITY_MASK BIT(1)
+
+#define ACPI_UBC_DEVICE_HID "HISI0541"
+
+#define to_ub_ubc(n) container_of(n, struct ub_bus_controller, dev)
 
 struct list_head ubc_list;
 EXPORT_SYMBOL_GPL(ubc_list);
@@ -40,19 +48,423 @@ EXPORT_SYMBOL_GPL(ubc_feature);
 
 static bool cluster_mode;
 
+static acpi_status acpi_processor_ubc(acpi_handle handle, u32 lvl,
+				      void *context, void **rv)
+{
+	return AE_OK;
+}
+
 static int acpi_update_ubc_msi_domain(void)
 {
+	struct ub_bus_controller *ubc;
+	acpi_status status;
+
+	list_for_each_entry(ubc, &ubc_list, node) {
+		/* Get UB Bus Controller from DSDT */
+		status = acpi_get_devices(ACPI_UBC_DEVICE_HID,
+					  acpi_processor_ubc,
+					  ubc, NULL);
+		if (ACPI_FAILURE(status))
+			return -ENODEV;
+	}
+
 	return 0;
 }
 
 static int dts_update_ubc_msi_domain(void)
 {
+	struct ub_bus_controller *ubc;
+	struct device_node *np;
+	u32 ctl_no;
+	bool find;
+	int ret;
+
+	for_each_compatible_node(np, NULL, "ub,ubc") {
+		ret = of_property_read_u32(np, "index", &ctl_no);
+		if (ret) {
+			pr_err("dts can't find ubc index\n");
+			continue;
+		}
+
+		find = false;
+		list_for_each_entry(ubc, &ubc_list, node) {
+			if (ubc->ctl_no == ctl_no) {
+				find = true;
+				break;
+			}
+		}
+		if (!find) {
+			pr_err("can't find ubc no=%u\n", ctl_no);
+			continue;
+		}
+	}
 	return 0;
+}
+
+static int parse_ubc_info(struct ubc_node *node, struct ub_bus_controller *ubc)
+{
+	ubc->attr.int_id_start = node->int_id_start;
+	ubc->attr.int_id_end = node->int_id_end;
+	ubc->attr.hpa_base = node->hpa_base;
+	ubc->attr.hpa_size = node->hpa_size;
+	ubc->attr.mem_size_limit = node->mem_size_limit;
+	ubc->attr.dma_cca = node->dma_cca;
+	ubc->attr.ummu_map = node->ummu_mapping;
+	ubc->attr.proximity_domain = node->proximity_domain;
+	ubc->attr.queue_addr = node->msg_queue_base;
+	ubc->attr.queue_size = node->msg_queue_size;
+	ubc->attr.queue_depth = node->msg_queue_depth;
+	ubc->attr.msg_int = node->msg_int;
+	ubc->attr.msg_int_attr = node->msg_int_attr;
+	ubc->attr.ubc_guid_low = node->ubc_guid_low;
+	ubc->attr.ubc_guid_high = node->ubc_guid_high;
+	pr_info("ubc interrupt id[0x%x-0x%x], ubc_guid[%llx-%llx], msg_int[0x%x]\n",
+		ubc->attr.int_id_start, ubc->attr.int_id_end,
+		ubc->attr.ubc_guid_high, ubc->attr.ubc_guid_low,
+		ubc->attr.msg_int);
+
+	ubc->data = kzalloc(UBC_VENDOR_INFO_SIZE, GFP_KERNEL);
+	if (!ubc->data)
+		return -ENOMEM;
+	memcpy(ubc->data, node->vendor_info, UBC_VENDOR_INFO_SIZE);
+
+	ubc->cluster = cluster_mode;
+	pr_info("ubc real cluster mode is %d\n", ubc->cluster);
+	INIT_LIST_HEAD(&ubc->resources);
+	(void)snprintf(ubc->name, sizeof(ubc->name), "UB_BUS_CTL%u", ubc->ctl_no);
+	pr_info("create ubc success, ubc name=%s\n", ubc->name);
+	return 0;
+}
+
+static int ubc_dev_new_resource_entry(struct resource *res,
+				      struct list_head *resources)
+{
+	struct resource_entry *rentry;
+
+	rentry = resource_list_create_entry(NULL, 0);
+	if (!rentry)
+		return -ENOMEM;
+
+	*rentry->res = *res;
+	rentry->offset = 0;
+	resource_list_add_tail(rentry, resources);
+	return 0;
+}
+
+static int dts_register_irq(u32 ctl_no, int irq_type, const char *name,
+			    struct resource *res)
+{
+	struct device_node *np;
+	u32 irq = 0, index;
+	int ret;
+
+	for_each_compatible_node(np, NULL, "ub,ubc") {
+		ret = of_property_read_u32(np, "index", &index);
+		if (ret) {
+			pr_err("dts can't find ubc index\n");
+			continue;
+		}
+		if (ctl_no != index)
+			continue;
+
+		irq = irq_of_parse_and_map(np, irq_type);
+		if (!irq)
+			continue;
+	}
+
+	if (!irq) {
+		pr_err("irq_type %d parse and map fail\n", irq_type);
+		return -EINVAL;
+	}
+	pr_info("irq_type[%d] register success, irq=%u\n", irq_type, irq);
+
+	res->name = name;
+	res->start = irq;
+	res->end = irq;
+	res->flags = IORESOURCE_IRQ;
+	return 0;
+}
+
+static void remove_ubc_resource(struct ub_bus_controller *ubc)
+{
+	struct resource_entry *entry;
+	struct resource *res;
+
+	resource_list_for_each_entry(entry, &ubc->resources) {
+		res = entry->res;
+		if (res->parent && (res->flags & IORESOURCE_MEM))
+			release_resource(res);
+		if ((res->flags & IORESOURCE_IRQ)
+		    && !strcmp(res->name, "UBUS")
+		    && !ubc->ctl_no) {
+			if (bios_mode == ACPI)
+				ubrt_unregister_gsi(ubc->attr.msg_int);
+			else if (bios_mode == DTS)
+				irq_dispose_mapping(ubc->queue_virq);
+		}
+	}
+
+	resource_list_free(&ubc->resources);
+}
+
+static int add_ubc_mmio_resource(struct ubc_node *node,
+				 struct ub_bus_controller *ubc)
+{
+	struct resource res = {};
+	int ret;
+
+	res.start = node->hpa_base;
+	res.end = node->hpa_base + node->hpa_size - 1;
+	res.flags = IORESOURCE_MEM;
+	res.name = ubc->name;
+
+	ret = ubc_dev_new_resource_entry(&res, &ubc->resources);
+	if (!ret)
+		pr_info("add %s resource success, %pR\n", res.name, &res);
+
+	return ret;
+}
+
+static int add_ubc_irq_resource(struct ubc_node *node,
+				struct ub_bus_controller *ubc)
+{
+	int hwirq, trigger, polarity, ret;
+	struct resource res = {};
+
+	hwirq = ubc->attr.msg_int;
+	trigger = !!(ubc->attr.msg_int_attr & UB_MSGQ_INT_TRIGGER_MASK);
+	polarity = !!(ubc->attr.msg_int_attr & UB_MSGQ_INT_POLARITY_MASK);
+
+	if (bios_mode == ACPI)
+		ret = ubrt_register_gsi(hwirq, trigger, polarity, "UBUS", &res);
+	else if (bios_mode == DTS)
+		ret = dts_register_irq(ubc->ctl_no, 0, "UBUS", &res);
+	else
+		ret = -EINVAL;
+
+	if (ret) {
+		pr_err("register irq fail, ret=%d\n", ret);
+		return ret;
+	}
+
+	ret = ubc_dev_new_resource_entry(&res, &ubc->resources);
+	if (ret)
+		goto out;
+
+	ubc->queue_virq = res.start;
+
+	pr_info("ubc msgq irq register success\n");
+	return 0;
+
+out:
+	if (bios_mode == ACPI)
+		ubrt_unregister_gsi(hwirq);
+	else if (bios_mode == DTS)
+		irq_dispose_mapping(res.start);
+
+	return ret;
+}
+
+static void ub_release_ubc_dev(struct device *dev)
+{
+	struct ub_bus_controller *ubc = to_ub_ubc(dev);
+	struct device_node *usi_np;
+
+	pr_info("%s release ub bus controller device.\n", ubc->name);
+
+	if (bios_mode == DTS) {
+		usi_np = irq_domain_get_of_node(dev->msi.domain);
+		if (usi_np)
+			of_node_put(usi_np);
+	}
+
+	remove_ubc_resource(ubc);
+	kfree(ubc->data);
+	list_del(&ubc->node);
+	kfree(ubc);
+}
+
+static int init_ubc(struct ub_bus_controller *ubc)
+{
+	struct device *dev = &ubc->dev;
+	int ret;
+
+	INIT_LIST_HEAD(&ubc->devs);
+	device_initialize(dev);
+	set_dev_node(dev, pxm_to_node(ubc->attr.proximity_domain));
+
+	dev->release = ub_release_ubc_dev;
+	dev->coherent_dma_mask = GENMASK_ULL(31, 0);
+	dev_set_name(dev, "ub_bus_controller%u", ubc->ctl_no);
+
+	ret = device_add(dev);
+	if (ret) {
+		pr_err("Add ub bus controller device failed.\n");
+		put_device(&ubc->dev);
+	}
+
+	return ret;
+}
+
+static void ubc_validate_resources(struct list_head *resources,
+				   unsigned long type)
+{
+	struct resource_entry *tmp, *entry, *entry2;
+	struct resource *res1, *res2, *root = NULL;
+	LIST_HEAD(list);
+
+	WARN_ON((type & IORESOURCE_MEM) == 0);
+	root = &iomem_resource;
+
+	list_splice_init(resources, &list);
+	resource_list_for_each_entry_safe(entry, tmp, &list) {
+		bool can_free = false;
+		resource_size_t end;
+
+		res1 = entry->res;
+		if (!(type & res1->flags))
+			goto next;
+
+		end = min(res1->end, root->end);
+		if (end <= res1->start) {
+			pr_info("ub bus controller resources %pR (ignored, not CPU addressable)\n",
+				res1);
+			can_free = true;
+			goto next;
+		} else if (res1->end != end) {
+			pr_info("ub bus controller resources %pR ([%#llx-%#llx] ignored, not CPU addressable)\n",
+				res1, (unsigned long long)end + 1,
+				(unsigned long long)res1->end);
+			res1->end = end;
+		}
+
+		resource_list_for_each_entry(entry2, resources) {
+			res2 = entry2->res;
+			if (!(type & res2->flags))
+				continue;
+
+			if (resource_overlaps(res1, res2)) {
+				res2->start = min(res1->start, res2->start);
+				res2->end = max(res1->end, res2->end);
+				pr_warn("ub bus controller resources expanded to %pR; %pR ignored\n",
+					res2, res1);
+				can_free = true;
+				goto next;
+			}
+		}
+
+next:
+		resource_list_del(entry);
+		if (can_free)
+			resource_list_free_entry(entry);
+		else
+			resource_list_add_tail(entry, resources);
+	}
+}
+
+static void ubc_device_add_resources(struct list_head *resources)
+{
+	struct resource *res, *root = NULL;
+	struct resource_entry *entry, *tmp;
+	int ret;
+
+	resource_list_for_each_entry_safe(entry, tmp, resources) {
+		res = entry->res;
+		if (!(res->flags & IORESOURCE_MEM))
+			continue;
+
+		root = &iomem_resource;
+		if (res == root)
+			continue;
+
+		ret = insert_resource(root, res);
+		if (ret) {
+			pr_warn("conflict, ignoring controller resources %pR\n",
+				res);
+			resource_list_destroy_entry(entry);
+		}
+	}
+}
+
+static void ubc_declare_resources(struct ub_bus_controller *ubc)
+{
+	struct resource_entry *window;
+	resource_size_t offset;
+	char addr[SZ_64], *fmt;
+	struct resource *res;
+
+	/* Show ub bus controller's resources */
+	resource_list_for_each_entry(window, &ubc->resources) {
+		offset = window->offset;
+		res = window->res;
+		if (offset) {
+			fmt = " (bus address [0x%#010llx-0x%#010llx])";
+			snprintf(addr, sizeof(addr), fmt,
+				 (unsigned long long)(res->start - offset),
+				 (unsigned long long)(res->end - offset));
+		} else {
+			addr[0] = '\0';
+		}
+
+		pr_info("ubc resource %pR%s\n", res, addr);
+	}
+}
+
+static void ubc_check_and_add_resources(struct ub_bus_controller *ubc)
+{
+	struct resource_entry *entry, *tmp;
+
+	resource_list_for_each_entry_safe(entry, tmp, &ubc->resources)
+		if (entry->res->flags & IORESOURCE_DISABLED)
+			resource_list_destroy_entry(entry);
+
+	ubc_validate_resources(&ubc->resources, IORESOURCE_MEM);
+
+	/* Insert resources into kernel */
+	ubc_device_add_resources(&ubc->resources);
+
+	ubc_declare_resources(ubc);
 }
 
 static int create_ubc(struct ubc_node *node, u32 ctl_no)
 {
+	struct ub_bus_controller *ubc;
+	int ret;
+
+	ubc = kzalloc(sizeof(*ubc), GFP_KERNEL);
+	if (!ubc)
+		return -ENOMEM;
+	ubc->ctl_no = ctl_no;
+
+	ret = parse_ubc_info(node, ubc);
+	if (ret)
+		goto free_ubc;
+
+	ret = add_ubc_mmio_resource(node, ubc);
+	if (ret)
+		goto free_vendor;
+
+	ret = add_ubc_irq_resource(node, ubc);
+	if (ret)
+		goto free_resource;
+
+	/* after init_ubc, ubc resources will be released in the dev->release */
+	ret = init_ubc(ubc);
+	if (ret)
+		return ret;
+
+	ubc_check_and_add_resources(ubc);
+	list_add_tail(&ubc->node, &ubc_list);
+
 	return 0;
+
+free_resource:
+	remove_ubc_resource(ubc);
+free_vendor:
+	kfree(ubc->data);
+free_ubc:
+	kfree(ubc);
+	return ret;
 }
 
 static int parse_ubc_table(void *info_node)
@@ -99,6 +511,12 @@ static int parse_ubc_table(void *info_node)
 
 static void ub_destroy_bus_controllers(void)
 {
+	struct ub_bus_controller *ubc, *tmp;
+
+	list_for_each_entry_safe_reverse(ubc, tmp, &ubc_list, node)
+		device_unregister(&ubc->dev);
+
+	pr_info("ubc destroy success\n");
 }
 
 void destroy_ubc(void)

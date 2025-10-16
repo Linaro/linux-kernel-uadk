@@ -137,15 +137,40 @@ struct ub_driver {
 	struct ub_dynids dynids;
 };
 
+struct ubc_common_attr {
+	u32 int_id_start;
+	u32 int_id_end;
+	u64 hpa_base;
+	u64 hpa_size;
+	u8 mem_size_limit;
+	u8 dma_cca;
+	u16 ummu_map;
+	u16 proximity_domain;
+	u64 queue_addr;
+	u64 queue_size;
+	u16 queue_depth;
+	u16 msg_int;
+	u8 msg_int_attr;
+	u64 ubc_guid_low;
+	u64 ubc_guid_high;
+};
+
 struct ub_bus_controller {
 	struct device dev;
 	struct ub_entity *uent;
+	struct ubc_common_attr attr;
+	u32 queue_virq;
+	char name[16];
 
 	u32 ctl_no;
 	struct message_device *mdev;
+	struct list_head resources;
 	struct list_head node;
 	struct list_head devs;
 	struct ub_bus_controller_ops *ops;
+	bool cluster;
+
+	void *data;
 };
 
 static inline struct ub_driver *to_ub_driver(struct device_driver *drv)

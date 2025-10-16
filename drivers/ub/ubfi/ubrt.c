@@ -9,6 +9,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 
+#include "ubc.h"
 #include "ubrt.h"
 
 #define UBIOS_SIG_UBC "ubc"
@@ -71,6 +72,7 @@ void ub_table_put(void *va)
 
 void uninit_ub_nodes(void)
 {
+	destroy_ubc();
 }
 
 int handle_acpi_ubrt(void)
@@ -85,6 +87,7 @@ int handle_acpi_ubrt(void)
 		sub_table = &acpi_table->sub_table[i];
 		switch (sub_table->type) {
 		case UB_BUS_CONTROLLER_TABLE:
+			ret = handle_ubc_table(sub_table->pointer);
 			break;
 		default:
 			pr_warn("Ignore sub table: type %u\n", sub_table->type);
@@ -125,7 +128,7 @@ int handle_dts_ubrt(void)
 		ub_table_put(header);
 
 		if (!strncmp(name, UBIOS_SIG_UBC, strlen(UBIOS_SIG_UBC)))
-			ret = 0;
+			ret = handle_ubc_table(ubios_table->sub_tables[i]);
 		else
 			pr_warn("Ignore sub table: %s\n", name);
 

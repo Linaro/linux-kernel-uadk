@@ -131,6 +131,11 @@ struct ub_driver {
 	struct ub_dynids dynids;
 };
 
+struct ub_bus_controller {
+	struct device dev;
+	struct list_head node;
+};
+
 static inline struct ub_driver *to_ub_driver(struct device_driver *drv)
 {
 	return drv ? container_of(drv, struct ub_driver, driver) : NULL;

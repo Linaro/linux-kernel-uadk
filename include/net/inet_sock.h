@@ -91,6 +91,10 @@ struct inet_request_sock {
 				comp_ok	   : 1,
 #endif
 				smc_ok	   : 1;
+#if IS_ENABLED(CONFIG_UB_UMS)
+	u16			ums_ok	   : 1,
+				unused	   : 15;
+#endif
 	u32                     ir_mark;
 	union {
 		struct ip_options_rcu __rcu	*ireq_opt;

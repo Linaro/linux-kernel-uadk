@@ -4115,6 +4115,24 @@ static bool tcp_parse_comp_option(const struct tcphdr *th,
 	return false;
 }
 
+static bool tcp_parse_ums_option(const struct tcphdr *th,
+			      struct tcp_options_received *opt_rx,
+			      const unsigned char *ptr,
+			      int opsize)
+{
+#if IS_ENABLED(CONFIG_UB_UMS)
+	if (static_branch_unlikely(&tcp_have_ums)) {
+		if (th->syn && !(opsize & 1) &&
+		    opsize >= TCPOLEN_EXP_UMS_BASE &&
+		    get_unaligned_be32(ptr) == TCPOPT_UMS_MAGIC) {
+			opt_rx->ums_ok = 1;
+			return true;
+		}
+	}
+#endif
+	return false;
+}
+
 /* Try to parse the MSS option from the TCP header. Return 0 on failure, clamped
  * value on success.
  */
@@ -4275,6 +4293,10 @@ void tcp_parse_options(const struct net *net,
 					break;
 
 				if (tcp_parse_comp_option(th, opt_rx, ptr,
+				    opsize))
+					break;
+
+				if (tcp_parse_ums_option(th, opt_rx, ptr,
 				    opsize))
 					break;
 
@@ -6328,6 +6350,16 @@ static void smc_check_reset_syn(struct tcp_sock *tp)
 #endif
 }
 
+static void ums_check_reset_syn(struct tcp_sock *tp)
+{
+#if IS_ENABLED(CONFIG_UB_UMS)
+	if (static_branch_unlikely(&tcp_have_ums)) {
+		if (tp->syn_ums && !tp->rx_opt.ums_ok)
+			tp->syn_ums = 0;
+	}
+#endif
+}
+
 static void tcp_try_undo_spurious_syn(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -6459,6 +6491,8 @@ consume:
 		WRITE_ONCE(tp->copied_seq, tp->rcv_nxt);
 
 		smc_check_reset_syn(tp);
+
+		ums_check_reset_syn(tp);
 
 		smp_mb();
 
@@ -6975,6 +7009,9 @@ static void tcp_openreq_init(struct request_sock *req,
 #if IS_ENABLED(CONFIG_TCP_COMP)
 	ireq->comp_ok = rx_opt->comp_ok;
 #endif
+#if IS_ENABLED(CONFIG_UB_UMS)
+	ireq->ums_ok = rx_opt->ums_ok;
+#endif
 }
 
 struct request_sock *inet_reqsk_alloc(const struct request_sock_ops *ops,
@@ -7156,6 +7193,9 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 
 	if (IS_ENABLED(CONFIG_SMC) && want_cookie)
 		tmp_opt.smc_ok = 0;
+
+	if (IS_ENABLED(CONFIG_UB_UMS) && want_cookie)
+		tmp_opt.ums_ok = 0;
 
 	tmp_opt.tstamp_ok = tmp_opt.saw_tstamp;
 	tcp_openreq_init(req, &tmp_opt, skb, sk);

@@ -310,6 +310,11 @@ EXPORT_SYMBOL(tcp_have_smc);
 DEFINE_STATIC_KEY_FALSE(tcp_have_comp);
 #endif
 
+#if IS_ENABLED(CONFIG_UB_UMS)
+DEFINE_STATIC_KEY_FALSE(tcp_have_ums);
+EXPORT_SYMBOL(tcp_have_ums);
+#endif
+
 /*
  * Current number of TCP sockets.
  */

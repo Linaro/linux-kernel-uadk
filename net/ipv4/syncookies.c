@@ -395,6 +395,9 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb)
 	ireq->comp_ok = 0;
 #endif
 
+	if (IS_ENABLED(CONFIG_UB_UMS))
+		ireq->ums_ok = 0;
+
 	ireq->ir_iif = inet_request_bound_dev_if(sk, skb);
 
 	/* We throwed the options of the initial SYN away, so we hope

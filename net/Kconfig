@@ -74,6 +74,14 @@ source "net/smc/Kconfig"
 source "net/xdp/Kconfig"
 source "net/oenetcls/Kconfig"
 
+config UB_UMS
+	tristate "Enable UB Memory based Socket(UMS)"
+	default m
+	help
+	  UB Memory based Socket(UMS) is compatiable with the standard socket API and
+	  based on the UB network for data transmission, transparently accelerating
+	  TCP communication
+
 config NET_HANDSHAKE
 	bool
 	depends on SUNRPC || NVME_TARGET_TCP || NVME_TCP

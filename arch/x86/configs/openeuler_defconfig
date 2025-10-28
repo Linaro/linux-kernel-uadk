@@ -9505,9 +9505,3 @@ CONFIG_ARCH_USE_MEMTEST=y
 # end of Kernel hacking
 
 CONFIG_KWORKER_NUMA_AFFINITY=y
-
-#
-# unified bus
-#
-CONFIG_UB_UBL=n
-# end of unified bus

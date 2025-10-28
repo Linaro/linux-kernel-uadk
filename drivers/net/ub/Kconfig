@@ -6,6 +6,7 @@
 config UB_UBL
 	default n
 	tristate "UB link support"
+	depends on ARM64
 	help
 	  This enables UB link support which is
 	  used to replace traditional ethernet layer.

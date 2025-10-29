@@ -7,6 +7,237 @@
 #include <ub/ubase/ubase_comm_debugfs.h>
 
 #include "ubase_debugfs.h"
+#include "ubase_hw.h"
+#include "ubase_mailbox.h"
+#include "ubase_tp.h"
+#include "ubase_ctx_debugfs.h"
+
+#define UBASE_DEFAULT_CTXGN 0
+
+static void ubase_dump_eq_ctx(struct seq_file *s, struct ubase_eq *eq)
+{
+	seq_printf(s, "%-5u", eq->eqn);
+	seq_printf(s, "%-13u", eq->entries_num);
+	seq_printf(s, "%-7u", eq->state);
+	seq_printf(s, "%-8u", eq->arm_st);
+	seq_printf(s, "%-10u", eq->eqe_size);
+	seq_printf(s, "%-11u", eq->eq_period);
+	seq_printf(s, "%-14u", eq->coalesce_cnt);
+	seq_printf(s, "%-6u", eq->irqn);
+	seq_printf(s, "%-10u", eq->eqc_irqn);
+	seq_printf(s, "%-12u", eq->cons_index);
+	seq_puts(s, "\n");
+}
+
+static void ubase_eq_ctx_titles_print(struct seq_file *s)
+{
+	seq_puts(s, "EQN  ENTRIES_NUM  STATE  ARM_ST  EQE_SIZE  EQ_PERIOD  ");
+	seq_puts(s, "COALESCE_CNT  IRQN  EQC_IRQN  CONS_INDEX\n");
+}
+
+static void ubase_dump_aeq_ctx(struct seq_file *s, struct ubase_dev *udev, u32 idx)
+{
+	struct ubase_aeq *aeq = &udev->irq_table.aeq;
+	struct ubase_eq *eq = &aeq->eq;
+
+	ubase_dump_eq_ctx(s, eq);
+}
+
+static void ubase_dump_ceq_ctx(struct seq_file *s, struct ubase_dev *udev, u32 idx)
+{
+	struct ubase_ceq *ceq = &udev->irq_table.ceqs.ceq[idx];
+	struct ubase_eq *eq = &ceq->eq;
+
+	ubase_dump_eq_ctx(s, eq);
+}
+
+static void ubase_tpg_ctx_titles_print(struct seq_file *s)
+{
+	seq_puts(s, "CHANNEL_ID  TPGN     TP_SHIFT  VALID_TP  ");
+	seq_puts(s, "START_TPN  TPG_STATE  TP_CNT\n");
+}
+
+static void ubase_dump_tpg_ctx(struct seq_file *s, struct ubase_dev *udev, u32 idx)
+{
+	struct ubase_tpg *tpg = &udev->tp_ctx.tpg[idx];
+
+	seq_printf(s, "%-12u", idx);
+	seq_printf(s, "%-9u", tpg->mb_tpgn);
+	seq_printf(s, "%-10u", tpg->tp_shift);
+	seq_printf(s, "%-10lu", tpg->valid_tp);
+	seq_printf(s, "%-11u", tpg->start_tpn);
+	seq_printf(s, "%-11u", tpg->tpg_state);
+	seq_printf(s, "%-8u", tpg->tp_cnt);
+	seq_puts(s, "\n");
+}
+
+enum ubase_dbg_ctx_type {
+	UBASE_DBG_AEQ_CTX = 0,
+	UBASE_DBG_CEQ_CTX,
+	UBASE_DBG_TPG_CTX,
+	UBASE_DBG_TP_CTX,
+};
+
+static u32 ubase_get_ctx_num(struct ubase_dev *udev,
+			     enum ubase_dbg_ctx_type ctx_type, u32 ctxgn)
+{
+	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;
+	u32 ctx_num = 0;
+
+	switch (ctx_type) {
+	case UBASE_DBG_AEQ_CTX:
+		ctx_num = udev->caps.dev_caps.num_aeq_vectors;
+		break;
+	case UBASE_DBG_CEQ_CTX:
+		ctx_num = udev->irq_table.ceqs.num;
+		break;
+	case UBASE_DBG_TPG_CTX:
+		ctx_num = unic_caps->tpg.max_cnt;
+		break;
+	case UBASE_DBG_TP_CTX:
+		spin_lock(&udev->tp_ctx.tpg_lock);
+		if (udev->tp_ctx.tpg)
+			ctx_num = udev->tp_ctx.tpg[ctxgn].tp_cnt;
+		spin_unlock(&udev->tp_ctx.tpg_lock);
+		break;
+	default:
+		ubase_err(udev, "failed to get ctx num, ctx_type = %u.\n",
+			  ctx_type);
+		break;
+	}
+
+	return ctx_num;
+}
+
+static int ubase_dbg_dump_context(struct seq_file *s,
+				  enum ubase_dbg_ctx_type ctx_type)
+{
+	struct ubase_dbg_ctx {
+		void (*print_ctx_titles)(struct seq_file *s);
+		void (*get_ctx)(struct seq_file *s, struct ubase_dev *udev, u32 idx);
+	} dbg_ctx[] = {
+		{ubase_eq_ctx_titles_print, ubase_dump_aeq_ctx},
+		{ubase_eq_ctx_titles_print, ubase_dump_ceq_ctx},
+		{ubase_tpg_ctx_titles_print, ubase_dump_tpg_ctx},
+	};
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;
+	unsigned long port_bitmap;
+	u32 tp_pos, i;
+
+	dbg_ctx[ctx_type].print_ctx_titles(s);
+
+	port_bitmap = unic_caps->utp_port_bitmap;
+	for (i = 0; i < ubase_get_ctx_num(udev, ctx_type, UBASE_DEFAULT_CTXGN); i++) {
+		if (ctx_type != UBASE_DBG_TP_CTX) {
+			dbg_ctx[ctx_type].get_ctx(s, udev, i);
+			continue;
+		}
+
+		tp_pos = (i % unic_caps->tpg.depth) * UBASE_TP_PORT_BITMAP_STEP;
+		if (test_bit(tp_pos, &port_bitmap))
+			dbg_ctx[ctx_type].get_ctx(s, udev, i);
+	}
+
+	return 0;
+}
+
+struct ubase_ctx_info {
+	u32 start_idx;
+	u32 ctx_size;
+	u8 op;
+	const char *ctx_name;
+};
+
+static inline u32 ubase_get_ctx_group_num(struct ubase_dev *udev,
+					  enum ubase_dbg_ctx_type ctx_type)
+{
+	if (ctx_type == UBASE_DBG_TP_CTX)
+		return udev->caps.unic_caps.tpg.max_cnt;
+
+	return 1;
+}
+
+static void ubase_get_ctx_info(struct ubase_dev *udev,
+			       enum ubase_dbg_ctx_type ctx_type,
+			       struct ubase_ctx_info *ctx_info, u32 ctxgn)
+{
+	switch (ctx_type) {
+	case UBASE_DBG_AEQ_CTX:
+		ctx_info->start_idx = 0;
+		ctx_info->ctx_size = UBASE_AEQ_CTX_SIZE;
+		ctx_info->op = UBASE_MB_QUERY_AEQ_CONTEXT;
+		ctx_info->ctx_name = "aeq";
+		break;
+	case UBASE_DBG_CEQ_CTX:
+		ctx_info->start_idx = 0;
+		ctx_info->ctx_size = UBASE_CEQ_CTX_SIZE;
+		ctx_info->op = UBASE_MB_QUERY_CEQ_CONTEXT;
+		ctx_info->ctx_name = "ceq";
+		break;
+	case UBASE_DBG_TPG_CTX:
+		ctx_info->start_idx = udev->caps.unic_caps.tpg.start_idx;
+		ctx_info->ctx_size = udev->ctx_buf.tpg.entry_size;
+		ctx_info->op = UBASE_MB_QUERY_TPG_CONTEXT;
+		ctx_info->ctx_name = "tpg";
+		break;
+	case UBASE_DBG_TP_CTX:
+		spin_lock(&udev->tp_ctx.tpg_lock);
+		ctx_info->start_idx = udev->tp_ctx.tpg ?
+				udev->tp_ctx.tpg[ctxgn].start_tpn : 0;
+		spin_unlock(&udev->tp_ctx.tpg_lock);
+
+		ctx_info->ctx_size = udev->ctx_buf.tp.entry_size;
+		ctx_info->op = UBASE_MB_QUERY_TP_CONTEXT;
+		ctx_info->ctx_name = "tp";
+		break;
+	default:
+		ubase_err(udev, "failed to get ctx info, ctx_type = %u.\n",
+			  ctx_type);
+		break;
+	}
+}
+
+static void ubase_mask_eq_ctx_key_words(void *buf)
+{
+	struct ubase_eq_ctx *eq = (struct ubase_eq_ctx *)buf;
+
+	eq->eqe_base_addr_l = 0;
+	eq->eqe_base_addr_h = 0;
+	eq->eqe_token_id = 0;
+	eq->eqe_token_value = 0;
+}
+
+static void ubase_mask_tp_ctx_key_words(void *buf)
+{
+	struct ubase_tp_ctx *tp = (struct ubase_tp_ctx *)buf;
+
+	tp->wqe_ba_l = 0;
+	tp->wqe_ba_h = 0;
+	tp->tp_wqe_token_id = 0;
+	tp->reorder_q_addr_l = 0;
+	tp->reorder_q_addr_h = 0;
+	tp->scc_token = 0;
+	tp->scc_token_1 = 0;
+}
+
+static void ubase_mask_ctx_key_words(void *buf,
+				     enum ubase_dbg_ctx_type ctx_type)
+{
+	switch (ctx_type) {
+	case UBASE_DBG_AEQ_CTX:
+	case UBASE_DBG_CEQ_CTX:
+		ubase_mask_eq_ctx_key_words(buf);
+		break;
+	case UBASE_DBG_TPG_CTX:
+		break;
+	case UBASE_DBG_TP_CTX:
+		ubase_mask_tp_ctx_key_words(buf);
+		break;
+	default:
+		break;
+	}
+}
 
 static void __ubase_print_context_hw(struct seq_file *s, void *ctx_addr,
 				     u32 ctx_len)
@@ -29,3 +260,141 @@ void ubase_print_context_hw(struct seq_file *s, void *ctx_addr, u32 ctx_len)
 	__ubase_print_context_hw(s, ctx_addr, ctx_len);
 }
 EXPORT_SYMBOL(ubase_print_context_hw);
+
+static int ubase_dbg_dump_ctx_hw(struct seq_file *s, void *data,
+				 enum ubase_dbg_ctx_type ctx_type)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	struct ubase_ctx_info ctx_info = {0};
+	struct ubase_cmd_mailbox *mailbox;
+	u32 max_ctxgn, ctxn, ctxgn;
+	struct ubase_mbx_attr attr;
+	int ret = 0;
+
+	if (!test_bit(UBASE_STATE_INITED_B, &udev->state_bits) ||
+	    test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+		return -EBUSY;
+
+	mailbox = __ubase_alloc_cmd_mailbox(udev);
+	if (IS_ERR_OR_NULL(mailbox)) {
+		ubase_err(udev,
+			  "failed to alloc mailbox for dump hw context.\n");
+		return -ENOMEM;
+	}
+
+	max_ctxgn = ubase_get_ctx_group_num(udev, ctx_type);
+	for (ctxgn = 0; ctxgn < max_ctxgn; ctxgn++) {
+		ubase_get_ctx_info(udev, ctx_type, &ctx_info, ctxgn);
+
+		for (ctxn = 0; ctxn < ubase_get_ctx_num(udev, ctx_type, ctxgn); ctxn++) {
+			ubase_fill_mbx_attr(&attr, ctxn + ctx_info.start_idx,
+					    ctx_info.op, 0);
+			ret = __ubase_hw_upgrade_ctx_ex(udev, &attr, mailbox);
+			if (ret) {
+				ubase_err(udev,
+					  "failed to post query %s ctx mbx, ret = %d.\n",
+					  ctx_info.ctx_name, ret);
+				goto upgrade_ctx_err;
+			}
+
+			seq_printf(s, "offset\t%s%u\n", ctx_info.ctx_name,
+				   ctxn + ctx_info.start_idx);
+			ubase_mask_ctx_key_words(mailbox->buf, ctx_type);
+			__ubase_print_context_hw(s, mailbox->buf, ctx_info.ctx_size);
+			seq_puts(s, "\n");
+		}
+	}
+
+upgrade_ctx_err:
+	__ubase_free_cmd_mailbox(udev, mailbox);
+
+	return ret;
+}
+
+int ubase_dbg_dump_aeq_context(struct seq_file *s, void *data)
+{
+	return ubase_dbg_dump_context(s, UBASE_DBG_AEQ_CTX);
+}
+
+int ubase_dbg_dump_ceq_context(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	int ret;
+
+	if (!mutex_trylock(&udev->irq_table.ceq_lock))
+		return -EBUSY;
+
+	if (!udev->irq_table.ceqs.ceq) {
+		mutex_unlock(&udev->irq_table.ceq_lock);
+		return -EBUSY;
+	}
+
+	ret = ubase_dbg_dump_context(s, UBASE_DBG_CEQ_CTX);
+	mutex_unlock(&udev->irq_table.ceq_lock);
+
+	return ret;
+}
+
+int ubase_dbg_dump_tpg_ctx(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	int ret;
+
+	if (!test_bit(UBASE_STATE_INITED_B, &udev->state_bits))
+		return -EBUSY;
+
+	if (!ubase_get_ctx_num(udev, UBASE_DBG_TPG_CTX, UBASE_DEFAULT_CTXGN))
+		return -EOPNOTSUPP;
+
+	if (!spin_trylock(&udev->tp_ctx.tpg_lock))
+		return -EBUSY;
+
+	if (!udev->tp_ctx.tpg) {
+		spin_unlock(&udev->tp_ctx.tpg_lock);
+		return -EBUSY;
+	}
+
+	ret = ubase_dbg_dump_context(s, UBASE_DBG_TPG_CTX);
+	spin_unlock(&udev->tp_ctx.tpg_lock);
+
+	return ret;
+}
+
+int ubase_dbg_dump_tpg_ctx_hw(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+
+	if (!test_bit(UBASE_STATE_INITED_B, &udev->state_bits))
+		return -EBUSY;
+
+	if (!ubase_get_ctx_num(udev, UBASE_DBG_TPG_CTX, UBASE_DEFAULT_CTXGN))
+		return -EOPNOTSUPP;
+
+	return ubase_dbg_dump_ctx_hw(s, data, UBASE_DBG_TPG_CTX);
+}
+
+int ubase_dbg_dump_tp_ctx_hw(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+
+	if (!test_bit(UBASE_STATE_INITED_B, &udev->state_bits))
+		return -EBUSY;
+
+	if (!ubase_get_ctx_num(udev, UBASE_DBG_TP_CTX, UBASE_DEFAULT_CTXGN))
+		return -EOPNOTSUPP;
+
+	if (!ubase_get_ctx_group_num(udev, UBASE_DBG_TP_CTX))
+		return -EOPNOTSUPP;
+
+	return ubase_dbg_dump_ctx_hw(s, data, UBASE_DBG_TP_CTX);
+}
+
+int ubase_dbg_dump_aeq_ctx_hw(struct seq_file *s, void *data)
+{
+	return ubase_dbg_dump_ctx_hw(s, data, UBASE_DBG_AEQ_CTX);
+}
+
+int ubase_dbg_dump_ceq_ctx_hw(struct seq_file *s, void *data)
+{
+	return ubase_dbg_dump_ctx_hw(s, data, UBASE_DBG_CEQ_CTX);
+}

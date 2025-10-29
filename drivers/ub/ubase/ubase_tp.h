@@ -11,7 +11,33 @@
 
 #include "ubase_dev.h"
 
+#define UBASE_TP_PORT_BITMAP_STEP	2
+
 #define UBASE_WAIT_TP_FLUSH_TOTAL_STEPS	12
+
+struct ubase_tp_ctx {
+	u32 rsvd0;
+	u32 wqe_ba_l;
+	u32 wqe_ba_h : 20;
+	u32 rsvd1 : 12;
+	u32 rsvd2[5];
+	u32 rsvd3_0 : 4;
+	u32 tp_wqe_token_id : 20;
+	u32 rsvd3_1 : 8;
+	u32 rsvd4[5];
+	u32 rsvd5 : 4;
+	u32 reorder_q_addr_l : 28;
+	u32 reorder_q_addr_h : 24;
+	u32 rsvd6 : 8;
+	u32 rsvd7[5];
+	u32 scc_token : 19;
+	u32 rsvd8 : 13;
+	u32 rsvd9[4];
+	u32 rsvd10_0 : 24;
+	u32 scc_token_1 : 4;
+	u32 rsvd10_1 : 4;
+	u32 rsvd11[37];
+};
 
 struct ubase_tpg {
 	u32		mb_tpgn;

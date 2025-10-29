@@ -8,6 +8,7 @@
 #include <linux/kernel.h>
 #include <ub/ubase/ubase_comm_debugfs.h>
 
+#include "ubase_ctx_debugfs.h"
 #include "ubase_dev.h"
 #include "ubase_hw.h"
 #include "ubase_qos_debugfs.h"
@@ -217,6 +218,11 @@ EXPORT_SYMBOL(ubase_dbg_seq_file_init);
 
 static struct ubase_dbg_dentry_info ubase_dbg_dentry[] = {
 	{
+		.name = "context",
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+	},
+	{
 		.name = "qos",
 		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
 		.support = __ubase_dbg_dentry_support,
@@ -243,12 +249,68 @@ static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
 		.read_func = ubase_dbg_dump_rst_info,
 	},
 	{
+		.name = "aeq_context",
+		.dentry_index = UBASE_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_aeq_context,
+	},
+	{
+		.name = "ceq_context",
+		.dentry_index = UBASE_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_ceq_context,
+	},
+	{
 		.name = "activate_record",
 		.dentry_index = UBASE_DBG_DENTRY_ROOT,
 		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
 		.support = __ubase_dbg_dentry_support,
 		.init = __ubase_dbg_seq_file_init,
 		.read_func = ubase_dbg_dump_activate_record,
+	},
+	{
+		.name = "tpg_context",
+		.dentry_index = UBASE_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_tpg_ctx,
+	},
+	{
+		.name = "tp_context_hw",
+		.dentry_index = UBASE_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_tp_ctx_hw,
+	},
+	{
+		.name = "tpg_context_hw",
+		.dentry_index = UBASE_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_tpg_ctx_hw,
+	},
+	{
+		.name = "aeq_context_hw",
+		.dentry_index = UBASE_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_aeq_ctx_hw,
+	},
+	{
+		.name = "ceq_context_hw",
+		.dentry_index = UBASE_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_ceq_ctx_hw,
 	},
 	{
 		.name = "sl_vl_map",

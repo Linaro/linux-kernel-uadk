@@ -238,6 +238,20 @@ struct ubase_query_tm_port_cmd {
 	u8 resv1[12];
 };
 
+struct ubase_activate_req {
+	__le16	bus_ue_id;
+	__le16	msn;
+	u8	activate;
+	u8	resv[19];
+};
+
+struct ubase_activate_resp {
+	__le16	bus_ue_id;
+	__le16	msn;
+	u8	result;
+	u8	resv[19];
+};
+
 struct ubase_query_ueid_cmd {
 	__le32 ueid[UBASE_BUS_EID_LEN];
 	u32 rsv[2];

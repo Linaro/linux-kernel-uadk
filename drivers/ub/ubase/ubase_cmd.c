@@ -7,6 +7,7 @@
 #include <linux/delay.h>
 
 #include "ubase_cmd.h"
+#include "ubase_arq.h"
 #include "ubase_hw.h"
 
 /* When use tracepoint, must define "CREATE_TRACE_POINTS" before include the
@@ -359,6 +360,8 @@ int ubase_cmd_init(struct ubase_dev *udev)
 		goto err_queue_init;
 	}
 
+	ubase_arq_init(udev);
+
 	ubase_cmd_init_regs(udev);
 
 	clear_bit(UBASE_STATE_CMD_DISABLE, &udev->hw.state);
@@ -372,6 +375,7 @@ int ubase_cmd_init(struct ubase_dev *udev)
 err_query_version:
 	set_bit(UBASE_STATE_CMD_DISABLE, &udev->hw.state);
 	ubase_cmd_uninit_regs(udev);
+	ubase_arq_uninit(udev);
 	ubase_cmd_queue_uninit(udev);
 err_queue_init:
 	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
@@ -397,6 +401,7 @@ void ubase_cmd_uninit(struct ubase_dev *udev)
 		msleep(UBASE_CMDQ_CLEAR_WAIT_TIME);
 	}
 
+	ubase_arq_uninit(udev);
 	ubase_cmd_queue_uninit(udev);
 
 	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
@@ -618,8 +623,11 @@ void ubase_cmd_crq_handler(struct ubase_dev *udev)
 
 		ubase_gen_bd_data(udev, bd_num, &msg_data, msg_data_len);
 
-		ubase_cmd_exec_callback(udev, opcode, msg_data,
-					msg_data_len);
+		if (ubase_is_arq_msg(opcode))
+			ubase_add_to_arq(udev, opcode, msg_data, msg_data_len);
+		else
+			ubase_cmd_exec_callback(udev, opcode, msg_data,
+						msg_data_len);
 
 		ubase_free_bd_data(msg_data, bd_num);
 	}

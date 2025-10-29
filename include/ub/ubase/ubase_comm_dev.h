@@ -249,6 +249,15 @@ void ubase_reset_register(struct auxiliary_device *adev,
 			  void (*reset_handler)(struct auxiliary_device *adev,
 						enum ubase_reset_stage stage));
 void ubase_reset_unregister(struct auxiliary_device *adev);
+
+void ubase_activate_register(struct auxiliary_device *adev,
+			     void (*activate_handler)(struct auxiliary_device *adev,
+						      bool activate));
+void ubase_activate_unregister(struct auxiliary_device *adev);
+
+int ubase_activate_dev(struct auxiliary_device *adev);
+int ubase_deactivate_dev(struct auxiliary_device *adev);
+
 int ubase_get_bus_eid(struct auxiliary_device *adev, struct ubase_bus_eid *eid);
 
 #endif

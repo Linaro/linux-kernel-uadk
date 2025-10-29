@@ -390,6 +390,11 @@ static inline bool __ubase_dev_prealloc_supported(struct ubase_dev *udev)
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_PRE_ALLOC_B);
 }
 
+static inline bool ubase_activate_proxy_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ACTIVATE_PROXY_B);
+}
+
 static inline bool ubase_utp_supported(struct ubase_dev *udev)
 {
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_UTP_B);
@@ -447,5 +452,8 @@ void ubase_suspend_aux_devices(struct ubase_dev *udev);
 void ubase_resume_aux_devices(struct ubase_dev *udev);
 
 void ubase_virt_handler(struct ubase_dev *udev, u16 bus_ue_id, bool is_en);
+
+int ubase_activate_handler(struct ubase_dev *udev, u32 bus_ue_id);
+int ubase_deactivate_handler(struct ubase_dev *udev, u32 bus_ue_id);
 
 #endif

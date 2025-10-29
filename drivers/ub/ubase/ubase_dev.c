@@ -8,6 +8,7 @@
 #include <ub/ubus/ubus.h>
 
 #include "debugfs/ubase_debugfs.h"
+#include "ubase_arq.h"
 #include "ubase_cmd.h"
 #include "ubase_ctrlq.h"
 #include "ubase_err_handle.h"
@@ -335,6 +336,14 @@ static void ubase_period_service_task(struct work_struct *work)
 	ubase_enable_period_service_task(udev);
 }
 
+static void ubase_arq_service_task(struct work_struct *work)
+{
+	struct ubase_delay_work *ubase_work =
+		container_of(work, struct ubase_delay_work, service_task.work);
+
+	ubase_cmd_arq_handler(ubase_work);
+}
+
 static void ubase_reset_service_task(struct work_struct *work)
 {
 	struct ubase_delay_work *ubase_work =
@@ -361,6 +370,8 @@ static void ubase_init_delayed_work(struct ubase_dev *udev)
 			  ubase_reset_service_task);
 	INIT_DELAYED_WORK(&udev->period_service_task.service_task,
 			  ubase_period_service_task);
+	INIT_DELAYED_WORK(&udev->arq_service_task.service_task,
+			  ubase_arq_service_task);
 }
 
 static int ubase_wq_init(struct ubase_dev *udev)
@@ -528,6 +539,40 @@ static int ubase_handle_ue_reset_event(void *dev, void *data, u32 len)
 	return 0;
 }
 
+static int ubase_handle_activate_resp(void *dev, void *data, u32 len)
+{
+	struct ubase_activate_resp *resp = data;
+	struct ubase_act_info *self, *other;
+	struct ubase_dev *udev = dev;
+	u16 msn;
+
+	if (len != sizeof(*resp)) {
+		ubase_err(udev,
+			  "activate dev resp len error, cur = %u, expect = %lu.\n",
+			  len, sizeof(*resp));
+		return -EINVAL;
+	}
+
+	msn = le16_to_cpu(resp->msn);
+	self = &udev->act_ctx.self;
+	if (self->wait_msn == msn) {
+		self->result = -resp->result;
+		complete(&self->activate_done);
+		return 0;
+	}
+	other = &udev->act_ctx.other;
+	if (other->wait_msn == msn) {
+		other->result = -resp->result;
+		complete(&other->activate_done);
+		return 0;
+	}
+
+	ubase_warn(udev,
+		   "unknown msn in activate resp, msn = %u, self msn = %u, other msn = %u.\n",
+		   msn, self->wait_msn, other->wait_msn);
+
+	return -EIO;
+}
 static struct ubase_crq_event_nb ubase_crq_events[] = {
 	{
 		.opcode = UBASE_OPC_UE2UE_UBASE,
@@ -536,6 +581,10 @@ static struct ubase_crq_event_nb ubase_crq_events[] = {
 	{
 		.opcode = UBASE_OPC_NOTIFY_UE_RESET,
 		.crq_handler = ubase_handle_ue_reset_event,
+	},
+	{
+		.opcode = UBASE_OPC_ACTIVATE_RESP,
+		.crq_handler = ubase_handle_activate_resp,
 	},
 };
 
@@ -1103,6 +1152,209 @@ struct ubase_adev_qos *ubase_get_adev_qos(struct auxiliary_device *adev)
 	return &udev->qos;
 }
 EXPORT_SYMBOL(ubase_get_adev_qos);
+
+static void ubase_activate_notify(struct ubase_dev *udev,
+				  struct auxiliary_device *adev, bool activate)
+{
+	bool disable_state = test_bit(UBASE_STATE_DISABLED_B, &udev->state_bits);
+	struct ubase_adev *uadev;
+	int i;
+
+	if (!disable_state)
+		mutex_lock(&udev->priv.uadev_lock);
+
+	for (i = 0; i < UBASE_DRV_MAX; i++) {
+		uadev = udev->priv.uadev[i];
+		if (!uadev || &uadev->adev == adev)
+			continue;
+
+		mutex_lock(&uadev->activate_lock);
+		if (uadev->activate_handler)
+			uadev->activate_handler(&uadev->adev, activate);
+		mutex_unlock(&uadev->activate_lock);
+	}
+
+	if (!disable_state)
+		mutex_unlock(&udev->priv.uadev_lock);
+}
+
+void ubase_activate_register(struct auxiliary_device *adev,
+			     void (*activate_handler)(struct auxiliary_device *adev,
+						      bool activate))
+{
+	struct ubase_adev *uadev;
+
+	if (!adev || !activate_handler)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->activate_lock);
+	if (!uadev->activate_handler)
+		uadev->activate_handler = activate_handler;
+	mutex_unlock(&uadev->activate_lock);
+}
+EXPORT_SYMBOL(ubase_activate_register);
+
+void ubase_activate_unregister(struct auxiliary_device *adev)
+{
+	struct ubase_adev *uadev;
+
+	if (!adev)
+		return;
+
+	uadev = container_of(adev, struct ubase_adev, adev);
+
+	mutex_lock(&uadev->activate_lock);
+	uadev->activate_handler = NULL;
+	mutex_unlock(&uadev->activate_lock);
+}
+EXPORT_SYMBOL(ubase_activate_unregister);
+
+static int ubase_wait_activate_done(struct ubase_dev *udev, u16 bus_ue_id)
+{
+#define UBASE_ACTIVE_DEV_TIMEOUT 10000
+
+	struct ub_entity *ue = container_of(udev->dev, struct ub_entity, dev);
+	struct ubase_act_info *info;
+
+	info = (ue->entity_idx == bus_ue_id) ? &udev->act_ctx.self :
+		&udev->act_ctx.other;
+
+	if (!wait_for_completion_timeout(&info->activate_done,
+					 msecs_to_jiffies(UBASE_ACTIVE_DEV_TIMEOUT))) {
+		ubase_err(udev,
+			  "wait activate dev resp timeout, bus_ue_id = %u, msn = %u.\n",
+			  bus_ue_id, info->wait_msn);
+		return -ETIMEDOUT;
+	}
+
+	return info->result;
+}
+
+static void ubase_record_msn(struct ubase_dev *udev, u16 bus_ue_id, u16 msn)
+{
+	struct ub_entity *ue = container_of(udev->dev, struct ub_entity, dev);
+	struct ubase_act_info *info;
+
+	info = (ue->entity_idx == bus_ue_id) ? &udev->act_ctx.self :
+		&udev->act_ctx.other;
+
+	info->wait_msn = msn;
+}
+
+static void ubase_alloc_msn(struct ubase_dev *udev, u16 *msn)
+{
+	struct ubase_act_ctx *ctx = &udev->act_ctx;
+
+	/* we cannot distinguish whether it is a real 0
+	 * or a 0 caused by the peer not assigning a value,
+	 * so we skip the number 0.
+	 */
+	mutex_lock(&ctx->lock);
+	++ctx->msn;
+	if (!ctx->msn)
+		ctx->msn = 1;
+	*msn = ctx->msn;
+	mutex_unlock(&ctx->lock);
+}
+
+static int ubase_send_activate_dev_req(struct ubase_dev *udev, bool activate,
+				       u16 bus_ue_id)
+{
+	struct ubase_activate_req req = {0};
+	struct ubase_cmd_buf in;
+	u16 msn;
+	int ret;
+
+	req.activate = activate ? 1 : 0;
+	req.bus_ue_id = cpu_to_le16(bus_ue_id);
+	ubase_alloc_msn(udev, &msn);
+	req.msn = cpu_to_le16(msn);
+	ubase_record_msn(udev, bus_ue_id, msn);
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_ACTIVATE_REQ, false, sizeof(req),
+			     &req);
+	ret = __ubase_cmd_send_in(udev, &in);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to send activate dev req, ue id=%u, ret=%d.\n",
+			  bus_ue_id, ret);
+		return ret;
+	}
+
+	return ubase_wait_activate_done(udev, bus_ue_id);
+}
+
+int ubase_activate_handler(struct ubase_dev *udev, u32 bus_ue_id)
+{
+	return ubase_send_activate_dev_req(udev, true, (u16)bus_ue_id);
+}
+
+int ubase_deactivate_handler(struct ubase_dev *udev, u32 bus_ue_id)
+{
+	return ubase_send_activate_dev_req(udev, false, (u16)bus_ue_id);
+}
+
+int ubase_activate_dev(struct auxiliary_device *adev)
+{
+	struct ubase_dev *udev;
+	struct ub_entity *ue;
+	int ret;
+
+	if (!adev)
+		return 0;
+
+	udev = __ubase_get_udev_by_adev(adev);
+
+	ue = container_of(udev->dev, struct ub_entity, dev);
+	if (ubase_activate_proxy_supported(udev) &&
+	    !test_bit(UBASE_STATE_DISABLED_B, &udev->state_bits))
+		ret = ub_activate_entity(ue, ue->entity_idx);
+	else
+		ret = ubase_activate_handler(udev, ue->entity_idx);
+
+	if (ret) {
+		ubase_err(udev,
+			  "failed to activate ubase dev, ret = %d.\n", ret);
+		return ret;
+	}
+
+	ubase_activate_notify(udev, adev, true);
+
+	return 0;
+}
+EXPORT_SYMBOL(ubase_activate_dev);
+
+int ubase_deactivate_dev(struct auxiliary_device *adev)
+{
+	struct ubase_dev *udev;
+	struct ub_entity *ue;
+	int ret;
+
+	if (!adev)
+		return 0;
+
+	udev = __ubase_get_udev_by_adev(adev);
+
+	ue = container_of(udev->dev, struct ub_entity, dev);
+	ubase_activate_notify(udev, adev, false);
+
+	if (ubase_activate_proxy_supported(udev) &&
+	    !test_bit(UBASE_STATE_DISABLED_B, &udev->state_bits))
+		ret = ub_deactivate_entity(ue, ue->entity_idx);
+	else
+		ret = ubase_deactivate_handler(udev, ue->entity_idx);
+
+	if (ret) {
+		ubase_err(udev,
+			  "failed to deactivate ubase dev, ret = %d.\n", ret);
+		ubase_activate_notify(udev, adev, true);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(ubase_deactivate_dev);
 
 static int ubase_query_bus_eid(struct ubase_dev *udev, struct ubase_bus_eid *eid)
 {

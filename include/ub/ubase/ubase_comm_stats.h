@@ -9,6 +9,9 @@
 
 #include <linux/auxiliary_bus.h>
 
+#define UBASE_STATS_MAX_VL_NUM	16
+#define UBASE_MAX_PORT_NUM	64
+
 struct ubase_ub_dl_stats {
 	u64	dl_tx_vl0_pkt_num;
 	u64	dl_tx_vl1_pkt_num;
@@ -206,5 +209,21 @@ struct ubase_eth_mac_stats {
 	u64	rx_merge_frame_frag_count;
 	u64	rx_merge_frame_smd_error_pkts;
 };
+
+struct ubase_perf_stats_result {
+	u8	valid : 1;
+	u8	resv0 : 7;
+	u8	port_id;
+	u8	resv1[2];
+	u32	tx_port_bw; /* kbps */
+	u32	rx_port_bw;
+	u32	tx_vl_bw[UBASE_STATS_MAX_VL_NUM];
+	u32	rx_vl_bw[UBASE_STATS_MAX_VL_NUM];
+};
+
+int ubase_get_ub_port_stats(struct auxiliary_device *adev, u16 port_id,
+			    struct ubase_ub_dl_stats *data);
+int ubase_perf_stats(struct auxiliary_device *adev, u64 port_bitmap, u32 period,
+		     struct ubase_perf_stats_result *data, u32 data_size);
 
 #endif /* _UBASE_COMM_STATS_H */

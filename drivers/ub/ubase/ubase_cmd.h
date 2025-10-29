@@ -70,6 +70,24 @@ struct ubase_ue2ue_ctrlq_head {
 	u8 rsv : 6;
 };
 
+struct ubase_start_perf_stats_cmd {
+	__le32	period;
+	__le32	logic_port_bitmap[2];
+	u8	rsv[12];
+};
+
+struct ubase_stop_perf_stats_cmd {
+	__le32	period; /* ms */
+	__le16	port_id;
+	u8	rsv[2];
+
+	__le32	tx_port_bw; /* kbps */
+	__le32	rx_port_bw;
+	__le32	tx_vl_bw[UBASE_STATS_MAX_VL_NUM];
+	__le32	rx_vl_bw[UBASE_STATS_MAX_VL_NUM];
+	u8	rsv1[8];
+};
+
 struct ubase_cfg_ets_vl_sch_cmd {
 	__le16 vl_bitmap;
 	u8 rsvd[2];

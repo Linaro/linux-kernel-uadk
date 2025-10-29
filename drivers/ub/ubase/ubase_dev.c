@@ -601,6 +601,10 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 		ubase_query_hw_oor_caps, NULL
 	},
 	{
+		"query port bitmap", UBASE_SUP_ALL, 0,
+		ubase_query_port_bitmap, NULL
+	},
+	{
 		"init irq table", UBASE_SUP_NO_PMU, 1,
 		ubase_irq_table_init, ubase_irq_table_uninit
 	},

@@ -9,7 +9,9 @@
 #include <ub/ubase/ubase_comm_debugfs.h>
 
 #include "ubase_dev.h"
+#include "ubase_hw.h"
 #include "ubase_qos_debugfs.h"
+#include "ubase_stats.h"
 #include "ubase_debugfs.h"
 
 static struct dentry *ubase_dbgfs_root;
@@ -26,6 +28,73 @@ static int ubase_dbg_dump_rst_info(struct seq_file *s, void *data)
 	seq_printf(s, "udev state: 0x%lx\n", udev->state_bits);
 
 	return 0;
+}
+
+static void ubase_dbg_fill_single_port(struct seq_file *s,
+				       struct ubase_perf_stats_result *stats)
+{
+	int i;
+
+	seq_printf(s, "\tport_id: %u\n", stats->port_id);
+	seq_printf(s, "\tport_tx_bw: %u(kbps)\n", le32_to_cpu(stats->tx_port_bw));
+	seq_printf(s, "\tport_rx_bw: %u(kbps)\n", le32_to_cpu(stats->rx_port_bw));
+	seq_puts(s, "\tvl   tx_bw(kbps)          rx_bw(kbps)\n");
+
+	for (i = 0; i < UBASE_STATS_MAX_VL_NUM; i++) {
+		seq_printf(s, "\t%-5d", i);
+		seq_printf(s, "%-21u", le32_to_cpu(stats->tx_vl_bw[i]));
+		seq_printf(s, "%-21u", le32_to_cpu(stats->rx_vl_bw[i]));
+		seq_puts(s, "\n");
+	}
+	seq_puts(s, "\n");
+}
+
+static int ubase_dbg_dump_perf_stats_ub(struct seq_file *s,
+					struct ubase_dev *udev)
+{
+#define UBASE_UB_PERF_STATS_PERIOD	10
+#define UBASE_QUERY_ALL_BITMAP	0
+
+	struct ubase_perf_stats_result *stats;
+	struct device *dev = udev->dev;
+	int ret, i;
+
+	stats = devm_kcalloc(dev, UBASE_MAX_PORT_NUM,
+			     sizeof(struct ubase_perf_stats_result), GFP_KERNEL);
+	if (!stats)
+		return -ENOMEM;
+
+	ret = __ubase_perf_stats(udev, UBASE_QUERY_ALL_BITMAP,
+				 UBASE_UB_PERF_STATS_PERIOD, stats,
+				 UBASE_MAX_PORT_NUM);
+	if (ret) {
+		devm_kfree(dev, stats);
+		return ret;
+	}
+
+	seq_printf(s, "perf_stats_period: %d(ms)\n", UBASE_UB_PERF_STATS_PERIOD);
+	seq_puts(s, "port bandwidth info:\n");
+
+	for (i = 0; i < UBASE_MAX_PORT_NUM; i++) {
+		if (!stats[i].valid)
+			break;
+		ubase_dbg_fill_single_port(s, &stats[i]);
+	}
+
+	devm_kfree(dev, stats);
+
+	return 0;
+}
+
+static int ubase_dbg_dump_perf_stats(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	int ret = 0;
+
+	if (ubase_dev_ubl_supported(udev))
+		ret = ubase_dbg_dump_perf_stats_ub(s, udev);
+
+	return ret;
 }
 
 static int ubase_dbg_dump_prealloc_mem_info(struct seq_file *s, void *data)
@@ -163,6 +232,14 @@ static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
 		.support = __ubase_dbg_dentry_support,
 		.init = __ubase_dbg_seq_file_init,
 		.read_func = ubase_dbg_dump_ets_port_info,
+	},
+	{
+		.name = "perf_stats",
+		.dentry_index = UBASE_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_perf_stats,
 	},
 	{
 		.name = "rack_vl_bitmap",

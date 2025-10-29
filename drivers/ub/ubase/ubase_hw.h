@@ -125,6 +125,13 @@ struct ubase_query_oor_resp {
 	u8	rsvd0[15];
 };
 
+struct ubase_query_port_bitmap_resp {
+	__le32 logic_port_bitmap;
+	__le32 chip_id;
+	__le32 die_id;
+	__le32 resv[3];
+};
+
 struct ubase_query_controller_info_resp {
 	__le32	rsvd0[2];
 	u8	packet_pattern_mode : 1;
@@ -200,5 +207,8 @@ void ubase_ue_uninit(struct ubase_dev *udev);
 int ubase_query_fst_fvt_rqmt(struct ubase_dev *udev,
 			     struct ubase_query_fst_fvt_rqmt_cmd *resp,
 			     u16 bus_ue_id);
+int ubase_query_port_bitmap(struct ubase_dev *udev);
+int __ubase_perf_stats(struct ubase_dev *udev, u64 port_bitmap, u32 period,
+		       struct ubase_perf_stats_result *data, u32 data_size);
 
 #endif

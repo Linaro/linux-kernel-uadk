@@ -58,12 +58,19 @@ enum ubase_opcode_type {
 	UBASE_OPC_QUERY_TM_PORT_INFO	= 0x4209,
 	UBASE_OPC_QUERY_FST_FVT_RQMT	= 0x4212,
 
+	/* DL commands */
+	UBASE_OPC_START_PERF_STATS	= 0x5103,
+	UBASE_OPC_STOP_PERF_STATS	= 0x5104,
+
 	/* PHY commands */
 	UBASE_OPC_QUERY_CHIP_INFO	= 0x6201,
 
 	/* Mailbox commands */
 	UBASE_OPC_POST_MB		= 0x7000,
 	UBASE_OPC_QUERY_MB_ST		= 0X7001,
+
+	/* Ubctl commands */
+	UBASE_OPC_QUERY_PORT_BITMAP	= 0xA017,
 
 	/* Software commands */
 	UBASE_OPC_MUE_TO_UE		= 0xF001,

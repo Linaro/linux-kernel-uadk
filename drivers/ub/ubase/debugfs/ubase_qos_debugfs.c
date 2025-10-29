@@ -239,6 +239,7 @@ int ubase_dbg_dump_adev_qos_info(struct seq_file *s, void *data)
 		{"ctp_sl_num: %u\n", qos->ctp_sl_num},
 		{"nic_sl_num: %u\n", qos->nic_sl_num},
 		{"nic_vl_num: %u\n", qos->nic_vl_num},
+		{"ue_max_vl_id: %u\n", qos->ue_max_vl_id},
 	};
 	int i;
 

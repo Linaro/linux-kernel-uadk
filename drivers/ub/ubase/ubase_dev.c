@@ -13,6 +13,7 @@
 #include "ubase_err_handle.h"
 #include "ubase_hw.h"
 #include "ubase_mailbox.h"
+#include "ubase_pmem.h"
 #include "ubase_reset.h"
 #include "ubase_dev.h"
 
@@ -625,7 +626,7 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	},
 	{
 		"prealloc memory", UBASE_SUP_UDMA, 1,
-		NULL, NULL
+		ubase_prealloc_mem_init, ubase_prealloc_mem_uninit
 	},
 	{
 		"init ue", UBASE_SUP_NO_PMU, 0,

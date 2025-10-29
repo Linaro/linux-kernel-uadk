@@ -412,7 +412,22 @@ static int ubase_alloc_and_fill_ctx_buf(struct ubase_dev *udev,
 	return ret;
 }
 
-static int ubase_cmd_ctx_buf_alloc(struct ubase_dev *udev,
+static int ubase_config_jfs_ctx_buf_by_pmem(struct ubase_dev *udev,
+					    struct ubase_mbx_attr *attr)
+{
+	struct ubase_cmd_mailbox mailbox;
+	int ret;
+
+	mailbox.dma = udev->pmem_info.comm.dma_addr;
+	ret = __ubase_hw_upgrade_ctx(udev, attr, &mailbox);
+	if (ret)
+		ubase_err(udev,
+			  "failed to config jfs ctx buf, ret = %d.\n", ret);
+
+	return ret;
+}
+
+int ubase_cmd_ctx_buf_alloc(struct ubase_dev *udev,
 			    struct ubase_ctx_buf_cap *ctx_buf,
 			    struct ubase_mbx_attr *attr)
 {
@@ -421,6 +436,10 @@ static int ubase_cmd_ctx_buf_alloc(struct ubase_dev *udev,
 
 	if (!size)
 		return 0;
+
+	if (attr->op == UBASE_MB_WRITE_JFS_CONTEXT_VA &&
+	    test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits))
+		return ubase_config_jfs_ctx_buf_by_pmem(udev, attr);
 
 	xa_init(&ctx_buf->ctx_xa);
 	ret = ubase_alloc_and_fill_ctx_buf(udev, ctx_buf, attr, size);
@@ -530,10 +549,24 @@ static int ubase_config_dma_buf(struct ubase_dev *udev, u16 opc, u64 dma_addr)
 	return ret;
 }
 
+static int ubase_config_ta_timer_buf_by_pmem(struct ubase_dev *udev, u16 opc)
+{
+	u64 dma_addr, offset;
+
+	offset = ubase_jfs_ctx_align_size(udev);
+	dma_addr = udev->pmem_info.comm.dma_addr + offset;
+
+	return ubase_config_dma_buf(udev, opc, dma_addr);
+}
+
 static int ubase_init_dma_buf(struct ubase_dev *udev, struct ubase_dma_buf *buf,
 			      u16 opc)
 {
 	int ret;
+
+	if (opc == UBASE_OPC_TA_TIMER_VA_CONFIG &&
+	    test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits))
+		return ubase_config_ta_timer_buf_by_pmem(udev, opc);
 
 	buf->addr = dma_alloc_coherent(udev->dev, buf->size, &buf->dma_addr,
 				       GFP_KERNEL);

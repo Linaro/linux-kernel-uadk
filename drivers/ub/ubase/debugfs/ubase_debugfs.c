@@ -28,6 +28,20 @@ static int ubase_dbg_dump_rst_info(struct seq_file *s, void *data)
 	return 0;
 }
 
+static int ubase_dbg_dump_prealloc_mem_info(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	struct ubase_prealloc_mem_info *pmem_info = &udev->pmem_info;
+	int status;
+
+	status = test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits);
+
+	seq_printf(s, "status:%s\n", status ? "enabled" : "disabled");
+	seq_printf(s, "comm_page_cnt:%u\n", pmem_info->comm.page_cnt);
+	seq_printf(s, "udma_page_cnt:%u\n", pmem_info->udma.page_cnt);
+
+	return 0;
+}
 
 static bool __ubase_dbg_dentry_support(struct device *dev, u32 property)
 {
@@ -205,6 +219,14 @@ static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
 		.support = __ubase_dbg_dentry_support,
 		.init = __ubase_dbg_seq_file_init,
 		.read_func = ubase_dbg_dump_tm_port_info,
+	},
+	{
+		.name = "prealloc_mem_info",
+		.dentry_index = UBASE_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_prealloc_mem_info,
 	},
 };
 

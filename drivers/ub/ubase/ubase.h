@@ -12,6 +12,7 @@
 
 #define UBASE_CAP_LEN			3
 #define UBASE_MAX_TCG_NUM		(4)
+#define UBASE_PMEM_PAGE_SIZE		(2 * 1024 * 1024UL) /* 2MB */
 
 enum ubase_service_state {
 	UBASE_STATE_CRQ_SERVICE_SCHED,

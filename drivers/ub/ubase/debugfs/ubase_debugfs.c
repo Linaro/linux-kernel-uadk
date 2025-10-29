@@ -8,6 +8,7 @@
 #include <linux/kernel.h>
 #include <ub/ubase/ubase_comm_debugfs.h>
 
+#include "ubase_cmd.h"
 #include "ubase_ctx_debugfs.h"
 #include "ubase_dev.h"
 #include "ubase_hw.h"
@@ -27,6 +28,85 @@ static int ubase_dbg_dump_rst_info(struct seq_file *s, void *data)
 	seq_printf(s, "HW reset done count: %u\n", udev->reset_stat.hw_reset_done_cnt);
 	seq_printf(s, "reset fail count: %u\n", udev->reset_stat.reset_fail_cnt);
 	seq_printf(s, "udev state: 0x%lx\n", udev->state_bits);
+
+	return 0;
+}
+
+static int ubase_query_ubcl_config(struct ubase_dev *udev, u16 offset,
+				   u16 is_query, u16 size,
+				   struct ubase_ubcl_config_cmd *resp)
+{
+	struct ubase_ubcl_config_cmd req;
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	memset(resp, 0, sizeof(*resp));
+	memset(&req, 0, sizeof(req));
+	req.offset = cpu_to_le16(offset);
+	req.size = cpu_to_le16(size);
+	req.is_query_size = cpu_to_le16(is_query);
+
+	__ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_UBCL_CONFIG, true,
+			       sizeof(req), &req);
+	__ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_UBCL_CONFIG, true,
+			       sizeof(*resp), resp);
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret && ret != -EPERM)
+		ubase_err(udev, "failed to query UBCL_config, ret = %d.\n", ret);
+
+	if (ret == -EPERM)
+		return -EOPNOTSUPP;
+
+	return ret;
+}
+
+static void ubase_dbg_fill_ubcl_content(struct ubase_ubcl_config_cmd *resp,
+					u32 *addr, struct seq_file *s)
+{
+	int i, j;
+
+	for (i = 0; i < UBASE_UBCL_CFG_DATA_NUM; i += UBASE_UBCL_CFG_DATA_ALIGN) {
+		seq_printf(s, "%08X: ", (*addr * UBASE_UBCL_CFG_DATA_ALIGN));
+		for (j = 0; j < UBASE_UBCL_CFG_DATA_ALIGN; j++)
+			seq_printf(s, "%08X ", resp->data[i + j]);
+		seq_puts(s, "\n");
+
+		*addr += UBASE_UBCL_CFG_DATA_ALIGN;
+		if ((i * sizeof(u32)) >= resp->size)
+			break;
+	}
+}
+
+static int ubase_dbg_dump_ubcl_config(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	struct ubase_ubcl_config_cmd resp = {0};
+	u16 read_size = sizeof(resp.data);
+	u16 offset = 0;
+	u16 total_size;
+	u32 addr = 0;
+	int ret;
+
+	if (!test_bit(UBASE_STATE_INITED_B, &udev->state_bits) ||
+	    test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+		return -EBUSY;
+
+	ret = ubase_query_ubcl_config(udev, offset, 1, 0, &resp);
+	if (ret)
+		return ret;
+	total_size = le16_to_cpu(resp.size);
+
+	seq_puts(s, "UBCL_config:\n");
+	seq_printf(s, "total_size: %u\n", total_size);
+	while (offset < total_size) {
+		read_size = min(read_size, total_size - offset);
+		ret = ubase_query_ubcl_config(udev, offset, 0, read_size, &resp);
+		if (ret)
+			return ret;
+		offset += le16_to_cpu(resp.size);
+
+		ubase_dbg_fill_ubcl_content(&resp, &addr, s);
+	}
 
 	return 0;
 }
@@ -263,6 +343,14 @@ static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
 		.support = __ubase_dbg_dentry_support,
 		.init = __ubase_dbg_seq_file_init,
 		.read_func = ubase_dbg_dump_ceq_context,
+	},
+	{
+		.name = "UBCL_config",
+		.dentry_index = UBASE_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_ubcl_config,
 	},
 	{
 		.name = "activate_record",

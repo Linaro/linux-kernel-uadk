@@ -49,6 +49,16 @@ struct ubase_query_version_cmd {
 	__le32 caps[UBASE_CAP_LEN];
 };
 
+#define UBASE_UBCL_CFG_DATA_ALIGN	4
+#define UBASE_UBCL_CFG_DATA_NUM		60
+struct ubase_ubcl_config_cmd {
+	__le16	is_query_size;
+	__le16	offset;
+	__le16	size;
+	__le16	rsv;
+	__le32	data[UBASE_UBCL_CFG_DATA_NUM];
+};
+
 enum ubase_ue2ue_sub_cmd {
 	UBASE_UE2UE_CTRLQ_MSG = 3,
 };

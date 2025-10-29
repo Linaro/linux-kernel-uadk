@@ -65,3 +65,25 @@ int ubase_get_ub_port_stats(struct auxiliary_device *adev, u16 port_id,
 				      sizeof(*data) / sizeof(u64), false);
 }
 EXPORT_SYMBOL(ubase_get_ub_port_stats);
+
+void ubase_update_activate_stats(struct ubase_dev *udev, bool activate,
+				 int result)
+{
+	struct ubase_activate_dev_stats *record = &udev->stats.activate_record;
+	u64 idx, total;
+
+	mutex_lock(&record->lock);
+
+	if (activate)
+		record->act_cnt++;
+	else
+		record->deact_cnt++;
+
+	total = record->act_cnt + record->deact_cnt;
+	idx = (total - 1) % UBASE_ACT_STAT_MAX_NUM;
+	record->stats[idx].activate = activate;
+	record->stats[idx].time = ktime_get_real_seconds();
+	record->stats[idx].result = result;
+
+	mutex_unlock(&record->lock);
+}

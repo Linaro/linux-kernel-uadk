@@ -30,6 +30,55 @@ static int ubase_dbg_dump_rst_info(struct seq_file *s, void *data)
 	return 0;
 }
 
+static int ubase_dbg_dump_activate_record(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	struct ubase_activate_dev_stats *record;
+	u8 cnt = 1, stats_cnt;
+	u64 total, idx;
+
+	if (!test_bit(UBASE_STATE_INITED_B, &udev->state_bits) ||
+	    test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+		return -EBUSY;
+
+	record = &udev->stats.activate_record;
+
+	mutex_lock(&record->lock);
+
+	seq_puts(s, "current time        : ");
+	ubase_dbg_format_time(ktime_get_real_seconds(), s);
+	seq_puts(s, "\n");
+	seq_printf(s, "activate dev count    : %llu\n", record->act_cnt);
+	seq_printf(s, "deactivate dev count  : %llu\n", record->deact_cnt);
+
+	total = record->act_cnt + record->deact_cnt;
+	if (!total) {
+		seq_puts(s, "activate dev change records : NA\n");
+		mutex_unlock(&record->lock);
+		return 0;
+	}
+
+	seq_puts(s, "activate dev change records :\n");
+	seq_puts(s, "\tNo.\tTIME\t\t\t\tSTATUS\t\tRESULT\n");
+
+	stats_cnt = min(total, UBASE_ACT_STAT_MAX_NUM);
+	while (cnt <= stats_cnt) {
+		total--;
+		idx = total % UBASE_ACT_STAT_MAX_NUM;
+		seq_printf(s, "\t%-2d\t", cnt);
+		ubase_dbg_format_time(record->stats[idx].time, s);
+		seq_printf(s, "\t%s", record->stats[idx].activate ?
+					  "activate" : "deactivate");
+		seq_printf(s, "\t%d", record->stats[idx].result);
+		seq_puts(s, "\n");
+		cnt++;
+	}
+
+	mutex_unlock(&record->lock);
+
+	return 0;
+}
+
 static void ubase_dbg_fill_single_port(struct seq_file *s,
 				       struct ubase_perf_stats_result *stats)
 {
@@ -192,6 +241,14 @@ static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
 		.support = __ubase_dbg_dentry_support,
 		.init = __ubase_dbg_seq_file_init,
 		.read_func = ubase_dbg_dump_rst_info,
+	},
+	{
+		.name = "activate_record",
+		.dentry_index = UBASE_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_activate_record,
 	},
 	{
 		.name = "sl_vl_map",

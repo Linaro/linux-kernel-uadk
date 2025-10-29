@@ -15,4 +15,7 @@ struct ubase_query_mac_stats_cmd {
 	__le64 stats_val[];
 };
 
+void ubase_update_activate_stats(struct ubase_dev *udev, bool activate,
+				 int result);
+
 #endif /* _UBASE_STATS_H */

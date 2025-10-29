@@ -16,6 +16,7 @@
 #include "ubase_mailbox.h"
 #include "ubase_pmem.h"
 #include "ubase_reset.h"
+#include "ubase_stats.h"
 #include "ubase_dev.h"
 
 #define UBASE_PERIOD_100MS 100
@@ -1317,12 +1318,15 @@ int ubase_activate_dev(struct auxiliary_device *adev)
 	if (ret) {
 		ubase_err(udev,
 			  "failed to activate ubase dev, ret = %d.\n", ret);
-		return ret;
+		goto activate_dev_err;
 	}
 
 	ubase_activate_notify(udev, adev, true);
 
-	return 0;
+activate_dev_err:
+	ubase_update_activate_stats(udev, true, ret);
+
+	return ret;
 }
 EXPORT_SYMBOL(ubase_activate_dev);
 
@@ -1351,6 +1355,8 @@ int ubase_deactivate_dev(struct auxiliary_device *adev)
 			  "failed to deactivate ubase dev, ret = %d.\n", ret);
 		ubase_activate_notify(udev, adev, true);
 	}
+
+	ubase_update_activate_stats(udev, false, ret);
 
 	return ret;
 }

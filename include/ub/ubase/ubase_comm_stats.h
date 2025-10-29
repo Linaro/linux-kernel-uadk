@@ -9,6 +9,97 @@
 
 #include <linux/auxiliary_bus.h>
 
+struct ubase_ub_dl_stats {
+	u64	dl_tx_vl0_pkt_num;
+	u64	dl_tx_vl1_pkt_num;
+	u64	dl_tx_vl2_pkt_num;
+	u64	dl_tx_vl3_pkt_num;
+	u64	dl_tx_vl4_pkt_num;
+	u64	dl_tx_vl5_pkt_num;
+	u64	dl_tx_vl6_pkt_num;
+	u64	dl_tx_vl7_pkt_num;
+	u64	dl_tx_vl8_pkt_num;
+	u64	dl_tx_vl9_pkt_num;
+	u64	dl_tx_vl10_pkt_num;
+	u64	dl_tx_vl11_pkt_num;
+
+	u64	dl_rx_vl0_pkt_num;
+	u64	dl_rx_vl1_pkt_num;
+	u64	dl_rx_vl2_pkt_num;
+	u64	dl_rx_vl3_pkt_num;
+	u64	dl_rx_vl4_pkt_num;
+	u64	dl_rx_vl5_pkt_num;
+	u64	dl_rx_vl6_pkt_num;
+	u64	dl_rx_vl7_pkt_num;
+	u64	dl_rx_vl8_pkt_num;
+	u64	dl_rx_vl9_pkt_num;
+	u64	dl_rx_vl10_pkt_num;
+	u64	dl_rx_vl11_pkt_num;
+
+	u64	dl_tx_busi_pkt_num;
+	u64	dl_tx_busi_block_num;
+	u64	dl_tx_busi_flit_num;
+	u64	dl_rx_busi_pkt_num;
+	u64	dl_rx_busi_block_num;
+	u64	dl_rx_busi_flit_num;
+	u64	dl_tx_ctrl_pkt_num;
+	u64	dl_tx_ctrl_pkt_flit_num;
+	u64	dl_rx_ctrl_pkt_num;
+	u64	dl_rx_ctrl_pkt_flit_num;
+
+	u64	dl_rx_vl0_from_nl_crd;
+	u64	dl_rx_vl1_from_nl_crd;
+	u64	dl_rx_vl2_from_nl_crd;
+	u64	dl_rx_vl3_from_nl_crd;
+	u64	dl_rx_vl4_from_nl_crd;
+	u64	dl_rx_vl5_from_nl_crd;
+	u64	dl_rx_vl6_from_nl_crd;
+	u64	dl_rx_vl7_from_nl_crd;
+	u64	dl_rx_vl8_from_nl_crd;
+	u64	dl_rx_vl9_from_nl_crd;
+	u64	dl_rx_vl10_from_nl_crd;
+	u64	dl_rx_vl11_from_nl_crd;
+
+	u64	dl_tx_vl0_to_nl_crd;
+	u64	dl_tx_vl1_to_nl_crd;
+	u64	dl_tx_vl2_to_nl_crd;
+	u64	dl_tx_vl3_to_nl_crd;
+	u64	dl_tx_vl4_to_nl_crd;
+	u64	dl_tx_vl5_to_nl_crd;
+	u64	dl_tx_vl6_to_nl_crd;
+	u64	dl_tx_vl7_to_nl_crd;
+	u64	dl_tx_vl8_to_nl_crd;
+	u64	dl_tx_vl9_to_nl_crd;
+	u64	dl_tx_vl10_to_nl_crd;
+	u64	dl_tx_vl11_to_nl_crd;
+
+	u64	dl_tx_recv_ack_flit;
+	u64	dl_rx_send_ack_flit;
+	u64	dl_retry_req_sum;
+	u64	dl_retry_ack_sum;
+	u64	dl_crc_error_sum;
+
+	u64	dl_tx_vl12_pkt_num;
+	u64	dl_tx_vl13_pkt_num;
+	u64	dl_tx_vl14_pkt_num;
+	u64	dl_tx_vl15_pkt_num;
+
+	u64	dl_rx_vl12_pkt_num;
+	u64	dl_rx_vl13_pkt_num;
+	u64	dl_rx_vl14_pkt_num;
+	u64	dl_rx_vl15_pkt_num;
+
+	u64	dl_rx_vl12_from_nl_crd;
+	u64	dl_rx_vl13_from_nl_crd;
+	u64	dl_rx_vl14_from_nl_crd;
+	u64	dl_rx_vl15_from_nl_crd;
+
+	u64	dl_tx_vl12_to_nl_crd;
+	u64	dl_tx_vl13_to_nl_crd;
+	u64	dl_tx_vl14_to_nl_crd;
+	u64	dl_tx_vl15_to_nl_crd;
+};
+
 struct ubase_eth_mac_stats {
 	u64	tx_fragment_pkts;
 	u64	tx_undersize_pkts;

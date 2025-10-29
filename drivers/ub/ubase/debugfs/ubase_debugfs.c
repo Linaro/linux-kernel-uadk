@@ -32,6 +32,154 @@ static int ubase_dbg_dump_rst_info(struct seq_file *s, void *data)
 	return 0;
 }
 
+static void ubase_dbg_dump_caps_bits(struct seq_file *s, struct ubase_dev *udev)
+{
+#define CAP_FMT(name) "\tsupport_" #name ": %d\n"
+#define PTRINT_CAP(name, func) seq_printf(s, CAP_FMT(name), func(udev))
+
+	PTRINT_CAP(ub_link, ubase_dev_ubl_supported);
+	PTRINT_CAP(ta_extdb_buffer_config, ubase_dev_ta_extdb_buf_supported);
+	PTRINT_CAP(ta_timer_buffer_config, ubase_dev_ta_timer_buf_supported);
+	PTRINT_CAP(err_handle, ubase_dev_err_handle_supported);
+	PTRINT_CAP(ctrlq, ubase_dev_ctrlq_supported);
+	PTRINT_CAP(eth_mac, ubase_dev_eth_mac_supported);
+	PTRINT_CAP(mac_stats, ubase_dev_mac_stats_supported);
+	PTRINT_CAP(prealloc, __ubase_dev_prealloc_supported);
+	PTRINT_CAP(udma, ubase_dev_udma_supported);
+	PTRINT_CAP(unic, ubase_dev_unic_supported);
+	PTRINT_CAP(uvb, ubase_dev_uvb_supported);
+	PTRINT_CAP(ip_over_urma, ubase_ip_over_urma_supported);
+	if (ubase_ip_over_urma_supported(udev))
+		PTRINT_CAP(ip_over_urma_utp, ubase_ip_over_urma_utp_supported);
+	PTRINT_CAP(activate_proxy, ubase_activate_proxy_supported);
+	PTRINT_CAP(utp, ubase_utp_supported);
+}
+
+static void ubase_dbg_dump_caps_info(struct seq_file *s, struct ubase_dev *udev)
+{
+	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
+	struct ubase_dbg_common_caps_info {
+		const char *format;
+		u64 caps_info;
+	} ubase_common_caps_info[] = {
+		{"\tnum_ceq_vectors: %u\n", dev_caps->num_ceq_vectors},
+		{"\tnum_aeq_vectors: %u\n", dev_caps->num_aeq_vectors},
+		{"\tnum_misc_vectors: %u\n", dev_caps->num_misc_vectors},
+		{"\taeqe_size: %u\n", dev_caps->aeqe_size},
+		{"\tceqe_size: %u\n", dev_caps->ceqe_size},
+		{"\taeqe_depth: %u\n", dev_caps->aeqe_depth},
+		{"\tceqe_depth: %u\n", dev_caps->ceqe_depth},
+		{"\ttotal_ue_num: %u\n", dev_caps->total_ue_num},
+		{"\tta_extdb_buf_size: %llu\n", udev->ta_ctx.extdb_buf.size},
+		{"\tta_timer_buf_size: %llu\n", udev->ta_ctx.timer_buf.size},
+		{"\tpublic_jetty_cnt: %u\n", dev_caps->public_jetty_cnt},
+		{"\tvl_num: %hhu\n", dev_caps->vl_num},
+		{"\trsvd_jetty_cnt: %hu\n", dev_caps->rsvd_jetty_cnt},
+		{"\tpacket_pattern_mode: %u\n", dev_caps->packet_pattern_mode},
+		{"\tack_queue_num: %u\n", dev_caps->ack_queue_num},
+		{"\toor_en: %u\n", dev_caps->oor_en},
+		{"\treorder_queue_en: %u\n", dev_caps->reorder_queue_en},
+		{"\ton_flight_size: %u\n", dev_caps->on_flight_size},
+		{"\treorder_cap: %u\n", dev_caps->reorder_cap},
+		{"\treorder_queue_shift: %u\n", dev_caps->reorder_queue_shift},
+		{"\tat_times: %u\n", dev_caps->at_times},
+		{"\tue_num: %u\n", dev_caps->ue_num},
+		{"\tmac_stats_num: %u\n", dev_caps->mac_stats_num},
+		{"\tlogic_port_bitmap: 0x%x\n", dev_caps->logic_port_bitmap},
+		{"\tub_port_logic_id: %u\n", dev_caps->ub_port_logic_id},
+		{"\tio_port_logic_id: %u\n", dev_caps->io_port_logic_id},
+		{"\tio_port_id: %u\n", dev_caps->io_port_id},
+		{"\tnl_port_id: %u\n", dev_caps->nl_port_id},
+		{"\tchip_id: %u\n", dev_caps->chip_id},
+		{"\tdie_id: %u\n", dev_caps->die_id},
+		{"\tue_id: %u\n", dev_caps->ue_id},
+		{"\tnl_id: %u\n", dev_caps->nl_id},
+	};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ubase_common_caps_info); i++)
+		seq_printf(s, ubase_common_caps_info[i].format,
+			   ubase_common_caps_info[i].caps_info);
+}
+
+static void ubase_dbg_dump_common_caps(struct seq_file *s, struct ubase_dev *udev)
+{
+	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
+
+	ubase_dbg_dump_caps_info(s, udev);
+
+	seq_puts(s, "\treq_vl:");
+	ubase_dbg_dump_arr_info(s, dev_caps->req_vl, dev_caps->vl_num);
+
+	seq_puts(s, "\tresp_vl:");
+	ubase_dbg_dump_arr_info(s, dev_caps->resp_vl, dev_caps->vl_num);
+}
+
+static void ubase_dbg_dump_adev_caps(struct seq_file *s,
+				     struct ubase_adev_caps *caps)
+{
+	struct ubase_dbg_adev_caps_info {
+		const char *format;
+		u32 caps_info;
+	} ubase_adev_caps_info[] = {
+		{"\tjfs_max_cnt: %u\n", caps->jfs.max_cnt},
+		{"\tjfs_reserved_cnt: %u\n", caps->jfs.reserved_cnt},
+		{"\tjfs_depth: %u\n", caps->jfs.depth},
+		{"\tjfr_max_cnt: %u\n", caps->jfr.max_cnt},
+		{"\tjfr_reserved_cnt: %u\n", caps->jfr.reserved_cnt},
+		{"\tjfr_depth: %u\n", caps->jfr.depth},
+		{"\tjfc_max_cnt: %u\n", caps->jfc.max_cnt},
+		{"\tjfc_reserved_cnt: %u\n", caps->jfc.reserved_cnt},
+		{"\tjfc_depth: %u\n", caps->jfc.depth},
+		{"\ttp_max_cnt: %u\n", caps->tp.max_cnt},
+		{"\ttp_reserved_cnt: %u\n", caps->tp.reserved_cnt},
+		{"\ttp_depth: %u\n", caps->tp.depth},
+		{"\ttpg_max_cnt: %u\n", caps->tpg.max_cnt},
+		{"\ttpg_reserved_cnt: %u\n", caps->tpg.reserved_cnt},
+		{"\ttpg_depth: %u\n", caps->tpg.depth},
+		{"\tcqe_size: %hu\n", caps->cqe_size},
+		{"\tutp_port_bitmap: 0x%x\n", caps->utp_port_bitmap},
+		{"\tjtg_max_cnt: %u\n", caps->jtg_max_cnt},
+		{"\trc_max_cnt: %u\n", caps->rc_max_cnt},
+		{"\trc_depth: %u\n", caps->rc_que_depth},
+		{"\tccc_max_cnt: %u\n", caps->ccc_max_cnt},
+		{"\tdest_addr_max_cnt: %u\n", caps->dest_addr_max_cnt},
+		{"\tseid_upi_max_cnt: %u\n", caps->seid_upi_max_cnt},
+		{"\ttpm_max_cnt: %u\n", caps->tpm_max_cnt},
+		{"\tprealloc_mem_dma_len: %llu\n", caps->pmem.dma_len},
+	};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ubase_adev_caps_info); i++)
+		seq_printf(s, ubase_adev_caps_info[i].format,
+			   ubase_adev_caps_info[i].caps_info);
+}
+
+static int ubase_dbg_dump_dev_caps(struct seq_file *s, void *data)
+{
+	struct ubase_dev *udev = dev_get_drvdata(s->private);
+	struct ubase_dev_caps *udev_caps = &udev->caps;
+
+	seq_puts(s, "CAP_BITS:\n");
+	ubase_dbg_dump_caps_bits(s, udev);
+	seq_puts(s, "\nCOMMON_CAPS:\n");
+	ubase_dbg_dump_common_caps(s, udev);
+
+	if (ubase_dev_pmu_supported(udev))
+		return 0;
+
+	seq_puts(s, "\nUNIC_CAPS:\n");
+	ubase_dbg_dump_adev_caps(s, &udev_caps->unic_caps);
+
+	if (ubase_dev_cdma_supported(udev))
+		seq_puts(s, "\nCDMA_CAPS:\n");
+	else
+		seq_puts(s, "\nUDMA_CAPS:\n");
+	ubase_dbg_dump_adev_caps(s, &udev_caps->udma_caps);
+
+	return 0;
+}
+
 static int ubase_query_ubcl_config(struct ubase_dev *udev, u16 offset,
 				   u16 is_query, u16 size,
 				   struct ubase_ubcl_config_cmd *resp)
@@ -343,6 +491,15 @@ static struct ubase_dbg_cmd_info ubase_dbg_cmd[] = {
 		.support = __ubase_dbg_dentry_support,
 		.init = __ubase_dbg_seq_file_init,
 		.read_func = ubase_dbg_dump_ceq_context,
+	},
+	{
+		.name = "caps_info",
+		.dentry_index = UBASE_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_URMA | UBASE_SUP_CDMA | UBASE_SUP_PMU |
+			    UBASE_SUP_UBL_ETH,
+		.support = __ubase_dbg_dentry_support,
+		.init = __ubase_dbg_seq_file_init,
+		.read_func = ubase_dbg_dump_dev_caps,
 	},
 	{
 		.name = "UBCL_config",

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0+
+menuconfig UB_CDMA
+	default n
+	tristate "cdma driver"
+	depends on UB_UBASE && UB_UMMU_CORE
+	help
+	   This option enables support for CDMA drivers. The CDMA driver facilitates
+	   the creation and destruction of CDMA devices, as well as the creation of
+	   resources within CDMA devices to perform DMA read/write tasks and retrieve
+	   the completion status of executed tasks.

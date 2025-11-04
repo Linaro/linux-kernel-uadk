@@ -13,20 +13,55 @@
 
 #define UBASE_MIN_IRQ_NUM 3 /* for misc aeq ceq */
 
+#define UBASE_EQ_ALWAYS_ARMED		0x2
+#define UBASE_EQ_COALESCE_0		0
+#define UBASE_EQ_INIT_PROD_IDX		0
+#define UBASE_EQ_INIT_CONS_IDX		0
+#define UBASE_EQ_STAT_INVALID		0
+#define UBASE_EQ_STAT_VALID		1
+
+#define UBASE_CTX_SHIFT_BASE		6
+#define UBASE_DEFAULT_EQE_SIZE		64
+#define UBASE_EQE_BA_L_OFFSET		12
+#define UBASE_EQE_BA_L_VALID_BIT	GENMASK(19, 0)
+#define UBASE_EQE_BA_H_OFFSET		32
+#define UBASE_EQE_BA_H_VALID_BIT	GENMASK(31, 0)
+
+#define EQC_EQ_MAX_PERIOD_INDX	4U
+
 #define UBASE_INT_NAME_LEN 32
 
 #define UBASE_AE_LEVEL_NUM 4
 
+/* Vector0 interrupt CMDQ event source register(RW) */
+#define UBASE_VECTOR0_CMDQ_SRC_REG	0x18004
 /* Vector0 interrupt control register */
 #define UBASE_MISC_VECTOR_REG_OFFSET	0x18020
+/* CMDQ register bits for RX event */
+#define UBASE_VECTOR0_RX_CMDQ_INT_B	1
+
+enum ubase_async_event_cause_bit {
+	UBASE_ASYNC_EVENT_CRQ_B,
+};
 
 enum ubase_eqc_irqn {
 	UBASE_MISC_IRQ_INDEX,
+	UBASE_AEQ_IRQ_INDEX,
 };
 
 struct ubase_irq {
 	char	name[UBASE_INT_NAME_LEN];
 	int	irqn;
+};
+
+struct ubase_eq_db {
+	u8 eqn;
+	u8 rsv0;
+	__le16 type : 2;
+	__le16 rsv1 : 14;
+
+	__le32 ci : 24;
+	__le32 rsv2 : 8;
 };
 
 struct ubase_eq_addr {
@@ -48,6 +83,62 @@ struct ubase_eq {
 	int			irqn;
 	u32			eqc_irqn; /* irqn for eqc */
 	u32			cons_index;
+};
+
+struct ubase_eq_ctx {
+	/* DW0 */
+	u32 state : 2;
+	u32 arm_st : 2;
+	u32 eqe_size : 1;
+	u32 rsv0 : 3;
+	u32 pi : 24;
+
+	/* DW1 */
+	u32 shift : 5;
+	u32 eqe_coalesce_period : 3;
+	u32 ci : 24;
+
+	/* DW2 */
+	u32 eqe_coalesce_cnt : 10;
+	u32 rsv1 : 2;
+	u32 eqe_base_addr_l : 20;
+
+	/* DW3 */
+	u32 eqe_base_addr_h;
+
+	/* DW4 */
+	u32 eqe_token_id : 20;
+	u32 rsv2 : 12;
+
+	/* DW5 */
+	u32 eqe_token_value;
+
+	/* DW6 */
+	u32 irq_num : 16;
+	u32 rsv3_1 : 16;
+
+	/* DW7 */
+	u32 rsv3_2;
+
+	/* DW8 */
+	u32 eqn : 8;
+	u32 eqe_cnt : 10;
+	u32 rsv4 : 12;
+	u32 eqe_report_timer_l : 2;
+
+	/* DW9 */
+	u32 eqe_report_timer_h;
+
+	/* DW10 */
+	u32 funid : 8;
+	u32 pi_bypass : 24;
+
+	/* DW11 */
+	u32 state2 : 2;
+	u32 rsv5_1 : 30;
+
+	/* DW12~DW15 */
+	u32 rsv5_2[4];
 };
 
 struct ubase_ceq {
@@ -74,6 +165,12 @@ struct ubase_irq_table {
 
 	struct ubase_irq		**irqs; /* first one for misc */
 	u32				irqs_num;
+};
+
+struct ubase_aeq_work {
+	struct ubase_dev	*udev;
+	struct work_struct	work;
+	struct ubase_aeqe	aeqe;
 };
 
 int ubase_irq_table_init(struct ubase_dev *udev);

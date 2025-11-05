@@ -5,4 +5,5 @@
 #
 ccflags-y += -I$(src)
 
-ubcore-objs := ubcore_log.o
+ubcore-objs := ubcore_log.o \
+ubcore_hash_table.o

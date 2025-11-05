@@ -8323,6 +8323,7 @@ CONFIG_KWORKER_NUMA_AFFINITY=y
 # unified bus
 #
 CONFIG_UB=y
+CONFIG_UB_URMA=m
 CONFIG_UB_UBL=m
 # Basic UB bus code compiled into the kernel
 CONFIG_UB_UBUS=y

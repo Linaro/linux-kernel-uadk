@@ -5,6 +5,7 @@
 #
 ccflags-y += -I$(src)
 
-ubcore-objs := ubcore_topo_info.o \
+ubcore-objs := ubcore_hash_table.o \
 ubcore_log.o \
-ubcore_hash_table.o
+ubcore_topo_info.o \
+ubcore_workqueue.o

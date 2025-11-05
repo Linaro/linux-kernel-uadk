@@ -97,7 +97,7 @@ int ubcore_create_workqueues(void)
 			g_ubcore_workqueues[i] = alloc_workqueue(
 				"%s", 0, 0, UBCORE_QUEUE_NAMES[i]);
 
-		if (g_ubcore_workqueues[i] == NULL) {
+		if (!g_ubcore_workqueues[i]) {
 			ubcore_log_err(
 				"Fail to alloc workqueue, queue type %u.\n", i);
 			break;
@@ -109,7 +109,7 @@ int ubcore_create_workqueues(void)
 	for (j = 0; j < i; j++)
 		destroy_workqueue(g_ubcore_workqueues[j]);
 
-	return -1;
+	return -EINVAL;
 }
 
 void ubcore_destroy_workqueues(void)

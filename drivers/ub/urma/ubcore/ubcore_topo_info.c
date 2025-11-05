@@ -28,7 +28,7 @@ ubcore_create_global_topo_map(struct ubcore_topo_info *topo_infos,
 
 void ubcore_delete_global_topo_map(void)
 {
-	if (g_ubcore_topo_map == NULL)
+	if (!g_ubcore_topo_map)
 		return;
 	ubcore_delete_topo_map(g_ubcore_topo_map);
 	g_ubcore_topo_map = NULL;
@@ -46,13 +46,13 @@ ubcore_create_topo_map_from_user(struct ubcore_topo_info *user_topo_infos,
 	struct ubcore_topo_map *topo_map = NULL;
 	int ret = 0;
 
-	if (user_topo_infos == NULL || node_num <= 0 ||
+	if (!user_topo_infos || node_num <= 0 ||
 	    node_num > MAX_NODE_NUM) {
 		ubcore_log_err("Invalid param\n");
 		return NULL;
 	}
 	topo_map = kzalloc(sizeof(struct ubcore_topo_map), GFP_KERNEL);
-	if (topo_map == NULL)
+	if (!topo_map)
 		return NULL;
 	ret = copy_from_user(topo_map->topo_infos,
 			     (void __user *)user_topo_infos,
@@ -68,7 +68,7 @@ ubcore_create_topo_map_from_user(struct ubcore_topo_info *user_topo_infos,
 
 void ubcore_delete_topo_map(struct ubcore_topo_map *topo_map)
 {
-	if (topo_map == NULL)
+	if (!topo_map)
 		return;
 	kfree(topo_map);
 }
@@ -118,7 +118,7 @@ static int find_cur_node_index(struct ubcore_topo_map *topo_map,
 	}
 	if (i == topo_map->node_num) {
 		ubcore_log_err("can't find cur node\n");
-		return -1;
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -156,7 +156,7 @@ static int update_peer_port_eid(struct ubcore_topo_info *new_topo_info,
 					", old: " EID_FMT "\n",
 					EID_RAW_ARGS(new_peer_port_eid),
 					EID_RAW_ARGS(old_peer_port_eid));
-				return -1;
+				return -EINVAL;
 			}
 			(void)memcpy(old_peer_port_eid, new_peer_port_eid,
 				     EID_LEN);
@@ -185,7 +185,7 @@ int ubcore_update_topo_map(struct ubcore_topo_map *new_topo_map,
 	uint32_t new_cur_node_index = 0;
 	uint32_t old_cur_node_index = 0;
 
-	if (new_topo_map == NULL || old_topo_map == NULL) {
+	if (!new_topo_map || !old_topo_map) {
 		ubcore_log_err("Invalid topo map\n");
 		return -EINVAL;
 	}
@@ -195,18 +195,18 @@ int ubcore_update_topo_map(struct ubcore_topo_map *new_topo_map,
 	}
 	if (find_cur_node_index(new_topo_map, &new_cur_node_index) != 0) {
 		ubcore_log_err("find cur node index failed in new topo map\n");
-		return -1;
+		return -EINVAL;
 	}
 	new_cur_node_info = &(new_topo_map->topo_infos[new_cur_node_index]);
 	if (find_cur_node_index(old_topo_map, &old_cur_node_index) != 0) {
 		ubcore_log_err("find cur node index failed in old topo map\n");
-		return -1;
+		return -EINVAL;
 	}
 	old_cur_node_info = &(old_topo_map->topo_infos[old_cur_node_index]);
 
 	if (update_peer_port_eid(new_cur_node_info, old_cur_node_info) != 0) {
 		ubcore_log_err("update peer port eid failed\n");
-		return -1;
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -260,7 +260,7 @@ int ubcore_get_primary_eid(union ubcore_eid *eid, union ubcore_eid *primary_eid)
 	int i, j, k;
 	struct ubcore_topo_info *cur_node_info;
 
-	if (g_ubcore_topo_map == NULL) {
+	if (!g_ubcore_topo_map) {
 		ubcore_log_info(
 			"ubcore topo map doesn't exist, eid is primary_eid.\n");
 		(void)memcpy(primary_eid, eid, EID_LEN);
@@ -272,7 +272,7 @@ int ubcore_get_primary_eid(union ubcore_eid *eid, union ubcore_eid *primary_eid)
 		if (compare_eids(cur_node_info->bonding_eid,
 				 (char *)eid->raw)) {
 			ubcore_log_err("input eid is bonding eid\n");
-			return -1;
+			return -EINVAL;
 		}
 		for (j = 0; j < IODIE_NUM; j++) {
 			if (compare_eids(
@@ -302,7 +302,7 @@ int ubcore_get_primary_eid(union ubcore_eid *eid, union ubcore_eid *primary_eid)
 		}
 	}
 	ubcore_log_err("can't find primary eid\n");
-	return -1;
+	return -EINVAL;
 }
 
 static struct ubcore_topo_info *
@@ -336,14 +336,14 @@ static int ubcore_get_topo_port_eid(union ubcore_eid *src_v_eid,
 		ubcore_get_topo_info_by_bonding_eid(src_v_eid);
 	if (IS_ERR_OR_NULL(src_topo_info)) {
 		ubcore_log_err("Failed to get src_topo_info.\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	dst_topo_info =
 		ubcore_get_topo_info_by_bonding_eid(dst_v_eid);
 	if (IS_ERR_OR_NULL(dst_topo_info)) {
 		ubcore_log_err("Failed to get dst_topo_info.\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	/* loop up in source topo info */
@@ -386,7 +386,7 @@ static int ubcore_get_topo_port_eid(union ubcore_eid *src_v_eid,
 	ubcore_log_err(
 		"Failed to get topo port eid, src_v_eid: "EID_FMT", dst_v_eid: "EID_FMT".\n",
 		EID_ARGS(*src_v_eid), EID_ARGS(*dst_v_eid));
-	return -1;
+	return -EINVAL;
 }
 
 int ubcore_get_primary_eid_by_bonding_eid(union ubcore_eid *bonding_eid,
@@ -396,9 +396,9 @@ int ubcore_get_primary_eid_by_bonding_eid(union ubcore_eid *bonding_eid,
 	int i;
 
 	topo_map = ubcore_get_global_topo_map();
-	if (topo_map == NULL) {
+	if (!topo_map) {
 		ubcore_log_err("Failed get global topo map");
-		return -1;
+		return -EINVAL;
 	}
 
 	for (i = 0; i < topo_map->node_num; i++) {
@@ -409,7 +409,7 @@ int ubcore_get_primary_eid_by_bonding_eid(union ubcore_eid *bonding_eid,
 			return 0;
 		}
 	}
-	return -1;
+	return -EINVAL;
 }
 
 static int ubcore_get_topo_primary_eid(union ubcore_eid *src_v_eid,
@@ -443,16 +443,16 @@ int ubcore_get_topo_eid(uint32_t tp_type, union ubcore_eid *src_v_eid,
 {
 	int ret = 0;
 
-	if (src_v_eid == NULL || dst_v_eid == NULL ||
-		src_p_eid == NULL || dst_p_eid == NULL) {
+	if (!src_v_eid || !dst_v_eid ||
+		!src_p_eid || !dst_p_eid) {
 		ubcore_log_err("Invalid parameter.\n");
 		return -EINVAL;
 	}
 
-	if (g_ubcore_topo_map == NULL) {
+	if (!g_ubcore_topo_map) {
 		ubcore_log_err(
 			"Failed to get p_eid, ubcore topo map doesn't exist.\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	switch (tp_type) {

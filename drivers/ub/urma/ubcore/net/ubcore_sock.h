@@ -15,8 +15,8 @@
 #include "ubcore_net.h"
 #include <ub/urma/ubcore_types.h>
 
-int ubcore_sock_send(struct ubcore_device *dev, struct ubcore_net_msg *msg,
-		     void *conn);
+int ubcore_sock_send(struct ubcore_device *dev, void *conn,
+		struct ubcore_net_msg *msg);
 int ubcore_sock_send_to(struct ubcore_device *dev, struct ubcore_net_msg *msg,
 			union ubcore_eid addr);
 

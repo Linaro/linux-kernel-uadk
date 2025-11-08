@@ -125,7 +125,6 @@ ubcore_import_jfr_ex(struct ubcore_device *dev, struct ubcore_tjetty_cfg *cfg,
 		     struct ubcore_active_tp_cfg *active_tp_cfg,
 		     struct ubcore_udata *udata)
 {
-	struct ubcore_vtpn *vtpn = NULL;
 	struct ubcore_tjetty *tjfr;
 
 	if (dev == NULL || dev->ops == NULL ||
@@ -156,7 +155,6 @@ ubcore_import_jetty_ex(struct ubcore_device *dev, struct ubcore_tjetty_cfg *cfg,
 		       struct ubcore_active_tp_cfg *active_tp_cfg,
 		       struct ubcore_udata *udata)
 {
-	struct ubcore_vtpn *vtpn = NULL;
 	struct ubcore_tjetty *tjetty;
 
 	if (dev == NULL || dev->ops == NULL ||
@@ -187,7 +185,6 @@ static int ubcore_inner_bind_ub_jetty_ctrlplane(
 	struct ubcore_active_tp_cfg *active_tp_cfg, struct ubcore_udata *udata)
 {
 	struct ubcore_device *dev;
-	struct ubcore_vtpn *vtpn;
 	int ret;
 
 	dev = jetty->ub_dev;
@@ -205,13 +202,6 @@ static int ubcore_inner_bind_ub_jetty_ctrlplane(
 	}
 	atomic_inc(&jetty->use_cnt);
 	return 0;
-
-unbind:
-	if (dev->ops->bind_jetty_ex != NULL && dev->ops->unbind_jetty != NULL) {
-		(void)dev->ops->unbind_jetty(jetty);
-		atomic_dec(&jetty->use_cnt);
-	}
-	return ret;
 }
 
 static int ubcore_inner_bind_jetty_ctrlplane(
@@ -312,4 +302,77 @@ int ubcore_user_control(struct ubcore_device *dev,
 	return 0;
 }
 EXPORT_SYMBOL(ubcore_user_control);
+
+int ubcore_config_rsvd_jetty(struct ubcore_device *dev, uint32_t min_jetty_id,
+			     uint32_t max_jetty_id)
+{
+	struct ubcore_device_cfg cfg = { 0 };
+	int ret = 0;
+
+	if (dev == NULL || dev->ops == NULL ||
+	    dev->ops->config_device == NULL ||
+	    dev->ops->query_device_attr == NULL ||
+	    dev->transport_type != UBCORE_TRANSPORT_UB) {
+		return -EINVAL;
+	}
+
+	cfg.ue_idx = dev->attr.ue_idx;
+	cfg.mask.bs.reserved_jetty_id_min = 1;
+	cfg.mask.bs.reserved_jetty_id_max = 1;
+	cfg.reserved_jetty_id_min = min_jetty_id;
+	cfg.reserved_jetty_id_max = max_jetty_id;
+
+	ret = dev->ops->config_device(dev, &cfg);
+	if (ret) {
+		ubcore_log_info("dev:%s, not support reserved jetty\n",
+				dev->dev_name);
+		dev->attr.reserved_jetty_id_max = U32_MAX;
+		dev->attr.reserved_jetty_id_min = U32_MAX;
+	} else {
+		dev->ops->query_device_attr(dev, &dev->attr);
+	}
+
+	return ret;
+}
+
+int ubcore_query_device_attr(struct ubcore_device *dev,
+			     struct ubcore_device_attr *attr)
+{
+	int ret;
+
+	if (dev == NULL || attr == NULL || dev->ops == NULL ||
+	    dev->ops->query_device_attr == NULL) {
+		ubcore_log_err("Invalid argument.\n");
+		return -EINVAL;
+	}
+
+	ret = dev->ops->query_device_attr(dev, attr);
+	if (ret != 0) {
+		ubcore_log_err("failed to query device attr, ret: %d.\n", ret);
+		return -EPERM;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(ubcore_query_device_attr);
+
+int ubcore_query_device_status(struct ubcore_device *dev,
+			       struct ubcore_device_status *status)
+{
+	int ret;
+
+	if (dev == NULL || status == NULL || dev->ops == NULL ||
+	    dev->ops->query_device_status == NULL) {
+		ubcore_log_err("Invalid argument.\n");
+		return -EINVAL;
+	}
+
+	ret = dev->ops->query_device_status(dev, status);
+	if (ret != 0) {
+		ubcore_log_err("failed to query device status, ret: %d.\n",
+			       ret);
+		return -EPERM;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(ubcore_query_device_status);
 

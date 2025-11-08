@@ -29,6 +29,7 @@
 #define IPV4_MAP_IPV6_PREFIX 0x0000ffff
 #define SOCK_PORT 1226
 #define SOCK_MSG_MAX_LEN 4096
+#define SK_EVENT_TIME_LIMIT 300
 
 enum sk_type {
 	SOCK_LISTEN,
@@ -217,7 +218,7 @@ static struct socket *k_connect(union ubcore_net_addr_union *ub_addr,
 
 	ret = kernel_connect(sock, sk_addr, sk_addr_size, 0);
 	if (ret < 0) {
-		ubcore_log_err("Failed to call kernel_connect");
+		ubcore_log_err("Failed to connect socket");
 		goto destroy_sock;
 	}
 
@@ -372,13 +373,13 @@ static struct sk_entry *sk_entry_create_listen(union ubcore_net_addr_union addr)
 	struct socket *sock;
 
 	sock = k_listen(&addr, ss.port);
-	if (sock == NULL) {
+	if (!sock) {
 		ubcore_log_err("Failed to create listen socket");
 		return NULL;
 	}
 
 	entry = sk_entry_create(sock, SOCK_LISTEN, addr);
-	if (entry == NULL) {
+	if (!entry) {
 		ubcore_log_err("Failed to create sock entry");
 		k_close(sock);
 	}
@@ -392,13 +393,13 @@ static struct sk_entry *sk_entry_create_accept(struct socket *sock)
 	union ubcore_net_addr_union addr = { 0 };
 
 	newsock = k_accept(sock, &addr);
-	if (newsock == NULL) {
+	if (!newsock) {
 		ubcore_log_err("Failed to create accept socket");
 		return NULL;
 	}
 
 	entry = sk_entry_create(newsock, SOCK_ACCEPT, addr);
-	if (entry == NULL) {
+	if (!entry) {
 		ubcore_log_err("Failed to register accept sock entry");
 		k_close(newsock);
 	}
@@ -412,13 +413,13 @@ sk_entry_create_connect(union ubcore_net_addr_union addr)
 	struct socket *sock;
 
 	sock = k_connect(&addr, ss.port);
-	if (sock == NULL) {
+	if (!sock) {
 		ubcore_log_err("Failed to create connect socket");
 		return NULL;
 	}
 
 	entry = sk_entry_create(sock, SOCK_CONNECT, addr);
-	if (entry == NULL) {
+	if (!entry) {
 		ubcore_log_err("Failed to create sock entry");
 		k_close(sock);
 	}
@@ -441,11 +442,11 @@ static struct sk_entry *sk_entry_find_by_addr(union ubcore_net_addr_union addr)
 	}
 	spin_unlock_irqrestore(&ss.lock, flags);
 
-	if (entry != NULL)
+	if (entry)
 		return entry;
 
 	entry = sk_entry_create_connect(addr);
-	if (entry == NULL) {
+	if (!entry) {
 		ubcore_log_err("Failed to create connect sock entry\n");
 		return NULL;
 	}
@@ -463,14 +464,14 @@ static int sk_handle_msg(struct sk_entry *entry)
 	if (ret != MSG_HDR_SIZE || msg.len > SOCK_MSG_MAX_LEN) {
 		ubcore_log_err("Failed to recv sock hdr, recv: %zu, " MSG_FMT,
 			       ret, MSG_ARG(&msg));
-		return -1;
+		return -EINVAL;
 	}
 
 	msg.data = kcalloc(1, msg.len, GFP_KERNEL);
 	if (IS_ERR_OR_NULL(msg.data)) {
 		ubcore_log_err("Failed to alloc sock msg data, " MSG_FMT,
 			       MSG_ARG(&msg));
-		return -1;
+		return -EINVAL;
 	}
 
 	ret = k_recvmsg(entry->sock, msg.data, msg.len, 0);
@@ -478,12 +479,12 @@ static int sk_handle_msg(struct sk_entry *entry)
 		ubcore_log_err("Failed to recv sock data, recv: %zu, " MSG_FMT,
 			       ret, MSG_ARG(&msg));
 		kfree(msg.data);
-		return -1;
+		return -EINVAL;
 	}
 
 	dev = ubcore_find_device((union ubcore_eid *)&entry->ub_addr,
 				 (enum ubcore_transport_type)(msg.cap));
-	if (dev == NULL) {
+	if (!dev) {
 		ubcore_log_err(
 			"Failed to find device when handle sock msg, " MSG_FMT,
 			MSG_ARG(&msg));
@@ -508,7 +509,7 @@ static int sk_event_loop(void *data)
 
 	while (!kthread_should_stop()) {
 		ktime_t expires;
-		ktime_t time_limit = ktime_set(300, 0);
+		ktime_t time_limit = ktime_set(SK_EVENT_TIME_LIMIT, 0);
 		unsigned long flags;
 
 		spin_lock_irqsave(&ss.lock, flags);
@@ -552,7 +553,7 @@ static int sk_event_loop(void *data)
 		spin_unlock_irqrestore(&ss.lock, flags);
 
 		if (signal_pending(current)) {
-			ubcore_log_err("pending signal");
+			ubcore_log_err("pending signal error");
 			break;
 		}
 
@@ -604,8 +605,8 @@ static int ubcore_sock_send_inner(struct ubcore_device *dev,
 	return ret;
 }
 
-int ubcore_sock_send(struct ubcore_device *dev, struct ubcore_net_msg *msg,
-		     void *conn)
+int ubcore_sock_send(struct ubcore_device *dev, void *conn,
+		struct ubcore_net_msg *msg)
 {
 	struct sk_entry *entry = conn;
 
@@ -620,8 +621,8 @@ int ubcore_sock_send_to(struct ubcore_device *dev, struct ubcore_net_msg *msg,
 
 	entry = sk_entry_find_by_addr(
 		*((union ubcore_net_addr_union *)(&addr)));
-	if (entry == NULL)
-		return -1;
+	if (!entry)
+		return -EINVAL;
 	ret = ubcore_sock_send_inner(dev, msg, entry);
 	sk_entry_ref_release(entry);
 	return ret;
@@ -641,13 +642,13 @@ int ubcore_sock_init(void)
 
 	if (sk_entry_create_listen(any_addr6) == NULL) {
 		ubcore_log_err("Failed to register ipv6 listen sock entry");
-		return -1;
+		return -EINVAL;
 	}
 
 	ss.daemon = kthread_run(sk_event_loop, NULL, "sk_event_loop");
 	if (!ss.daemon) {
 		ubcore_log_err("sock thread launch failed");
-		return -1;
+		return -EINVAL;
 	}
 	return 0;
 }

@@ -42,7 +42,7 @@ void ubcore_init_tp_key_jetty_id(struct ubcore_tp_key *key,
 void ubcore_remove_tp_node(struct ubcore_hash_table *ht,
 			   struct ubcore_tp_node *tp_node)
 {
-	if (tp_node == NULL)
+	if (!tp_node)
 		return;
 
 	ubcore_hash_table_remove(ht, &tp_node->hnode);
@@ -59,7 +59,7 @@ static void ubcore_tpnode_kref_release(struct kref *ref_cnt)
 
 void ubcore_tpnode_kref_put(struct ubcore_tp_node *tp_node)
 {
-	if (tp_node == NULL)
+	if (!tp_node)
 		return;
 
 	(void)kref_put(&tp_node->ref_cnt, ubcore_tpnode_kref_release);
@@ -73,12 +73,12 @@ void ubcore_find_remove_tp(struct ubcore_hash_table *ht, uint32_t hash,
 	struct ubcore_tp *tp = NULL;
 
 	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
+	if (!ht->head) {
 		spin_unlock(&ht->lock);
 		return;
 	}
 	tp_node = ubcore_hash_table_lookup_nolock(ht, hash, key);
-	if (tp_node == NULL) {
+	if (!tp_node) {
 		spin_unlock(&ht->lock);
 		return;
 	}
@@ -107,7 +107,7 @@ struct ubcore_hash_table *ubcore_create_tptable(void)
 	struct ubcore_hash_table *htable;
 
 	htable = kcalloc(1, sizeof(struct ubcore_hash_table), GFP_KERNEL);
-	if (htable == NULL)
+	if (!htable)
 		return NULL;
 
 	if (ubcore_hash_table_alloc(htable, &p) != 0) {
@@ -140,7 +140,7 @@ void ubcore_destroy_tptable(struct ubcore_hash_table **pp_ht)
 {
 	struct ubcore_hash_table *ht;
 
-	if (pp_ht == NULL || *pp_ht == NULL)
+	if (!pp_ht || !*pp_ht)
 		return;
 
 	ht = *pp_ht;
@@ -152,7 +152,7 @@ void ubcore_destroy_tptable(struct ubcore_hash_table **pp_ht)
 
 struct ubcore_hash_table *ubcore_get_tptable(struct ubcore_hash_table *ht)
 {
-	if (ht == NULL)
+	if (!ht)
 		return NULL;
 
 	kref_get(&ht->kref);
@@ -161,7 +161,7 @@ struct ubcore_hash_table *ubcore_get_tptable(struct ubcore_hash_table *ht)
 
 void ubcore_put_tptable(struct ubcore_hash_table *ht)
 {
-	if (ht == NULL)
+	if (!ht)
 		return;
 
 	(void)kref_put(&ht->kref, ubcore_tptable_release);
@@ -177,7 +177,7 @@ struct ubcore_tp_node *ubcore_add_tp_node(struct ubcore_hash_table *ht,
 	struct ubcore_tp_node *tp_node;
 
 	new_tp_node = kzalloc(sizeof(struct ubcore_tp_node), GFP_KERNEL);
-	if (new_tp_node == NULL)
+	if (!new_tp_node)
 		return NULL;
 
 	new_tp_node->key = *key;
@@ -188,14 +188,14 @@ struct ubcore_tp_node *ubcore_add_tp_node(struct ubcore_hash_table *ht,
 	init_completion(&new_tp_node->comp);
 
 	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
+	if (!ht->head) {
 		spin_unlock(&ht->lock);
 		mutex_destroy(&new_tp_node->lock);
 		kfree(new_tp_node);
 		return NULL;
 	}
 	tp_node = ubcore_hash_table_lookup_nolock(ht, hash, key);
-	if (tp_node != NULL) {
+	if (tp_node) {
 		kref_get(&tp_node->ref_cnt);
 		spin_unlock(&ht->lock);
 		mutex_destroy(&new_tp_node->lock);
@@ -219,7 +219,7 @@ struct ubcore_tp_node *ubcore_lookup_tpnode(struct ubcore_hash_table *ht,
 
 	spin_lock(&ht->lock);
 	tp_node = ubcore_hash_table_lookup_nolock(ht, hash, key);
-	if (tp_node != NULL)
+	if (tp_node)
 		kref_get(&tp_node->ref_cnt);
 	spin_unlock(&ht->lock);
 	return tp_node;

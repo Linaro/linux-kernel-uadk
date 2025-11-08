@@ -61,7 +61,7 @@ int ubcore_net_register_msg_handler(enum ubcore_net_msg_type type,
 	    g_descriptors[index].handler != NULL) {
 		ubcore_log_err("Failed to register net handler, type:%s",
 			       msg_type_str(type));
-		return -1;
+		return -EINVAL;
 	}
 	g_descriptors[index].handler = handler;
 	g_descriptors[index].msg_len = msg_len;
@@ -84,7 +84,7 @@ void ubcore_net_handle_msg(struct ubcore_device *dev,
 			       descriptor->msg_len, MSG_ARG(msg));
 		return;
 	}
-	if (descriptor->handler == NULL) {
+	if (!descriptor->handler) {
 		ubcore_log_err("No handler for net msg, " MSG_FMT,
 			       MSG_ARG(msg));
 		return;
@@ -114,7 +114,7 @@ static bool ubcore_is_loopback(struct ubcore_device *dev,
 int ubcore_net_send(struct ubcore_device *dev, struct ubcore_net_msg *msg,
 		    void *conn)
 {
-	if (conn == NULL) {
+	if (!conn) {
 		ubcore_log_info("Loopback detected, using shortcut.");
 		ubcore_net_handle_msg(dev, msg, NULL);
 		return 0;
@@ -124,10 +124,10 @@ int ubcore_net_send(struct ubcore_device *dev, struct ubcore_net_msg *msg,
 	case UBCORE_CONNECT_WK_JETTY:
 		return ubcore_ubcm_send(dev, conn, msg);
 	case UBCORE_CONNECT_SOCK:
-		return ubcore_sock_send(dev, msg, conn);
+		return ubcore_sock_send(dev, conn, msg);
 	default:
 		ubcore_log_err("connect type unrecognized!");
-		return -1;
+		return -EINVAL;
 	}
 }
 
@@ -147,7 +147,7 @@ int ubcore_net_send_to(struct ubcore_device *dev, struct ubcore_net_msg *msg,
 		return ubcore_sock_send_to(dev, msg, addr);
 	default:
 		ubcore_log_err("connect type unrecognized!");
-		return -1;
+		return -EINVAL;
 	}
 }
 
@@ -155,7 +155,7 @@ int ubcore_net_comm_init(void)
 {
 	if (ubcore_session_init() != 0) {
 		ubcore_log_err("Failed to init session service");
-		return -1;
+		return -EINVAL;
 	}
 	if (ubcore_sock_init() != 0) {
 		ubcore_log_err("connect type unrecognized!");
@@ -165,7 +165,7 @@ int ubcore_net_comm_init(void)
 
 uninit_session:
 	ubcore_session_uninit();
-	return -1;
+	return -EINVAL;
 }
 
 void ubcore_net_comm_uninit(void)

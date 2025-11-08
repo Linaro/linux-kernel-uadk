@@ -2,15 +2,6 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
- * for more details.
- *
  * Description: ubcore connect adapter implementation file
  * Author: Wang Hang
  * Create: 2025-06-19
@@ -62,7 +53,7 @@ static int ubcore_active_tp(struct ubcore_device *dev,
 {
 	int ret;
 
-	if (dev == NULL || dev->ops == NULL || dev->ops->active_tp == NULL ||
+	if (!dev || !dev->ops || dev->ops->active_tp ||
 	    active_cfg == NULL) {
 		ubcore_log_err("Invalid parameter.\n");
 		return -EINVAL;
@@ -86,7 +77,7 @@ static int ubcore_deactive_tp(struct ubcore_device *dev,
 {
 	int ret;
 
-	if (dev == NULL || dev->ops == NULL || dev->ops->active_tp == NULL) {
+	if (!dev || !dev->ops || dev->ops->active_tp) {
 		ubcore_log_err("Invalid parameter.\n");
 		return -EINVAL;
 	}
@@ -114,7 +105,7 @@ create_session_for_create_connection(struct ubcore_device *dev)
 	session_data->ret = -1;
 
 	session = ubcore_session_create(dev, session_data, 0, NULL, NULL);
-	if (session == NULL) {
+	if (!session) {
 		ubcore_log_err("Failed to alloc session for create connection");
 		kfree(session_data);
 		return NULL;
@@ -169,7 +160,7 @@ static int ubcore_add_ex_tp_info(struct ubcore_device *dev, uint64_t tp_handle)
 	int ret;
 
 	ex_tp_info = kzalloc(sizeof(struct ubcore_ex_tp_info), GFP_KERNEL);
-	if (ex_tp_info == NULL)
+	if (!ex_tp_info)
 		return -ENOMEM;
 	ex_tp_info->tp_handle = tp_handle;
 	kref_init(&ex_tp_info->ref_cnt);
@@ -194,14 +185,14 @@ ubcore_find_remove_ex_tp_info(struct ubcore_device *dev, uint64_t tp_handle)
 
 	hash = ubcore_get_ex_tp_hash(&tp_handle);
 	spin_lock(&dev->ht[UBCORE_HT_EX_TP].lock);
-	if (dev->ht[UBCORE_HT_EX_TP].head == NULL) {
+	if (!dev->ht[UBCORE_HT_EX_TP].head) {
 		spin_unlock(&dev->ht[UBCORE_HT_EX_TP].lock);
 		return NULL;
 	}
 
 	ex_tp_info = ubcore_hash_table_lookup_nolock(&dev->ht[UBCORE_HT_EX_TP],
 						     hash, &tp_handle);
-	if (ex_tp_info == NULL) {
+	if (!ex_tp_info) {
 		spin_unlock(&dev->ht[UBCORE_HT_EX_TP].lock);
 		ubcore_log_warn("Failed to find ex_tp_info, tp_handle: %llu.\n",
 				tp_handle);
@@ -220,7 +211,7 @@ static bool ubcore_check_ex_tp_info(struct ubcore_device *dev,
 	struct ubcore_ex_tp_info *ex_tp_info = NULL;
 
 	ex_tp_info = ubcore_find_remove_ex_tp_info(dev, tp_handle);
-	if (ex_tp_info == NULL)
+	if (!ex_tp_info)
 		return false;
 
 	kfree(ex_tp_info);
@@ -282,8 +273,7 @@ int ubcore_exchange_tp_info(struct ubcore_device *dev,
 	struct ubcore_session *session;
 	int ret;
 
-	if (dev == NULL || cfg == NULL || peer_tp_handle == NULL ||
-		rx_psn == NULL) {
+	if (!dev || !cfg || !peer_tp_handle || !rx_psn) {
 		ubcore_log_err("Invalid parameter.\n");
 		return -EINVAL;
 	}
@@ -296,7 +286,7 @@ int ubcore_exchange_tp_info(struct ubcore_device *dev,
 	}
 
 	session = create_session_for_create_connection(dev);
-	if (session == NULL) {
+	if (!session) {
 		ubcore_free_local_tpid(dev, tp_handle, tx_psn, udata);
 		return -ENOMEM;
 	}
@@ -403,7 +393,7 @@ static void handle_create_resp(struct ubcore_device *dev,
 	struct session_data_create_conn *session_data;
 
 	session = ubcore_session_find(msg->session_id);
-	if (session == NULL) {
+	if (!session) {
 		ubcore_log_err(
 			"Failed to find session %u on handle create-resp",
 			msg->session_id);

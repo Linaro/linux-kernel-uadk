@@ -2,15 +2,6 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
- * for more details.
- *
  * Description: ubcore connect bonding implementation file
  * Author: Wang Hang
  * Create: 2025-08-07
@@ -61,13 +52,13 @@ static struct ubcore_device *ubcore_find_physical_device(void)
 	union ubcore_eid *primary_eid;
 
 	topo_map = ubcore_get_global_topo_map();
-	if (topo_map == NULL) {
+	if (!topo_map) {
 		ubcore_log_err("Failed get global topo map");
 		return NULL;
 	}
 
 	topo_info = ubcore_get_cur_topo_info(topo_map);
-	if (topo_info == NULL) {
+	if (!topo_info) {
 		ubcore_log_err("Failed get global topo info");
 		return NULL;
 	}
@@ -83,13 +74,13 @@ static struct ubcore_device *ubcore_find_bonding_device(void)
 	union ubcore_eid *bonding_eid;
 
 	topo_map = ubcore_get_global_topo_map();
-	if (topo_map == NULL) {
+	if (!topo_map) {
 		ubcore_log_err("Failed get global topo map");
 		return NULL;
 	}
 
 	topo_info = ubcore_get_cur_topo_info(topo_map);
-	if (topo_info == NULL) {
+	if (!topo_info) {
 		ubcore_log_err("Failed get global topo info");
 		return NULL;
 	}
@@ -116,7 +107,7 @@ create_session_for_exchange_udata(struct ubcore_device *dev,
 	session_data->udata_out_size = udata_out_size;
 
 	session = ubcore_session_create(dev, session_data, 0, NULL, NULL);
-	if (session == NULL) {
+	if (!session) {
 		ubcore_log_err("Failed to alloc session for exchange seg info");
 		kfree(session_data);
 		return NULL;
@@ -227,14 +218,14 @@ int ubcore_connect_exchange_udata_when_import_seg(struct ubcore_seg *seg,
 	char buf[BONDING_UDATA_BUF_LEN];
 	int ret, result = -1;
 
-	if (physical_dev == NULL) {
+	if (!physical_dev) {
 		ubcore_log_err("Failed find physical device");
-		return -1;
+		return -EINVAL;
 	}
 
 	session = create_session_for_exchange_udata(physical_dev, &result, buf,
 						    sizeof(buf));
-	if (session == NULL) {
+	if (!session) {
 		ret = -ENOMEM;
 		goto put_device;
 	}
@@ -284,14 +275,14 @@ int ubcore_connect_exchange_udata_when_import_jetty(
 	char buf[BONDING_UDATA_BUF_LEN];
 	int ret, result = -1;
 
-	if (physical_dev == NULL) {
+	if (!physical_dev) {
 		ubcore_log_err("Failed find physical device");
-		return -1;
+		return -EINVAL;
 	}
 
 	session = create_session_for_exchange_udata(physical_dev, &result, buf,
 						    sizeof(buf));
-	if (session == NULL) {
+	if (!session) {
 		ret = -ENOMEM;
 		goto put_device;
 	}
@@ -389,7 +380,7 @@ static void handle_exchange_udata_resp(struct ubcore_device *dev, void *conn,
 	struct session_data_exchange_udata *session_data;
 
 	session = ubcore_session_find(session_id);
-	if (session == NULL) {
+	if (!session) {
 		ubcore_log_err(
 			"Failed to find session %u on handle bonding-seg-info-req",
 			session_id);

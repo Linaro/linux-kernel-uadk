@@ -29,19 +29,19 @@ struct ubcore_tp_advice {
 
 static inline bool ubcore_have_ops(struct ubcore_device *dev)
 {
-	return (dev != NULL && dev->ops != NULL);
+	return (dev && dev->ops);
 }
 
 static inline bool ubcore_have_tp_ops(struct ubcore_device *dev)
 {
-	return (dev != NULL && dev->ops != NULL &&
-		dev->ops->create_tp != NULL && dev->ops->modify_tp != NULL);
+	return (dev && dev->ops &&
+		dev->ops->create_tp && dev->ops->modify_tp);
 }
 
 static inline bool ubcore_have_tp_ctrlplane_ops(struct ubcore_device *dev)
 {
-	return (dev != NULL && dev->ops != NULL &&
-		dev->ops->get_tp_list != NULL && dev->ops->active_tp != NULL);
+	return (dev && dev->ops &&
+		dev->ops->get_tp_list && dev->ops->active_tp);
 }
 
 /* alpha */

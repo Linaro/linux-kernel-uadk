@@ -77,7 +77,7 @@ ubcore_session_create(struct ubcore_device *dev, void *session_data,
 		timeout_limited = timeout;
 
 	s = kzalloc(sizeof(struct ubcore_session), GFP_KERNEL);
-	if (s == NULL)
+	if (!s)
 		return NULL;
 
 	s->dev = dev;
@@ -129,7 +129,7 @@ static void ubcore_session_timeout(struct work_struct *work)
 
 	ubcore_log_err("Session %u timeout\n", session->session_id);
 
-	if (session->complete_cb != NULL)
+	if (session->complete_cb)
 		session->complete_cb(session->dev, session->session_data);
 	complete(&session->completion);
 	ubcore_session_remove_from_list(session);
@@ -143,7 +143,7 @@ void ubcore_session_complete(struct ubcore_session *session)
 	ubcore_log_info("Session %u complete\n", session->session_id);
 	cancel_delayed_work_sync(&session->delayed_work);
 
-	if (session->complete_cb != NULL)
+	if (session->complete_cb)
 		session->complete_cb(session->dev, session->session_data);
 	complete(&session->completion);
 	ubcore_session_remove_from_list(session);
@@ -159,8 +159,8 @@ static void ubcore_session_free(struct kref *kref)
 	struct ubcore_session *session =
 		container_of(kref, struct ubcore_session, ref);
 
-	if (session->session_data != NULL) {
-		if (session->free_cb == NULL)
+	if (session->session_data) {
+		if (!session->free_cb)
 			session->free_cb = kfree;
 		(session->free_cb)(session->session_data);
 	}
@@ -208,9 +208,9 @@ int ubcore_session_init(void)
 	spin_lock_init(&session_ctx.lock);
 
 	session_ctx.wq = alloc_workqueue("%s", 0, 1, "ubcore-session");
-	if (session_ctx.wq == NULL) {
+	if (!session_ctx.wq) {
 		ubcore_log_err("Fail to alloc session workqueue.");
-		return -1;
+		return -EINVAL;
 	}
 	return 0;
 }

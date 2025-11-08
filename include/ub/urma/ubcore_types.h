@@ -1134,12 +1134,6 @@ union ubcore_vtp_cfg_flag {
 	uint32_t value;
 };
 
-struct ubcore_vice_tpg_info {
-	struct ubcore_tpg *vice_tpg;
-	enum ubcore_vtp_node_state node_state;
-	uint32_t vice_role;
-};
-
 struct ubcore_vtp_cfg {
 	uint16_t ue_idx; // ueid or mueid
 	uint32_t vtpn;
@@ -1162,7 +1156,6 @@ struct ubcore_vtp_cfg {
 struct ubcore_vtp {
 	struct ubcore_device *ub_dev;
 	struct ubcore_vtp_cfg cfg; /* driver fills */
-	struct ubcore_vice_tpg_info vice_tpg_info;
 	struct hlist_node hnode; /* driver inaccessible */
 	uint32_t role; /* current side is initiator, target or duplex */
 	struct kref ref_cnt;

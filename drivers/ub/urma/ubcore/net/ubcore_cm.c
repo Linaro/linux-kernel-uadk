@@ -22,9 +22,9 @@ struct cm_entry {
 static int ubcore_call_cm_send_ops(struct ubcore_device *dev,
 				   struct ubcore_cm_send_buf *send_buf)
 {
-	if (g_send == NULL) {
-		ubcore_log_err("ubcore_cm_send_ops function not register yet!");
-		return -1;
+	if (!g_send) {
+		ubcore_log_err("ubcore_cm_send_ops function not registered yet!");
+		return -EINVAL;
 	}
 
 	return g_send(dev, send_buf);
@@ -34,9 +34,9 @@ int ubcore_call_cm_eid_ops(struct ubcore_device *dev,
 			   struct ubcore_eid_info *eid_info,
 			   enum ubcore_mgmt_event_type event_type)
 {
-	if (g_eid_ops == NULL) {
-		ubcore_log_err("ubcore_cm_eid_ops function not register yet!");
-		return -1;
+	if (!g_eid_ops) {
+		ubcore_log_err("ubcore_cm_eid_ops function not registered yet!");
+		return -EINVAL;
 	}
 
 	return g_eid_ops(dev, eid_info, event_type);

@@ -4,18 +4,20 @@
 #
 ccflags-y += -I$(src)
 
-ubcore-objs := ubcore_hash_table.o \
-ubcore_main.o \
+ubcore-objs := ubcore_tp_table.o \
 net/ubcore_sock.o \
-ubcore_log.o \
-ubcore_tp_table.o \
-ubcore_priv.o \
-net/ubcore_cm.o \
-net/ubcore_net.o \
 ubcore_workqueue.o \
-net/ubcore_session.o \
-ubcore_topo_info.o \
+ubcore_main.o \
+ubcore_hash_table.o \
+ubcore_priv.o \
+ubcore_cgroup.o \
+net/ubcore_net.o \
+ubcore_cdev_file.o \
 ubcore_connect_adapter.o \
-ubcore_connect_bonding.o
+ubcore_connect_bonding.o \
+ubcore_log.o \
+net/ubcore_cm.o \
+ubcore_topo_info.o \
+net/ubcore_session.o
 
 obj-$(CONFIG_UB_URMA) += ubcore.o

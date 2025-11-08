@@ -2973,6 +2973,22 @@ struct ubcore_device {
 	struct ubcore_vtp_bitmap vtp_bitmap;
 };
 
+struct ubcore_client {
+	struct list_head list_node;
+	char *client_name;
+	int (*add)(struct ubcore_device *dev);
+	void (*remove)(struct ubcore_device *dev, void *client_ctx);
+	/* The driver needs to stay and resolve the memory mapping first, */
+	/* and then release the jetty resources. */
+	void (*stop)(struct ubcore_device *dev, void *client_ctx);
+};
+
+struct ubcore_client_ctx {
+	struct list_head list_node;
+	void *data; // Each ubep device create some data on the client, such as uburma_device.
+	struct ubcore_client *client;
+};
+
 union ubcore_umem_flag {
 	struct {
 		uint32_t non_pin : 1; /* 0: pinned to physical memory. 1: non pin. */

@@ -14,6 +14,8 @@ net/ubcore_cm.o \
 net/ubcore_net.o \
 ubcore_workqueue.o \
 net/ubcore_session.o \
-ubcore_topo_info.o
+ubcore_topo_info.o \
+ubcore_connect_adapter.o \
+ubcore_connect_bonding.o
 
 obj-$(CONFIG_UB_URMA) += ubcore.o

@@ -23,7 +23,6 @@
 #include "ubcore_workqueue.h"
 #include "ubcore_main.h"
 
-
 #define UBCORE_MAX_MUE_NUM 16
 #define UBCORE_DEVICE_NAME "ubcore"
 
@@ -32,7 +31,6 @@ struct ubcore_ctx {
 	struct cdev ubcore_cdev;
 	struct device *ubcore_dev;
 };
-
 
 static LIST_HEAD(g_client_list);
 static LIST_HEAD(g_device_list);
@@ -54,6 +52,8 @@ static DECLARE_RWSEM(g_clients_rwsem);
 static LIST_HEAD(g_ubcore_net_list);
 static DECLARE_RWSEM(g_ubcore_net_rwsem);
 
+=======
+>>>>>>> 3d29b1597160 (ubcore: add device management for character device and class operations)
 static int ubcore_global_open(struct inode *i_node, struct file *filp)
 {
 	ubcore_log_info("open ubcore global file succeed.\n");
@@ -97,10 +97,13 @@ static struct class g_ubcore_class = { .name = "ubcore",
 				       .devnode = ubcore_devnode,
 				       .ns_type = &net_ns_type_operations,
 				       .namespace = NULL };
+<<<<<<< HEAD
 struct ubcore_net {
 	possible_net_t net;
 	struct list_head node;
 };
+=======
+>>>>>>> 3d29b1597160 (ubcore: add device management for character device and class operations)
 
 int ubcore_class_register(void)
 {
@@ -190,6 +193,7 @@ int ubcore_cdev_unregister(void)
 	return 0;
 }
 
+<<<<<<< HEAD
 void ubcore_get_device(struct ubcore_device *dev)
 {
 	if (IS_ERR_OR_NULL(dev)) {
@@ -1165,3 +1169,5 @@ int ubcore_query_stats(struct ubcore_device *dev, struct ubcore_stats_key *key,
 	return 0;
 }
 EXPORT_SYMBOL(ubcore_query_stats);
+=======
+>>>>>>> 3d29b1597160 (ubcore: add device management for character device and class operations)

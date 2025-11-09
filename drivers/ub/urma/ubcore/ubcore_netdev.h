@@ -12,7 +12,7 @@
 #ifndef UBCORE_NETDEV_H
 #define UBCORE_NETDEV_H
 
-#include <ub/urma/ubcore_types.h>
+#include "ub/urma/ubcore_types.h"
 
 int ubcore_check_port_state(struct ubcore_device *dev);
 void ubcore_fill_port_netdev(struct ubcore_device *dev, struct net_device *ndev,

@@ -12,7 +12,7 @@
 #ifndef UBCORE_CDEV_FILE_H
 #define UBCORE_CDEV_FILE_H
 
-#include <ub/urma/ubcore_types.h>
+#include "ub/urma/ubcore_types.h"
 
 struct ubcore_port_attribute {
 	struct attribute attr;

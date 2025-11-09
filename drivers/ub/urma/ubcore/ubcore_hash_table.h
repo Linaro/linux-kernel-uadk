@@ -12,7 +12,7 @@
 #ifndef UBCORE_HASH_TABLE_H
 #define UBCORE_HASH_TABLE_H
 
-#include <ub/urma/ubcore_types.h>
+#include "ub/urma/ubcore_types.h"
 
 static inline void *ubcore_ht_obj(const struct ubcore_hash_table *ht,
 				  const struct hlist_node *hnode)

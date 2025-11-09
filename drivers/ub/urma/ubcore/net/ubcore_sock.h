@@ -13,7 +13,7 @@
 #define NET_UBCORE_SOCK_H
 
 #include "ubcore_net.h"
-#include <ub/urma/ubcore_types.h>
+#include "ub/urma/ubcore_types.h"
 
 int ubcore_sock_send(struct ubcore_device *dev, void *conn,
 		struct ubcore_net_msg *msg);

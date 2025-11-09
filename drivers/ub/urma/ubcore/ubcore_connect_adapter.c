@@ -16,7 +16,7 @@
 #include "net/ubcore_net.h"
 #include "net/ubcore_session.h"
 #include "ubcore_log.h"
-#include <ub/urma/ubcore_uapi.h>
+#include "ub/urma/ubcore_uapi.h"
 #include "ubcore_priv.h"
 
 enum msg_create_conn_result {

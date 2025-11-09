@@ -12,7 +12,7 @@
 #ifndef UBCORE_MSG_H
 #define UBCORE_MSG_H
 
-#include <ub/urma/ubcore_types.h>
+#include "ub/urma/ubcore_types.h"
 
 // Must be the same as TPSA_NL_RESP_XXX
 #define UBCORE_MSG_RESP_LIMIT_RATE (-EBUSY)

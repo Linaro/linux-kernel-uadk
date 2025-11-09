@@ -13,8 +13,8 @@
 #include <linux/inet.h>
 #include <linux/version.h>
 
-#include <ub/urma/ubcore_types.h>
-#include <ub/urma/ubcore_uapi.h>
+#include "ub/urma/ubcore_types.h"
+#include "ub/urma/ubcore_uapi.h"
 
 #include "ubcore_log.h"
 #include "ubcore_device.h"

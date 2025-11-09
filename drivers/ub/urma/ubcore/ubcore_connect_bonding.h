@@ -12,7 +12,7 @@
 #ifndef UBCORE_CONNECT_BONDING_H
 #define UBCORE_CONNECT_BONDING_H
 
-#include <ub/urma/ubcore_types.h>
+#include "ub/urma/ubcore_types.h"
 
 #define UBAGG_DEV_PREFIX "bonding_dev"
 

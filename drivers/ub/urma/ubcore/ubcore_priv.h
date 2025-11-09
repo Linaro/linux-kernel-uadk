@@ -14,7 +14,7 @@
 
 #include <linux/jhash.h>
 #include <linux/types.h>
-#include <ub/urma/ubcore_types.h>
+#include "ub/urma/ubcore_types.h"
 #include "ubcore_tp.h"
 
 #define UBCORE_MAX_UVS_NAME_LEN 64

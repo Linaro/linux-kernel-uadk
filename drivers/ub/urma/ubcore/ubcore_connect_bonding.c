@@ -14,7 +14,7 @@
 #include "net/ubcore_net.h"
 #include "ubcore_priv.h"
 #include "ubcore_topo_info.h"
-#include <ub/urma/ubcore_uapi.h>
+#include "ub/urma/ubcore_uapi.h"
 
 #define BONDING_UDATA_BUF_LEN 960
 

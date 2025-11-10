@@ -38,29 +38,6 @@ void ubagg_bitmap_free(struct ubagg_bitmap *bitmap)
 		kfree(bitmap->bits);
 	spin_unlock(&bitmap->lock);
 	kfree(bitmap);
-	bitmap = NULL;
-}
-
-int ubagg_bitmap_alloc_idx_from_offset(struct ubagg_bitmap *bitmap, int offset)
-{
-	int idx;
-
-	if (bitmap == NULL) {
-		ubagg_log_err("bitmap NULL");
-		return -1;
-	}
-	spin_lock(&bitmap->lock);
-	idx = (int)find_next_zero_bit(bitmap->bits, bitmap->size, offset);
-	if (idx >= bitmap->size || idx < 0) {
-		spin_unlock(&bitmap->lock);
-		ubagg_log_err("bitmap allocation failed.\n");
-		return -1;
-	}
-
-	set_bit(idx, bitmap->bits);
-	spin_unlock(&bitmap->lock);
-	ubagg_log_info("bitmap allocation success., idx = %d\n", idx);
-	return idx;
 }
 
 int ubagg_bitmap_alloc_idx_from_offset_nolock(struct ubagg_bitmap *bitmap,
@@ -79,7 +56,7 @@ int ubagg_bitmap_alloc_idx_from_offset_nolock(struct ubagg_bitmap *bitmap,
 	}
 
 	set_bit(idx, bitmap->bits);
-	ubagg_log_info("bitmap allocation success., idx = %d\n", idx);
+	ubagg_log_info("bitmap allocation success, idx = %d\n", idx);
 	return idx;
 }
 
@@ -100,7 +77,7 @@ int ubagg_bitmap_alloc_idx(struct ubagg_bitmap *bitmap)
 	}
 	set_bit(idx, bitmap->bits);
 	spin_unlock(&bitmap->lock);
-	ubagg_log_info("bitmap allocation success., idx = %d\n", idx);
+	ubagg_log_info("bitmap allocation success, idx = %d\n", idx);
 	return idx;
 }
 

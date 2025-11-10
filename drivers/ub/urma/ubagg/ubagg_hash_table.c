@@ -17,11 +17,11 @@ int ubagg_hash_table_alloc(struct ubagg_hash_table *ht,
 {
 	uint32_t i;
 
-	if (p == NULL || p->size == 0)
-		return -1;
+	if (!p || p->size == 0)
+		return -EINVAL;
 
 	ht->head = kcalloc(p->size, sizeof(struct hlist_head), GFP_KERNEL);
-	if (ht->head == NULL)
+	if (!ht->head)
 		return -ENOMEM;
 
 	ht->p = *p;
@@ -33,8 +33,7 @@ int ubagg_hash_table_alloc(struct ubagg_hash_table *ht,
 	return 0;
 }
 
-void ubagg_hash_table_free_with_cb(struct ubagg_hash_table *ht,
-				   void (*free_cb)(void *))
+void ubagg_hash_table_free(struct ubagg_hash_table *ht)
 {
 	struct hlist_node *pos = NULL, *next = NULL;
 	struct hlist_head *head;
@@ -42,7 +41,7 @@ void ubagg_hash_table_free_with_cb(struct ubagg_hash_table *ht,
 	void *obj;
 
 	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
+	if (!ht->head) {
 		spin_unlock(&ht->lock);
 		return;
 	}
@@ -51,23 +50,14 @@ void ubagg_hash_table_free_with_cb(struct ubagg_hash_table *ht,
 			obj = ubagg_ht_obj(ht, pos);
 			hlist_del(pos);
 			spin_unlock(&ht->lock);
-			if (free_cb != NULL)
-				free_cb(obj);
-			else
-				kfree(obj);
+			kfree(obj);
 			spin_lock(&ht->lock);
 		}
 	}
 	head = ht->head;
 	ht->head = NULL;
 	spin_unlock(&ht->lock);
-	if (head != NULL)
-		kfree(head);
-}
-
-void ubagg_hash_table_free(struct ubagg_hash_table *ht)
-{
-	ubagg_hash_table_free_with_cb(ht, NULL);
+	kfree(head);
 }
 
 void ubagg_hash_table_add_nolock(struct ubagg_hash_table *ht,
@@ -77,22 +67,10 @@ void ubagg_hash_table_add_nolock(struct ubagg_hash_table *ht,
 	hlist_add_head(hnode, &ht->head[hash % ht->p.size]);
 }
 
-void ubagg_hash_table_add(struct ubagg_hash_table *ht, struct hlist_node *hnode,
-			  uint32_t hash)
-{
-	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
-		spin_unlock(&ht->lock);
-		return;
-	}
-	ubagg_hash_table_add_nolock(ht, hnode, hash);
-	spin_unlock(&ht->lock);
-}
-
 void ubagg_hash_table_remove_nolock(struct ubagg_hash_table *ht,
 				    struct hlist_node *hnode)
 {
-	if (ht->head == NULL)
+	if (!ht->head)
 		return;
 
 	hlist_del_init(hnode);
@@ -104,53 +82,6 @@ void ubagg_hash_table_remove(struct ubagg_hash_table *ht,
 	spin_lock(&ht->lock);
 	ubagg_hash_table_remove_nolock(ht, hnode);
 	spin_unlock(&ht->lock);
-}
-
-int ubagg_hash_table_check_remove(struct ubagg_hash_table *ht,
-				  struct hlist_node *hnode)
-{
-	spin_lock(&ht->lock);
-	if (hlist_unhashed(hnode)) {
-		spin_unlock(&ht->lock);
-		return -EINVAL;
-	}
-	ubagg_hash_table_remove_nolock(ht, hnode);
-	spin_unlock(&ht->lock);
-	return 0;
-}
-
-void *ubagg_hash_table_lookup_nolock_get(struct ubagg_hash_table *ht,
-					 uint32_t hash, const void *key)
-{
-	struct hlist_node *pos = NULL;
-	void *obj = NULL;
-
-	hlist_for_each(pos, &ht->head[hash % ht->p.size]) {
-		obj = ubagg_ht_obj(ht, pos);
-		if (ht->p.key_size > 0 &&
-		    memcmp(ubagg_ht_key(ht, pos), key, ht->p.key_size) == 0) {
-			break;
-		}
-		obj = NULL;
-	}
-
-	return obj;
-}
-
-void *ubagg_hash_table_lookup_get(struct ubagg_hash_table *ht, uint32_t hash,
-				  const void *key)
-{
-	void *obj = NULL;
-
-	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
-		spin_unlock(&ht->lock);
-		return NULL;
-	}
-	obj = ubagg_hash_table_lookup_nolock_get(ht, hash, key);
-
-	spin_unlock(&ht->lock);
-	return obj;
 }
 
 void *ubagg_hash_table_lookup_nolock(struct ubagg_hash_table *ht, uint32_t hash,
@@ -167,64 +98,5 @@ void *ubagg_hash_table_lookup_nolock(struct ubagg_hash_table *ht, uint32_t hash,
 		}
 		obj = NULL;
 	}
-	return obj;
-}
-
-void *ubagg_hash_table_lookup(struct ubagg_hash_table *ht, uint32_t hash,
-			      const void *key)
-{
-	void *obj = NULL;
-
-	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
-		spin_unlock(&ht->lock);
-		return NULL;
-	}
-	obj = ubagg_hash_table_lookup_nolock(ht, hash, key);
-	spin_unlock(&ht->lock);
-	return obj;
-}
-
-/* Do not insert a new entry if an old entry with the same key exists */
-int ubagg_hash_table_find_add(struct ubagg_hash_table *ht,
-			      struct hlist_node *hnode, uint32_t hash)
-{
-	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
-		spin_unlock(&ht->lock);
-		return -EINVAL;
-	}
-	/* Old entry with the same key exists */
-	if (ubagg_hash_table_lookup_nolock(ht, hash, ubagg_ht_key(ht, hnode)) !=
-	    NULL) {
-		spin_unlock(&ht->lock);
-		return -EEXIST;
-	}
-	ubagg_hash_table_add_nolock(ht, hnode, hash);
-	spin_unlock(&ht->lock);
-	return 0;
-}
-
-void *ubagg_hash_table_find_remove(struct ubagg_hash_table *ht, uint32_t hash,
-				   const void *key)
-{
-	struct hlist_node *pos = NULL, *next = NULL;
-	void *obj = NULL;
-
-	spin_lock(&ht->lock);
-	if (ht->head == NULL) {
-		spin_unlock(&ht->lock);
-		return NULL;
-	}
-	hlist_for_each_safe(pos, next, &ht->head[hash % ht->p.size]) {
-		obj = ubagg_ht_obj(ht, pos);
-		if (ht->p.key_size > 0 &&
-		    memcmp(ubagg_ht_key(ht, pos), key, ht->p.key_size) == 0) {
-			hlist_del(pos);
-			break;
-		}
-		obj = NULL;
-	}
-	spin_unlock(&ht->lock);
 	return obj;
 }

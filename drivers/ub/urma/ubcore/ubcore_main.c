@@ -28,6 +28,10 @@ static int __init ubcore_init(void)
 	if (ret != 0)
 		goto class_init;
 
+	ret = ubcore_register_pnet_ops();
+	if (ret != 0)
+		goto register_cdev;
+
 	ret = ubcore_create_workqueues();
 	if (ret != 0) {
 		ubcore_log_err("Failed to create all the workqueues, ret = %d\n", ret);
@@ -47,6 +51,7 @@ class_init:
 static void __exit ubcore_exit(void)
 {
 	ubcore_destroy_workqueues();
+	ubcore_unregister_pnet_ops();
 	ubcore_cdev_unregister();
 	ubcore_class_unregister();
 	ubcore_log_info("ubcore module exits.\n");

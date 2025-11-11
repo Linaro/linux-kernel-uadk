@@ -12,5 +12,9 @@
 #ifndef UBCORE_MAIN_H
 #define UBCORE_MAIN_H
 
+#include "ubcore_msg.h"
+
+int ubcore_register_notifiers(void);
+void ubcore_unregister_notifiers(void);
 
 #endif

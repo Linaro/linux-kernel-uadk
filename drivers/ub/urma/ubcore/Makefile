@@ -19,6 +19,7 @@ ubcore_log.o \
 net/ubcore_cm.o \
 ubcore_topo_info.o \
 net/ubcore_session.o \
+ubcore_jetty.o \
 ubcore_device.o
 
 obj-$(CONFIG_UB_URMA) += ubcore.o

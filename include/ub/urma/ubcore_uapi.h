@@ -36,7 +36,6 @@ ubcore_alloc_ucontext(struct ubcore_device *dev, uint32_t eid_index,
  */
 void ubcore_free_ucontext(struct ubcore_device *dev,
 			  struct ubcore_ucontext *ucontext);
-
 /**
  * add a function entity id (eid) to ub device (for uvs)
  * @param[in] dev: the ubcore_device handle;
@@ -97,7 +96,6 @@ int ubcore_query_resource(struct ubcore_device *dev, struct ubcore_res_key *key,
  */
 int ubcore_config_device(struct ubcore_device *dev,
 			 struct ubcore_device_cfg *cfg);
-
 /**
  * set ctx data of a client
  * @param[in] dev: the ubcore_device handle;
@@ -143,7 +141,6 @@ struct ubcore_token_id *ubcore_alloc_token_id(struct ubcore_device *dev,
  * @return: 0 on success, other value on error
  */
 int ubcore_free_token_id(struct ubcore_token_id *token_id);
-
 /**
  * register segment to ubcore device
  * @param[in] dev: the ubcore device handle;

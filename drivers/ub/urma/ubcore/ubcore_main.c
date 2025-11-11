@@ -30,7 +30,7 @@ static int __init ubcore_init(void)
 
 	ret = ubcore_create_workqueues();
 	if (ret != 0) {
-		pr_err("Failed to create all the workqueues, ret = %d\n", ret);
+		ubcore_log_err("Failed to create all the workqueues, ret = %d\n", ret);
 		goto register_cdev;
 	}
 

@@ -52,8 +52,11 @@ static DECLARE_RWSEM(g_clients_rwsem);
 static LIST_HEAD(g_ubcore_net_list);
 static DECLARE_RWSEM(g_ubcore_net_rwsem);
 
+<<<<<<< HEAD
 =======
 >>>>>>> 3d29b1597160 (ubcore: add device management for character device and class operations)
+=======
+>>>>>>> 05337ccf75c6 (ubcore: implement device registration and jetty management)
 static int ubcore_global_open(struct inode *i_node, struct file *filp)
 {
 	ubcore_log_info("open ubcore global file succeed.\n");
@@ -98,12 +101,18 @@ static struct class g_ubcore_class = { .name = "ubcore",
 				       .ns_type = &net_ns_type_operations,
 				       .namespace = NULL };
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 05337ccf75c6 (ubcore: implement device registration and jetty management)
 struct ubcore_net {
 	possible_net_t net;
 	struct list_head node;
 };
+<<<<<<< HEAD
 =======
 >>>>>>> 3d29b1597160 (ubcore: add device management for character device and class operations)
+=======
+>>>>>>> 05337ccf75c6 (ubcore: implement device registration and jetty management)
 
 int ubcore_class_register(void)
 {
@@ -194,6 +203,9 @@ int ubcore_cdev_unregister(void)
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 05337ccf75c6 (ubcore: implement device registration and jetty management)
 void ubcore_get_device(struct ubcore_device *dev)
 {
 	if (IS_ERR_OR_NULL(dev)) {
@@ -1169,5 +1181,8 @@ int ubcore_query_stats(struct ubcore_device *dev, struct ubcore_stats_key *key,
 	return 0;
 }
 EXPORT_SYMBOL(ubcore_query_stats);
+<<<<<<< HEAD
 =======
 >>>>>>> 3d29b1597160 (ubcore: add device management for character device and class operations)
+=======
+>>>>>>> 05337ccf75c6 (ubcore: implement device registration and jetty management)

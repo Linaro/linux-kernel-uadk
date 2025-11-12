@@ -12,7 +12,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include "ubcore_log.h"
-#include "ub/urma/ubcore_types.h"
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_topo_info.h"
 
 static struct ubcore_topo_map *g_ubcore_topo_map;

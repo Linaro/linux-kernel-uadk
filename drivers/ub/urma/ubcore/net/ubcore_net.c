@@ -11,7 +11,6 @@
 
 #include "ubcore_sock.h"
 #include "ubcore_cm.h"
-
 #include "ubcore_log.h"
 #include "ubcore_net.h"
 

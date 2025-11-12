@@ -13,7 +13,6 @@
 #define UB_MAD_PRIV_H
 
 #include <linux/bitmap.h>
-
 #include "ub_mad.h"
 
 /* well-known jetty (wk jetty) parameters */

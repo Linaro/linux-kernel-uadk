@@ -11,7 +11,6 @@
 
 #include <linux/atomic.h>
 #include <linux/random.h>
-
 #include "ubcore_log.h"
 #include "ubcore_session.h"
 

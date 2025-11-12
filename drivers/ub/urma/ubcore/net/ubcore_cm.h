@@ -12,8 +12,8 @@
 #ifndef UBCORE_CM_H
 #define UBCORE_CM_H
 
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_net.h"
-#include "ub/urma/ubcore_types.h"
 
 typedef int (*ubcore_cm_eid_ops)(struct ubcore_device *dev,
 				 struct ubcore_eid_info *eid_info,

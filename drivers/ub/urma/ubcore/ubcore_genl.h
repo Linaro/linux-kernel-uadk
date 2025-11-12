@@ -12,7 +12,8 @@
 #ifndef UBCORE_GENL_H
 #define UBCORE_GENL_H
 
-#include "ub/urma/ubcore_types.h"
+#include <ub/urma/ubcore_types.h>
+
 int ubcore_genl_init(void) __init;
 void ubcore_genl_exit(void);
 

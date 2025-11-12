@@ -10,12 +10,12 @@
  */
 
 #include <linux/slab.h>
+#include <ub/urma/ubcore_uapi.h>
 #include "ubcore_connect_adapter.h"
 #include "ubcore_msg.h"
 #include "ubcore_log.h"
 #include "ubcore_hash_table.h"
 #include "ubcore_priv.h"
-#include "ub/urma/ubcore_uapi.h"
 #include "ubcore_workqueue.h"
 #include "ubcore_msg.h"
 #include "ubcore_vtp.h"

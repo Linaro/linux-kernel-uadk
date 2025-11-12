@@ -11,7 +11,6 @@
 
 #include "ubcore_connect_bonding.h"
 #include "ubcore_log.h"
-
 #include "ubcore_priv.h"
 #include "ubcore_hash_table.h"
 #include "ubcore_tp.h"

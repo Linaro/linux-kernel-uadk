@@ -16,19 +16,18 @@
 #include <linux/file.h>
 #include <linux/poll.h>
 #include <linux/random.h>
-
+#include <ub/urma/ubcore_types.h>
+#include <ub/urma/ubcore_uapi.h>
+#include <ub/urma/ubcore_jetty.h>
 #include "ubcore_connect_adapter.h"
 #include "ubcore_connect_bonding.h"
 #include "ubcore_log.h"
-#include "ub/urma/ubcore_types.h"
-#include "ub/urma/ubcore_uapi.h"
 #include "ubcore_priv.h"
 #include "ubcore_hash_table.h"
 #include "ubcore_tp.h"
 #include "ubcore_tp_table.h"
 #include "ubcore_vtp.h"
 #include "ubcore_device.h"
-#include "ub/urma/ubcore_jetty.h"
 
 static void ubcore_jfs_kref_release(struct kref *ref_cnt)
 {
@@ -1687,11 +1686,6 @@ int ubcore_unimport_jetty(struct ubcore_tjetty *tjetty)
 	return dev->ops->unimport_jetty(tjetty);
 }
 EXPORT_SYMBOL(ubcore_unimport_jetty);
-
-static inline void ubcore_put_advice(struct ubcore_tp_advice *advice)
-{
-	ubcore_put_tptable(advice->meta.ht);
-}
 
 static int ubcore_inner_bind_ub_jetty(struct ubcore_jetty *jetty,
 				      struct ubcore_tjetty *tjetty,

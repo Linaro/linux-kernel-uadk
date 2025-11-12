@@ -38,57 +38,57 @@ enum ubcm_log_level {
 extern uint32_t g_ubcm_log_level;
 
 #define ubcm_log_info(...)                                   \
-	do {                                                 \
-		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_INFO) \
-			ubcm_log(info, __VA_ARGS__);         \
+	do {                                                     \
+		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_INFO)         \
+			ubcm_log(info, __VA_ARGS__);                     \
 	} while (0)
 
 #define ubcm_log_err(...)                                   \
-	do {                                                \
-		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_ERR) \
-			ubcm_log(err, __VA_ARGS__);         \
+	do {                                                    \
+		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_ERR)         \
+			ubcm_log(err, __VA_ARGS__);                     \
 	} while (0)
 
 #define ubcm_log_warn(...)                                      \
-	do {                                                    \
-		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_WARNING) \
-			ubcm_log(warn, __VA_ARGS__);            \
+	do {                                                        \
+		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_WARNING)         \
+			ubcm_log(warn, __VA_ARGS__);                        \
 	} while (0)
 
 /* No need to record debug log by printk_ratelimited */
 #define ubcm_log_debug(...)                                   \
-	do {                                                  \
-		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_DEBUG) \
-			ubcm_log(debug, __VA_ARGS__);         \
+	do {                                                      \
+		if (g_ubcm_log_level >= UBCM_LOG_LEVEL_DEBUG)         \
+			ubcm_log(debug, __VA_ARGS__);                     \
 	} while (0)
 
 /* Rate Limited log to avoid soft lockup crash by quantities of printk */
 /* Current limit is 100 log every 5 seconds */
-#define ubcm_log_info_rl(...)                                               \
-	do {                                                                \
+#define ubcm_log_info_rl(...)                                       \
+	do {                                                            \
 		static DEFINE_RATELIMIT_STATE(_rs, UBCM_RATELIMIT_INTERVAL, \
-					      UBCM_RATELIMIT_BURST);        \
+					      UBCM_RATELIMIT_BURST);                    \
 		if ((__ratelimit(&_rs)) &&                                  \
 		    (g_ubcm_log_level >= UBCM_LOG_LEVEL_INFO))              \
-			ubcm_log(info, __VA_ARGS__);                        \
+			ubcm_log(info, __VA_ARGS__);                            \
 	} while (0)
 
-#define ubcm_log_err_rl(...)                                                \
-	do {                                                                \
+#define ubcm_log_err_rl(...)                                        \
+	do {                                                            \
 		static DEFINE_RATELIMIT_STATE(_rs, UBCM_RATELIMIT_INTERVAL, \
-					      UBCM_RATELIMIT_BURST);        \
+					      UBCM_RATELIMIT_BURST);                    \
 		if ((__ratelimit(&_rs)) &&                                  \
 		    (g_ubcm_log_level >= UBCM_LOG_LEVEL_ERR))               \
-			ubcm_log(err, __VA_ARGS__);                         \
+			ubcm_log(err, __VA_ARGS__);                             \
 	} while (0)
 
-#define ubcm_log_warn_rl(...)                                               \
-	do {                                                                \
+#define ubcm_log_warn_rl(...)                                       \
+	do {                                                            \
 		static DEFINE_RATELIMIT_STATE(_rs, UBCM_RATELIMIT_INTERVAL, \
-					      UBCM_RATELIMIT_BURST);        \
+					      UBCM_RATELIMIT_BURST);                    \
 		if ((__ratelimit(&_rs)) &&                                  \
 		    (g_ubcm_log_level >= UBCM_LOG_LEVEL_WARNING))           \
-			ubcm_log(warn, __VA_ARGS__);                        \
+			ubcm_log(warn, __VA_ARGS__);                            \
 	} while (0)
 
 #endif /* UBCM_LOG_H */

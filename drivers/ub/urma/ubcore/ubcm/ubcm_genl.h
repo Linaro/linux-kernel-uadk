@@ -13,9 +13,6 @@
 #define UBCM_GENL_H
 
 #include <linux/types.h>
-
-
-
 #include "ub_mad.h"
 
 /* NETLINK_GENERIC related info */
@@ -30,22 +27,22 @@
 enum ubcm_uvs_state { UBCM_UVS_STATE_DEAD = 0, UBCM_UVS_STATE_ALIVE };
 
 enum ubcm_genl_attr { /* Refer to enum uvs_cm_genl_attr */
-		      UBCM_ATTR_UNSPEC,
-		      UBCM_HDR_COMMAND,
-		      UBCM_HDR_ARGS_LEN,
-		      UBCM_HDR_ARGS_ADDR,
-		      UBCM_ATTR_NS_MODE,
-		      UBCM_ATTR_DEV_NAME,
-		      UBCM_ATTR_NS_FD,
-		      UBCM_MSG_SEQ,
-		      UBCM_MSG_TYPE,
-		      UBCM_SRC_ID,
-		      UBCM_DST_ID,
-		      UBCM_RESERVED,
-		      UBCM_PAYLOAD_DATA,
-		      UBCM_ATTR_AFTER_LAST,
-		      NUM_UBCM_ATTR = UBCM_ATTR_AFTER_LAST,
-		      UBCM_ATTR_MAX = UBCM_ATTR_AFTER_LAST - 1
+	UBCM_ATTR_UNSPEC,
+	UBCM_HDR_COMMAND,
+	UBCM_HDR_ARGS_LEN,
+	UBCM_HDR_ARGS_ADDR,
+	UBCM_ATTR_NS_MODE,
+	UBCM_ATTR_DEV_NAME,
+	UBCM_ATTR_NS_FD,
+	UBCM_MSG_SEQ,
+	UBCM_MSG_TYPE,
+	UBCM_SRC_ID,
+	UBCM_DST_ID,
+	UBCM_RESERVED,
+	UBCM_PAYLOAD_DATA,
+	UBCM_ATTR_AFTER_LAST,
+	NUM_UBCM_ATTR = UBCM_ATTR_AFTER_LAST,
+	UBCM_ATTR_MAX = UBCM_ATTR_AFTER_LAST - 1
 };
 
 /* Handling generic netlnik messages from UVS, only forward messages */

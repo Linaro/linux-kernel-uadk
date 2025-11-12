@@ -14,8 +14,7 @@
 
 #include <linux/types.h>
 #include <linux/mm.h>
-
-#include "ub/urma/ubcore_types.h"
+#include <ub/urma/ubcore_types.h>
 
 #define UBCORE_QUEUE_NAME_LEN 32
 

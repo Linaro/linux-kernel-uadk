@@ -12,13 +12,12 @@
 #include <net/net_namespace.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-
-#include "ub/urma/ubcore_api.h"
+#include <ub/urma/ubcore_api.h>
+#include <ub/urma/ubcore_uapi.h>
 #include "ubcore_device.h"
 #include "ubcore_priv.h"
 #include "ubcore_cmd_tlv.h"
 #include "ubcore_topo_info.h"
-#include "ub/urma/ubcore_uapi.h"
 #include "net/ubcore_cm.h"
 #include "ubcore_uvs_cmd.h"
 

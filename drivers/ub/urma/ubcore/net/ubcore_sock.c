@@ -21,7 +21,6 @@
 #include <linux/socket.h>
 #include <linux/tcp.h>
 #include <linux/version.h>
-
 #include "ubcore_log.h"
 #include "ubcore_priv.h"
 #include "ubcore_sock.h"

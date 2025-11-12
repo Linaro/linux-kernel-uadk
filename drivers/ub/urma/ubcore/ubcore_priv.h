@@ -14,7 +14,7 @@
 
 #include <linux/jhash.h>
 #include <linux/types.h>
-#include "ub/urma/ubcore_types.h"
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_tp.h"
 
 #define UBCORE_MAX_UVS_NAME_LEN 64
@@ -156,8 +156,7 @@ void ubcore_set_tp_init_cfg(struct ubcore_tp *tp, struct ubcore_tp_cfg *cfg);
 struct ubcore_tp *ubcore_create_tp(struct ubcore_device *dev,
 				   struct ubcore_tp_cfg *cfg,
 				   struct ubcore_udata *udata);
-int ubcore_modify_tp(struct ubcore_device *dev, struct ubcore_tp_node *tp_node,
-		     struct ubcore_tp_attr *tp_attr, struct ubcore_udata udata);
+
 void ubcore_update_all_vlan_netaddr(struct ubcore_device *dev,
 				    enum ubcore_net_addr_op op);
 

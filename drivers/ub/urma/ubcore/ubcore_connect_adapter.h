@@ -12,7 +12,7 @@
 #ifndef UBCORE_CONNECT_ADAPTER_H
 #define UBCORE_CONNECT_ADAPTER_H
 
-#include "ub/urma/ubcore_types.h"
+#include <ub/urma/ubcore_types.h>
 
 struct ubcore_ex_tp_info {
 	struct hlist_node hnode; /* key: tp_handle */

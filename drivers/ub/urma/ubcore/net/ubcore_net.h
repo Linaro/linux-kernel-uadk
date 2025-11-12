@@ -12,8 +12,8 @@
 #ifndef NET_UBCORE_NET_H
 #define NET_UBCORE_NET_H
 
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_session.h"
-#include "ub/urma/ubcore_types.h"
 
 /* Compatible with uvs_msg_type_t */
 enum ubcore_net_msg_type {

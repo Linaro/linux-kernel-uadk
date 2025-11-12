@@ -13,9 +13,6 @@
 #include <net/genetlink.h>
 #include <linux/version.h>
 #include <linux/jhash.h>
-
-
-
 #include "ub_mad.h"
 #include "ub_cm.h"
 #include "ubcm_log.h"

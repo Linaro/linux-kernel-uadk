@@ -14,8 +14,8 @@
 
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_log.h"
-#include "ub/urma/ubcore_types.h"
 #include "ubcore_topo_info.h"
 
 struct ubcore_cmd_hdr {

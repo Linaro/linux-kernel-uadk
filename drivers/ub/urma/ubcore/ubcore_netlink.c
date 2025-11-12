@@ -17,7 +17,6 @@
 #include "ubcore_tp.h"
 #include "ubcore_vtp.h"
 #include "ubcore_priv.h"
-#include "ubcore_netdev.h"
 #include "ubcore_device.h"
 #include "ubcore_genl_define.h"
 #include "ubcore_workqueue.h"

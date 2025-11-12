@@ -15,8 +15,7 @@
 #include <linux/list.h>
 #include <linux/ctype.h>
 #include <linux/version.h>
-
-#include "ub/urma/ubcore_api.h"
+#include <ub/urma/ubcore_api.h>
 #include "ubcore_msg.h"
 #include "ubcore_cmd.h"
 #include "ubcore_device.h"

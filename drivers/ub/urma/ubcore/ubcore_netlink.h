@@ -14,7 +14,7 @@
 
 #include <net/genetlink.h>
 #include <linux/netlink.h>
-#include "ub/urma/ubcore_types.h"
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_cmd.h"
 
 struct ubcore_uvs_instance;

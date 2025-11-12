@@ -14,20 +14,14 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/version.h>
-
-
-
-
+#include <ub/urma/ubcore_uapi.h>
 #include "ubcm_log.h"
 #include "ubcm_genl.h"
 #include "ub_mad.h"
 #include "ub_cm.h"
 
 #define UBCM_LOG_FILE_PERMISSION (0644)
-
 #define UBCM_MODULE_NAME "ubcm"
-#define UBCM_DEVNO_MODE (0666)
-#define UBCM_DEVICE_NAME "ubcm"
 
 module_param(g_ubcm_log_level, uint, UBCM_LOG_FILE_PERMISSION);
 MODULE_PARM_DESC(g_ubcm_log_level, " 3: ERR, 4: WARNING, 6: INFO, 7: DEBUG");
@@ -70,24 +64,11 @@ static const struct file_operations g_ubcm_ops = {
 static int ubcm_add_device(struct ubcore_device *device);
 static void ubcm_remove_device(struct ubcore_device *device, void *client_ctx);
 
-static struct ubcore_client g_ubcm_client = { .list_node = LIST_HEAD_INIT(
-						      g_ubcm_client.list_node),
-					      .client_name = UBCM_MODULE_NAME,
-					      .add = ubcm_add_device,
-					      .remove = ubcm_remove_device };
-
-static char *ubcm_devnode(const struct device *dev, umode_t *mode)
-
-{
-	if (mode)
-		*mode = UBCM_DEVNO_MODE;
-
-	return kasprintf(GFP_KERNEL, "%s", dev_name(dev));
-}
-
-static struct class g_ubcm_class = {
-	.name = UBCM_MODULE_NAME,
-	.devnode = ubcm_devnode,
+static struct ubcore_client g_ubcm_client = {
+	.list_node = LIST_HEAD_INIT(g_ubcm_client.list_node),
+	.client_name = UBCM_MODULE_NAME,
+	.add = ubcm_add_device,
+	.remove = ubcm_remove_device
 };
 
 static int ubcm_get_ubc_dev(struct ubcore_device *device)
@@ -234,7 +215,6 @@ static int ubcm_add_device(struct ubcore_device *device)
 	cm_dev->device = device;
 	ubcore_set_client_ctx_data(device, &g_ubcm_client, cm_dev);
 
-	/* Currently no send_handler needed */
 	cm_dev->agent = ubmad_register_agent(device, ubcm_send_handler,
 					     ubcm_recv_handler, (void *)cm_dev);
 	if (IS_ERR_OR_NULL(cm_dev->agent)) {
@@ -285,9 +265,8 @@ void ubcm_work_handler(struct work_struct *work)
 
 	cm_dev = ubcm_find_get_device(&send_buf->src_eid);
 	if (IS_ERR_OR_NULL(cm_dev) || IS_ERR_OR_NULL(cm_dev->device)) {
-		ubcm_log_err("Failed to find ubcm device, src_eid: " EID_FMT
-			     ".\n",
-			     EID_ARGS(send_buf->src_eid));
+		ubcm_log_err("Failed to find ubcm device, src_eid: " EID_FMT ".\n",
+			EID_ARGS(send_buf->src_eid));
 		goto free_send_buf;
 	}
 	/* Source eid should be default eid0 for wk_jetty */
@@ -379,67 +358,6 @@ struct ubcm_device *ubcm_find_get_device(union ubcore_eid *eid)
 	return target;
 }
 
-static int ubcm_cdev_create(void)
-{
-	struct ubcm_context *cm_ctx = get_ubcm_ctx();
-	int ret;
-
-	ret = alloc_chrdev_region(&cm_ctx->ubcm_devno, 0, 1, UBCM_MODULE_NAME);
-	if (ret != 0) {
-		ubcm_log_err("Failed to alloc chrdev region, ret: %d.\n", ret);
-		return ret;
-	}
-
-	/* create /sys/class/ubcm */
-	ret = class_register(&g_ubcm_class);
-	if (ret != 0) {
-		ubcm_log_err("Failed to register ubcm class, ret: %d.\n", ret);
-		goto unreg_devno;
-	}
-
-	cdev_init(&cm_ctx->ubcm_cdev, &g_ubcm_ops);
-	cm_ctx->ubcm_cdev.owner = THIS_MODULE;
-
-	ret = cdev_add(&cm_ctx->ubcm_cdev, cm_ctx->ubcm_devno, 1);
-	if (ret != 0) {
-		ubcm_log_err("Failed to add ubcm chrdev, ret: %d.\n", ret);
-		goto unreg_class;
-	}
-
-	/* create /dev/ubcm */
-	cm_ctx->ubcm_dev = device_create(&g_ubcm_class, NULL,
-					 cm_ctx->ubcm_devno, NULL,
-					 UBCM_DEVICE_NAME);
-	if (IS_ERR_OR_NULL(cm_ctx->ubcm_dev)) {
-		ret = -1;
-		ubcm_log_err("Failed to create ubcm device, ret: %d.\n",
-			     (int)PTR_ERR(cm_ctx->ubcm_dev));
-		cm_ctx->ubcm_dev = NULL;
-		goto del_cdev;
-	}
-
-	ubcm_log_info("Finish to create ubcm chrdev.\n");
-	return 0;
-del_cdev:
-	cdev_del(&cm_ctx->ubcm_cdev);
-unreg_class:
-	class_unregister(&g_ubcm_class);
-unreg_devno:
-	unregister_chrdev_region(cm_ctx->ubcm_devno, 1);
-	return ret;
-}
-
-static void ubcm_cdev_destroy(void)
-{
-	struct ubcm_context *cm_ctx = get_ubcm_ctx();
-
-	device_destroy(&g_ubcm_class, cm_ctx->ubcm_cdev.dev);
-	cm_ctx->ubcm_dev = NULL;
-	cdev_del(&cm_ctx->ubcm_cdev);
-	class_unregister(&g_ubcm_class);
-	unregister_chrdev_region(cm_ctx->ubcm_devno, 1);
-}
-
 int ubcm_init(void)
 {
 	int ret;
@@ -456,24 +374,17 @@ int ubcm_init(void)
 		goto uninit_mad;
 	}
 
-	ret = ubcm_cdev_create();
-	if (ret != 0) {
-		ubcm_log_err("Failed to create ubcm chrdev, ret: %d.\n", ret);
-		goto uninit_base;
-	}
-
 	ret = ubcm_genl_init();
 	if (ret != 0) {
 		ubcm_log_err("Failed to init ubcm generic netlink, ret: %d.\n",
 			     ret);
-		goto destroy_cdev;
+		goto uninit_base;
 	}
 	ubcore_register_cm_send_ops(ubmad_ubc_send);
 
-	pr_info("ubcm module init success.\n");
+	ubcm_log_info("ubcm module init success.\n");
 	return 0;
-destroy_cdev:
-	ubcm_cdev_destroy();
+
 uninit_base:
 	ubcm_base_uninit();
 uninit_mad:
@@ -484,8 +395,7 @@ uninit_mad:
 void ubcm_uninit(void)
 {
 	ubcm_genl_uninit();
-	ubcm_cdev_destroy();
 	ubcm_base_uninit();
 	ubmad_uninit();
-	pr_info("ubcm module exits.\n");
+	ubcm_log_info("ubcm module exits.\n");
 }

@@ -9,9 +9,9 @@
  * History: 2023-12-25: create file
  */
 
+#include <ub/urma/ubcore_types.h>
+#include <ub/urma/ubcore_uapi.h>
 #include "ubcore_log.h"
-#include "ub/urma/ubcore_types.h"
-#include "ub/urma/ubcore_uapi.h"
 
 #ifdef CONFIG_CGROUP_RDMA
 static inline bool ubcore_is_use_cg(struct ubcore_device *dev)

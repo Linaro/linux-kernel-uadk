@@ -12,7 +12,7 @@
 #ifndef UBCORE_VTP_H
 #define UBCORE_VTP_H
 
-#include "ub/urma/ubcore_types.h"
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_netlink.h"
 #include "ubcore_msg.h"
 #include "ubcore_netlink.h"

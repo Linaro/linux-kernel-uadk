@@ -14,10 +14,7 @@
 
 #include <linux/workqueue.h>
 #include <linux/cdev.h>
-
-
 #include "net/ubcore_cm.h"
-
 #include "ub_mad.h"
 #include "ubcm_genl.h"
 

@@ -14,7 +14,6 @@
 #define UBCORE_CMD_TLV_H
 
 #include <linux/types.h>
-
 #include "ubcore_cmd.h"
 #include "ubcore_uvs_cmd.h"
 

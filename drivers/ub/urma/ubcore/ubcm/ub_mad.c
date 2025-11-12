@@ -11,17 +11,16 @@
 
 #include <linux/list.h>
 #include <linux/jhash.h>
-
-
-
+#include <ub/urma/ubcore_uapi.h>
+#include <ub/urma/ubcore_api.h>
 #include "ubcore_tp.h"
 #include "ubcm_log.h"
-
 #include "ub_mad_priv.h"
+#include "ubcore_log.h"
 
 // udma jetty id starts from 1 currently
-#define WK_JETTY_ID_INITIALIZER                          \
-	{                                                \
+#define WK_JETTY_ID_INITIALIZER                  \
+	{                                            \
 		UBMAD_WK_JETTY_ID_0, UBMAD_WK_JETTY_ID_1 \
 	}
 static const uint32_t g_ubmad_wk_jetty_id[UBMAD_WK_JETTY_NUM] =
@@ -191,7 +190,7 @@ ubmad_update_device_priv_resources(struct ubmad_device_priv *dev_priv,
 	}
 	dev_priv->has_create_jetty_rsrc = true;
 	ubcm_log_info(
-		"Success to update priv resources: dev: %s eid_idx %d, " EID_FMT,
+		"Success to update priv resources: dev: %s eid_idx %d, eid: " EID_FMT,
 		dev_priv->device->dev_name, dev_priv->eid_info.eid_index,
 		EID_ARGS(dev_priv->eid_info.eid));
 	return 0;
@@ -732,6 +731,7 @@ static int ubmad_init_jetty_rsrc(struct ubmad_jetty_resource *rsrc,
 		ret = -1;
 		goto del_jfc_r;
 	}
+	rsrc->jfr = jfr;
 
 	jetty = ubmad_create_jetty(dev_priv, jfc_s, jfc_r, jfr, rsrc->jetty_id);
 	if (IS_ERR_OR_NULL(jetty)) {
@@ -1099,7 +1099,6 @@ static int ubmad_add_device(struct ubcore_device *device)
 	/* Use main device, do not use namespace logic device */
 	int ret;
 
-	/* open dev */
 	ret = ubmad_open_device(device);
 	if (ret != 0) {
 		ubcm_log_err(

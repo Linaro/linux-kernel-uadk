@@ -14,10 +14,9 @@
 
 #include <linux/types.h>
 #include <linux/uaccess.h>
-
+#include <ub/urma/ubcore_types.h>
 #include "ubcore_cmd.h"
 #include "ubcore_log.h"
-#include "ub/urma/ubcore_types.h"
 #include "ubcore_priv.h"
 
 #define UBCORE_UVS_CMD_MAGIC 'V'

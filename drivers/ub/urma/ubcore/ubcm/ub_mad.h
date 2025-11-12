@@ -12,7 +12,6 @@
 #ifndef UB_MAD_H
 #define UB_MAD_H
 
-
 #include "net/ubcore_cm.h"
 
 /* agent */
@@ -56,9 +55,9 @@ struct ubmad_recv_cr {
 
 struct ubmad_agent;
 typedef int (*ubmad_send_handler)(struct ubmad_agent *agent,
-				  struct ubmad_send_cr *cr);
+	struct ubmad_send_cr *cr);
 typedef int (*ubmad_recv_handler)(struct ubmad_agent *agent,
-				  struct ubmad_recv_cr *cr);
+	struct ubmad_recv_cr *cr);
 struct ubmad_agent {
 	struct ubcore_device *device;
 	ubmad_send_handler send_handler;
@@ -70,15 +69,15 @@ int ubmad_init(void);
 void ubmad_uninit(void);
 
 struct ubmad_agent *ubmad_register_agent(struct ubcore_device *device,
-					 ubmad_send_handler send_handler,
-					 ubmad_recv_handler recv_handler,
-					 void *usr_ctx);
+	ubmad_send_handler send_handler,
+	ubmad_recv_handler recv_handler,
+	void *usr_ctx);
 int ubmad_unregister_agent(struct ubmad_agent *agent);
 
 int ubmad_post_send(struct ubcore_device *device,
-		    struct ubmad_send_buf *send_buf,
-		    struct ubmad_send_buf **bad_send_buf);
+	struct ubmad_send_buf *send_buf,
+	struct ubmad_send_buf **bad_send_buf);
 int ubmad_ubc_send(struct ubcore_device *device,
-		   struct ubcore_cm_send_buf *send_buf);
+	struct ubcore_cm_send_buf *send_buf);
 
 #endif /* UB_MAD_H */

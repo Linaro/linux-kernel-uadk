@@ -12,7 +12,7 @@
 #ifndef UBCORE_TOPO_INFO_H
 #define UBCORE_TOPO_INFO_H
 
-#include <linux/types.h>
+#include <ub/urma/ubcore_types.h>
 
 #define EID_LEN (16)
 #define MAX_PORT_NUM (9)

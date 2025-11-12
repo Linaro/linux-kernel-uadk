@@ -3,12 +3,73 @@
 # UB network configuration
 #
 
+menuconfig UB_NET
+	bool "UB network driver support"
+	depends on NET
+	depends on ARM64
+	default n
+	help
+	  If you have a network (UB) card belonging to this class, say Y.
+
+	  UB is a new interconnection protocol that defines its own physical layer,
+	  data link layer, and network layer.
+	  This option includes the data link layer and all UB network device drivers.
+	  On the otherside, it can also be used with ethernet link for layer 2,
+	  which still integrates with the TCP/IP protocol stack.
+
+if UB_NET
+
 config UB_UBL
 	default n
 	tristate "UB link support"
-	depends on ARM64
 	help
 	  This enables UB link support which is
 	  used to replace traditional ethernet layer.
 	  Say 'Y' or 'm' if your device works
 	  in UB mode.
+
+config UB_UNIC
+	tristate "NIC based on UB devices"
+	default n
+	depends on UB_UBASE
+	help
+	  This option is used to enable the networking capabilities of the
+	  UB device and integrate with the TCP/IP protocol stack.
+	  This module depends upon UB_UBASE driver to access the ub devices
+	  and their associated operations. For UB devices, in addition to the
+	  ubase driver, it also relies on the ubl driver.
+
+config UB_UNIC_UBL
+	bool "Hisilicon UNIC UB link support"
+	default n
+	depends on UB_UBL
+	depends on UB_UNIC
+	help
+	  This option enables support for UB Link (UBL) in the Hisilicon
+	  UNIC network driver. UB link is used to replace traditional
+	  ethernet layer in the UB devices. When enable UB_UNIC_UBL config,
+	  UNIC driver will use the interfaces defined by UBL.
+
+	  To use this feature, you must have both the UB_UBL and UB_UNIC
+	  options enabled.
+
+	  If you are unsure whether you need this functionality, it is
+	  recommended to leave it disabled to avoid unnecessary kernel bloat.
+
+config UB_UNIC_DCB
+	bool "Hisilicon UNIC Data Center Bridge Support"
+	default n
+	depends on DCB
+	depends on UB_UNIC
+	help
+	  This option enables support for Data Center Bridging (DCB) in the
+	  Hisilicon UNIC network driver. DCB allows for the configuration of
+	  network traffic classes and priorities, enhancing network performance
+	  in data center environments.
+
+	  To use this feature, you must have both the DCB and UB_UNIC options enabled.
+
+	  If you are unsure whether you need this functionality, it is
+	  recommended to leave it disabled to avoid unnecessary kernel bloat.
+
+endif #UB_NET

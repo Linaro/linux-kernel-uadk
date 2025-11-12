@@ -5,3 +5,4 @@
 
 #### compile ubl
 obj-$(CONFIG_UB_UBL) += dev/
+obj-$(CONFIG_UB_UNIC) += unic/

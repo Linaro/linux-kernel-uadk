@@ -1,0 +1,277 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
+/*
+ * Copyright (c) 2025 HiSilicon Technologies Co., Ltd. All rights reserved.
+ *
+ */
+
+#ifndef __UNIC_DEV_H__
+#define __UNIC_DEV_H__
+
+#include <linux/ethtool.h>
+#include <linux/if_vlan.h>
+#include <linux/netdevice.h>
+#include <ub/ubase/ubase_comm_debugfs.h>
+#include <ub/ubase/ubase_comm_dev.h>
+#include <ub/ubase/ubase_comm_eq.h>
+
+#include "unic.h"
+#include "unic_cmd.h"
+#include "unic_ethtool.h"
+
+#define UNIC_MOD_VERSION	"1.0"
+#define UNIC_AE_LEVEL_NUM	1
+
+enum unic_dev_state {
+	UNIC_STATE_INVALID,
+	UNIC_STATE_RESETTING,
+	UNIC_STATE_INITED,
+	UNIC_STATE_DOWN,
+	UNIC_STATE_REMOVING,
+	UNIC_STATE_DISABLED,
+	UNIC_STATE_LINK_UPDATING,
+	UNIC_STATE_TESTING,
+	UNIC_STATE_DEACTIVATE,
+};
+
+enum unic_vport_state {
+	UNIC_VPORT_STATE_ALIVE,
+	UNIC_VPORT_STATE_PROMISC_CHANGE,
+	UNIC_VPORT_STATE_IP_TBL_CHANGE,
+	UNIC_VPORT_STATE_IP_QUERYING,
+};
+
+#define UNIC_DEFAULT_CHANNEL_NUM	1
+
+#define unic_dbg(_unic_dev, fmt, ...)                                         \
+	do {								      \
+		if (unic_dbg_log())                                           \
+			netdev_info((_unic_dev)->comdev.netdev, "(pid %d) " fmt, \
+				    current->pid, ##__VA_ARGS__);		\
+	} while (0)
+
+#define unic_err(_unic_dev, fmt, ...)                                         \
+	netdev_err((_unic_dev)->comdev.netdev, "(pid %d) " fmt,                 \
+		   current->pid, ##__VA_ARGS__)
+
+#define unic_info(_unic_dev, fmt, ...)                                        \
+	netdev_info((_unic_dev)->comdev.netdev, "(pid %d) " fmt,                \
+		    current->pid, ##__VA_ARGS__)
+
+#define unic_warn(_unic_dev, fmt, ...)                                        \
+	netdev_warn((_unic_dev)->comdev.netdev, "(pid %d) " fmt,                \
+		    current->pid, ##__VA_ARGS__)
+
+struct unic_mac {
+	u8  port; /* see PORT_TP/PORT_FIBRE... */
+	u8  media_type; /* port media type, see unic_media_type */
+	u8  module_type; /* module type, see unic_module_type */
+	u8  duplex;
+	u8  autoneg;
+	u8  support_autoneg;
+	u32 link_status; /* link status of mac & phy (if phy exists) */
+	u32 speed;
+	u32 max_speed;
+	u32 speed_ability;
+	u32 lanes; /* lane number */
+	u32 fec_mode; /* active fec mode */
+	u32 fec_ability; /* supported fec mode */
+	u32 user_fec_mode; /* user configured fec mode */
+	u8  mac_addr[ETH_ALEN];
+
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(supported);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
+};
+
+struct unic_hw {
+	struct unic_mac mac;
+};
+
+struct unic_channel {
+	struct unic_sq		*sq;
+	struct unic_rq		*rq;
+	struct unic_cq		*sq_cq;
+	struct unic_cq		*rq_cq;
+	struct napi_struct	napi;
+	/*​ ​monitor each jetty's return status in parallel operations.​ */
+	int			ret;
+};
+
+struct unic_coal_txrx {
+	struct unic_coalesce	tx_coal;
+	struct unic_coalesce	rx_coal;
+};
+
+struct unic_vl {
+	u8	vl_num;
+	u8	dscp_app_cnt;
+	u8	dscp_prio[UBASE_MAX_DSCP];
+	u8	vl_tsa[UBASE_MAX_VL_NUM];
+	u8	prio_vl[UNIC_MAX_PRIO_NUM];
+	u8	vl_bw[UBASE_MAX_VL_NUM];
+	u16	queue_count[UBASE_MAX_VL_NUM];
+	u16	queue_offset[UBASE_MAX_VL_NUM];
+	u8	vl_sl[UBASE_MAX_VL_NUM];
+	u64	vl_maxrate[UBASE_MAX_VL_NUM];
+	u16	vl_bitmap;
+};
+
+struct unic_channels {
+	struct unic_channel	*c;
+	struct unic_vl		vl;
+	u32			num;
+	u16			sqebb_depth;
+	u16			rqe_depth;
+	u32			sq_cqe_depth;
+	u32			rq_cqe_depth;
+	u16			rx_buff_len;
+	u16			cqe_size;
+	u32			rss_size;
+	u8			rss_vl_num; /* the number of vl used by unic */
+	u8			sqebb_shift;
+	u8			sq_jfc_shift;
+	u8			rq_jfc_shift;
+	struct unic_coal_txrx	unic_coal;
+	struct mutex		mutex; /* protects modify channel's resource and mapping */
+	unsigned long		state;
+};
+
+struct unic_caps {
+	u16	rx_buff_len;
+	u16	total_ip_tbl_size;
+	u32	rsvd0[5];
+	u16	max_trans_unit;
+	u16	min_trans_unit;
+	u32	vport_buf_size; /* unit: byte */
+	u8	vport_buf_num;
+	u16	max_int_ql; /* max value of interrupt coalesce based on INT_QL */
+	u16	max_int_gl; /* max value of interrupt coalesce based on INT_GL */
+};
+
+struct unic_addr_tbl {
+	spinlock_t		ip_list_lock; /* protect ip address need to add/detele */
+	struct list_head	ip_list; /* Store ip table */
+
+	spinlock_t		tmp_ip_lock; /* protect ip address from controller */
+	struct list_head	tmp_ip_list; /* Store temprary ip table */
+};
+
+struct unic_vport_buf {
+	void		*buf;
+	dma_addr_t	dma_addr;
+};
+
+struct unic_vport {
+	struct unic_dev		*back;
+	struct unic_addr_tbl	addr_tbl;
+	u8			overflow_promisc_flags;
+	u8			last_promisc_flags;
+	unsigned long		state;
+};
+
+struct unic_act_info {
+	bool		deactivate;
+	struct mutex	mutex; /* protects modify deactivate state */
+};
+
+struct unic_dev {
+	/* This member must be first, adaptor driver will relay on it */
+	struct ubase_adev_com	comdev;
+	struct unic_hw		hw;
+	struct unic_channels	channels;
+	struct ubase_dbgfs	dbgfs;
+	u8			dcbx_cap;
+	struct unic_caps	caps;
+	u32			cap_bits[UNIC_CAP_LEN];
+	u32			msg_enable;
+	unsigned long		state;
+	struct delayed_work	service_task;
+	struct ubase_event_nb	ae_nbs[UNIC_AE_LEVEL_NUM];
+	u8			netdev_flags;
+	u8			loopback_flags;
+	struct unic_vport	vport;
+	struct unic_vport_buf	vbuf[UNIC_MAX_VPORT_BUF_NUM];
+	unsigned long		serv_processed_cnt;
+	struct unic_act_info	act_info;
+	u32			tid;
+	u8			sw_link_status;
+};
+
+int unic_dev_init(struct auxiliary_device *adev);
+void unic_dev_uninit(struct auxiliary_device *adev);
+u32 unic_channels_max_num(struct auxiliary_device *adev);
+void unic_start_period_task(struct net_device *netdev);
+void unic_remove_period_task(struct unic_dev *unic_dev);
+int unic_init_wq(void);
+void unic_destroy_wq(void);
+int unic_set_vl_map(struct unic_dev *unic_dev, u8 *dscp_prio, u8 *prio_vl,
+		    u8 map_type);
+int unic_dbg_log(void);
+
+static inline bool unic_dev_ubl_supported(struct unic_dev *unic_dev)
+{
+	return ubase_adev_ubl_supported(unic_dev->comdev.adev);
+}
+
+static inline bool unic_dev_ets_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_ETS_B);
+}
+
+static inline bool unic_dev_fec_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_FEC_B);
+}
+
+static inline bool unic_dev_tc_speed_limit_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_TC_SPEED_LIMIT_B);
+}
+
+static inline bool unic_dev_tx_csum_offload_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_TX_CSUM_OFFLOAD_B);
+}
+
+static inline bool unic_dev_rx_csum_offload_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_RX_CSUM_OFFLOAD_B);
+}
+
+static inline bool __unic_removing(struct unic_dev *unic_dev)
+{
+	return test_bit(UNIC_STATE_REMOVING, &unic_dev->state);
+}
+
+static inline bool __unic_resetting(struct unic_dev *unic_dev)
+{
+	return test_bit(UNIC_STATE_RESETTING, &unic_dev->state);
+}
+
+static inline bool unic_resetting(struct net_device *netdev)
+{
+	return __unic_resetting(netdev_priv(netdev));
+}
+
+static inline bool __unic_initing(struct unic_dev *unic_dev)
+{
+	return !test_bit(UNIC_STATE_INITED, &unic_dev->state);
+}
+
+static inline bool unic_initing(struct net_device *netdev)
+{
+	return __unic_initing(netdev_priv(netdev));
+}
+
+static inline bool unic_is_initing_or_resetting(struct unic_dev *unic_dev)
+{
+	return __unic_resetting(unic_dev) || __unic_initing(unic_dev);
+}
+
+static inline u32 unic_cmd_timeout(struct unic_dev *unic_dev)
+{
+#define UNIC_CMD_TIMEOUT 5000
+
+	return __unic_removing(unic_dev) ? UNIC_CMD_TIMEOUT : 0;
+}
+
+#endif

@@ -25,6 +25,7 @@
 #include "ubcore_workqueue.h"
 #include "ubcore_main.h"
 #include "ubcore_cdev_file.h"
+#include "ubcore_uvs_cmd.h"
 
 #define UBCORE_MAX_MUE_NUM 16
 #define UBCORE_DEVICE_NAME "ubcore"

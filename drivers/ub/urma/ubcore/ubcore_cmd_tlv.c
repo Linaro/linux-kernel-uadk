@@ -56,9 +56,6 @@ static inline void fill_spec(struct ubcore_cmd_spec *spec, uint16_t type,
 #define SPEC_ARRAY(spec, type, v1, v2)                          \
 	fill_spec(spec, type, sizeof((v1)->v2), ARRAY_SIZE(v1), \
 		  sizeof((v1)[0]), (uintptr_t)(&((v1)->v2)))
-#define SPEC_ARRAY_DYNAMIC(spec, type, v1, el_num)                      \
-	fill_spec(spec, type, sizeof((v1)[0]), el_num, sizeof((v1)[0]), \
-		  (uintptr_t)(&((v1)[0])))
 
 static void ubcore_set_topo_fill_spec_in(void *arg_addr,
 					 struct ubcore_cmd_spec *spec)
@@ -83,7 +80,7 @@ static struct ubcore_cmd_attr *
 ubcore_create_tlv_attr(struct ubcore_cmd_hdr *hdr, uint32_t *attr_size)
 {
 	struct ubcore_cmd_attr *attr;
-	int ret;
+	int ret = 0;
 
 	if (hdr->args_len % sizeof(struct ubcore_cmd_attr) != 0 ||
 	    hdr->args_len >= UBCORE_CMD_TLV_MAX_LEN) {
@@ -109,7 +106,7 @@ static int ubcore_cmd_tlv_parse_type(struct ubcore_cmd_spec *spec,
 {
 	uintptr_t ptr_src, ptr_dst;
 	uint32_t i;
-	int ret;
+	int ret = 0;
 	uint32_t spec_el_num = spec->attr_data.bs.el_num;
 	uint32_t attr_el_num = attr->attr_data.bs.el_num;
 
@@ -143,8 +140,8 @@ static int ubcore_cmd_tlv_parse(struct ubcore_cmd_spec *spec,
 				uint32_t attr_size)
 {
 	uint32_t spec_idx, attr_idx;
-	bool match;
-	int ret;
+	bool match = false;
+	int ret = 0;
 
 	/* spec type of this range is only in type */
 	for (spec_idx = 0; spec_idx < spec_size; spec_idx++) {
@@ -175,11 +172,11 @@ static int ubcore_cmd_tlv_append_type(struct ubcore_cmd_spec *spec,
 {
 	uintptr_t ptr_src, ptr_dst;
 	uint32_t i;
-	int ret;
+	int ret = 0;
 	uint32_t spec_el_num = spec->attr_data.bs.el_num;
 	uint32_t attr_el_num = attr->attr_data.bs.el_num;
 
-	/* length of ubcore spec and from uvs should be strictly checked */
+	/* length of ubcore spec which from uvs should be strictly checked */
 	/* as length of uvs ioctl attr should be strictly equal to length of ubcore */
 	if (spec->field_size != attr->field_size ||
 	    spec_el_num != attr_el_num) {
@@ -208,7 +205,7 @@ static int ubcore_cmd_tlv_append(struct ubcore_cmd_spec *spec,
 				 uint32_t attr_size)
 {
 	uint32_t spec_idx, attr_idx;
-	int ret;
+	int ret = 0;
 
 	for (spec_idx = 0; spec_idx < spec_size; spec_idx++) {
 		for (attr_idx = 0; attr_idx < attr_size; attr_idx++) {
@@ -231,7 +228,7 @@ int ubcore_tlv_parse(ubcore_fill_spec_func fill_spec, size_t spec_size,
 	struct ubcore_cmd_spec *spec = NULL;
 	struct ubcore_cmd_attr *attr = NULL;
 	uint32_t attr_size;
-	int ret;
+	int ret = 0;
 
 	/* Command of hdr is valid, no need to check it */
 	if (fill_spec == NULL) {
@@ -265,7 +262,7 @@ int ubcore_tlv_append(ubcore_fill_spec_func fill_spec, size_t spec_size,
 	struct ubcore_cmd_spec *spec = NULL;
 	struct ubcore_cmd_attr *attr = NULL;
 	uint32_t attr_size;
-	int ret;
+	int ret = 0;
 
 	/* Command of hdr is valid, no need to check it */
 	if (fill_spec == NULL) {

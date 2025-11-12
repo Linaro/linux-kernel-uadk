@@ -51,6 +51,7 @@ static DECLARE_RWSEM(g_device_rwsem);
  * g_clients_rwsem protect g_client_list.
  */
 static DECLARE_RWSEM(g_clients_rwsem);
+static struct ubcore_device *g_ub_mue;
 
 static unsigned int g_ubcore_net_id;
 static LIST_HEAD(g_ubcore_net_list);
@@ -59,17 +60,17 @@ static DECLARE_RWSEM(g_ubcore_net_rwsem);
 
 static bool g_shared_ns = true;
 
+static long ubcore_global_ioctl(struct file *filp, unsigned int cmd,
+				unsigned long arg)
+{
+	ubcore_log_info("ubcore global ioctl command.\n");
+	return 0;
+}
+
 static int ubcore_global_open(struct inode *i_node, struct file *filp)
 {
 	ubcore_log_info("open ubcore global file succeed.\n");
 	return 0;
-}
-
-static long ubcore_global_ioctl(struct file *filp, unsigned int cmd,
-				unsigned long arg)
-{
-	ubcore_log_err("bad ioctl command.\n");
-	return -ENOIOCTLCMD;
 }
 
 static int ubcore_global_close(struct inode *i_node, struct file *filp)
@@ -269,6 +270,17 @@ struct ubcore_device *ubcore_find_device_with_name(const char *dev_name)
 	return target;
 }
 
+bool ubcore_check_dev_is_exist(const char *dev_name)
+{
+	struct ubcore_device *dev = NULL;
+
+	dev = ubcore_find_device_with_name(dev_name);
+	if (dev != NULL)
+		ubcore_put_device(dev);
+
+	return dev != NULL ? true : false;
+}
+
 static int ubcore_create_eidtable(struct ubcore_device *dev)
 {
 	struct ubcore_eid_entry *entry_list;
@@ -304,6 +316,93 @@ static void ubcore_destroy_eidtable(struct ubcore_device *dev)
 	spin_unlock(&dev->eid_table.lock);
 	if (e != NULL)
 		kfree(e);
+}
+
+struct ubcore_device *
+ubcore_find_mue_device_legacy(enum ubcore_transport_type type)
+{
+	if (g_ub_mue == NULL) {
+		ubcore_log_info("mue is not registered yet\n");
+		return NULL;
+	}
+
+	if (g_ub_mue->transport_type != type) {
+		ubcore_log_info("mue of tran type:%d, not registered yet\n",
+				(int)type);
+		return NULL;
+	}
+
+	ubcore_get_device(g_ub_mue);
+	return g_ub_mue;
+}
+
+struct ubcore_device *ubcore_find_mue_by_dev(struct ubcore_device *dev)
+{
+	if (dev == NULL)
+		return NULL;
+
+	if (dev->attr.tp_maintainer) {
+		ubcore_get_device(dev);
+		return dev;
+	}
+
+	return ubcore_find_mue_device_legacy(dev->transport_type);
+}
+
+struct ubcore_device *ubcore_find_mue_device_by_name(char *dev_name)
+{
+	struct ubcore_device *dev;
+
+	dev = ubcore_find_device_with_name(dev_name);
+	if (dev == NULL) {
+		ubcore_log_err("can not find dev by name:%s", dev_name);
+		return NULL;
+	}
+
+	if (dev->attr.tp_maintainer)
+		return dev;
+
+	ubcore_log_err("dev:%s is not mue", dev_name);
+	ubcore_put_device(dev);
+	return NULL;
+}
+
+struct ubcore_device **
+ubcore_get_all_mue_device(enum ubcore_transport_type type, uint32_t *dev_cnt)
+{
+	struct ubcore_device **dev_list;
+	struct ubcore_device *dev;
+	uint32_t count = 0;
+	int i = 0;
+
+	*dev_cnt = 0;
+	down_read(&g_device_rwsem);
+	list_for_each_entry(dev, &g_device_list, list_node) {
+		if (dev->attr.tp_maintainer && dev->transport_type == type)
+			++count;
+	}
+
+	if (count == 0) {
+		up_read(&g_device_rwsem);
+		return NULL;
+	}
+
+	dev_list = kcalloc(count, sizeof(struct ubcore_device *), GFP_KERNEL);
+	if (dev_list == NULL) {
+		up_read(&g_device_rwsem);
+		return NULL;
+	}
+
+	list_for_each_entry(dev, &g_device_list, list_node) {
+		if (dev->attr.tp_maintainer && dev->transport_type == type) {
+			dev_list[i++] = dev;
+			ubcore_get_device(dev);
+		}
+	}
+	*dev_cnt = count;
+	up_read(&g_device_rwsem);
+
+	return dev_list;
 }
 
 static void ubcore_free_driver_obj(void *obj)
@@ -475,6 +574,27 @@ static void ubcore_free_driver_res(struct ubcore_device *dev)
 				       ubcore_destroy_tpg_in_unreg_dev);
 }
 
+static void uninit_ubcore_mue(struct ubcore_device *dev)
+{
+	if (!dev->attr.tp_maintainer)
+		return;
+
+	if (g_ub_mue == dev)
+		g_ub_mue = NULL;
+}
+
+static int init_ubcore_mue(struct ubcore_device *dev)
+{
+	if (!dev->attr.tp_maintainer)
+		return 0;
+
+	/* set mue device */
+	if (dev->transport_type == UBCORE_TRANSPORT_UB && g_ub_mue == NULL)
+		g_ub_mue = dev;
+
+	return 0;
+}
+
 static int init_ubcore_device(struct ubcore_device *dev)
 {
 	if (dev->ops->query_device_attr != NULL &&
@@ -482,6 +602,9 @@ static int init_ubcore_device(struct ubcore_device *dev)
 		ubcore_log_err("Failed to query device attributes");
 		return -1;
 	}
+
+	if (init_ubcore_mue(dev) != 0)
+		return -1;
 
 	INIT_LIST_HEAD(&dev->list_node);
 	init_rwsem(&dev->client_ctx_rwsem);
@@ -495,7 +618,7 @@ static int init_ubcore_device(struct ubcore_device *dev)
 
 	if (ubcore_create_eidtable(dev) != 0) {
 		ubcore_log_err("create eidtable failed.\n");
-		return -1;
+		goto destroy_upi;
 	}
 
 	if (ubcore_alloc_hash_tables(dev) != 0) {
@@ -509,11 +632,87 @@ static int init_ubcore_device(struct ubcore_device *dev)
 
 destroy_eidtable:
 	ubcore_destroy_eidtable(dev);
+destroy_upi:
+	uninit_ubcore_mue(dev);
 	return -1;
 }
 
 static void ubcore_device_release(struct device *device)
 {
+}
+
+static struct ubcore_cc_entry *ubcore_get_cc_entry(struct ubcore_device *dev,
+						   uint32_t *cc_entry_cnt)
+{
+	struct ubcore_cc_entry *cc_entry = NULL;
+	*cc_entry_cnt = 0;
+
+	if (dev->ops == NULL || dev->ops->query_cc == NULL) {
+		ubcore_log_err("Invalid parameter!\n");
+		return NULL;
+	}
+
+	cc_entry = dev->ops->query_cc(dev, cc_entry_cnt);
+	if (cc_entry == NULL) {
+		ubcore_log_err("Failed to query cc entry\n");
+		return NULL;
+	}
+
+	if (*cc_entry_cnt > UBCORE_CC_IDX_TABLE_SIZE || *cc_entry_cnt == 0) {
+		kfree(cc_entry);
+		ubcore_log_err("cc_entry_cnt invalid, %u.\n", *cc_entry_cnt);
+		return NULL;
+	}
+
+	return cc_entry;
+}
+
+struct ubcore_nlmsg *ubcore_new_mue_dev_msg(struct ubcore_device *dev)
+{
+	struct ubcore_update_mue_dev_info_req *data;
+	struct ubcore_cc_entry *cc_entry;
+	struct ubcore_cc_entry *array;
+	struct ubcore_nlmsg *req_msg;
+	uint32_t cc_entry_cnt;
+	uint32_t cc_len;
+
+	/* If not support cc, cc_entry may be NULL, cc_entry_cnt is 0 */
+	cc_entry = ubcore_get_cc_entry(dev, &cc_entry_cnt);
+
+	cc_len = (uint32_t)sizeof(struct ubcore_update_mue_dev_info_req) +
+		 cc_entry_cnt * (uint32_t)sizeof(struct ubcore_cc_entry);
+	req_msg = kcalloc(1, sizeof(struct ubcore_nlmsg) + cc_len, GFP_KERNEL);
+	if (req_msg == NULL)
+		goto out;
+
+	/* fill msg head */
+	req_msg->msg_type = UBCORE_CMD_UPDATE_MUE_DEV_INFO_REQ;
+	req_msg->transport_type = dev->transport_type;
+	req_msg->payload_len = cc_len;
+
+	/* fill msg payload */
+	data = (struct ubcore_update_mue_dev_info_req *)req_msg->payload;
+	data->dev_fea = dev->attr.dev_cap.feature;
+	data->cc_entry_cnt = cc_entry_cnt;
+	data->opcode = UBCORE_UPDATE_MUE_ADD;
+	(void)strscpy(data->dev_name, dev->dev_name, UBCORE_MAX_DEV_NAME - 1);
+
+	if (dev->netdev != NULL &&
+	    strnlen(dev->netdev->name, UBCORE_MAX_DEV_NAME) <
+		    UBCORE_MAX_DEV_NAME)
+		(void)strscpy(data->netdev_name, dev->netdev->name,
+			      UBCORE_MAX_DEV_NAME - 1);
+
+	if (cc_entry != NULL) {
+		array = (struct ubcore_cc_entry *)data->data;
+		(void)memcpy(array, cc_entry,
+			     sizeof(struct ubcore_cc_entry) * cc_entry_cnt);
+	}
+
+out:
+	if (cc_entry != NULL)
+		kfree(cc_entry);
+	return req_msg;
 }
 
 static int ubcore_create_main_device(struct ubcore_device *dev)
@@ -536,7 +735,7 @@ static int ubcore_create_main_device(struct ubcore_device *dev)
 
 	ret = device_add(&dev->dev);
 	if (ret) {
-		put_device(&dev->dev); // to free res used by kobj
+		put_device(&dev->dev); /* to free res used by kobj */
 		return ret;
 	}
 
@@ -558,6 +757,7 @@ static void uninit_ubcore_device(struct ubcore_device *dev)
 	ubcore_free_driver_res(dev);
 	ubcore_free_hash_tables(dev);
 	ubcore_destroy_eidtable(dev);
+	uninit_ubcore_mue(dev);
 }
 
 int ubcore_config_rsvd_jetty(struct ubcore_device *dev, uint32_t min_jetty_id,
@@ -1184,55 +1384,12 @@ void ubcore_unregister_event_handler(struct ubcore_device *dev,
 }
 EXPORT_SYMBOL(ubcore_unregister_event_handler);
 
-static bool ubcore_preprocess_event(struct ubcore_event *event)
-{
-	if (event->event_type == UBCORE_EVENT_TP_ERR &&
-	    event->element.tp != NULL) {
-		ubcore_log_info("ubcore detect tp error event with tpn %u",
-				event->element.tp->tpn);
-		if (event->ub_dev->transport_type == UBCORE_TRANSPORT_UB) {
-			if (event->element.tp->state == UBCORE_TP_STATE_ERR ||
-			    event->element.tp->state == UBCORE_TP_STATE_RESET) {
-				ubcore_log_warn(
-					"Tp %u already in state %d, ignore err event",
-					event->element.tp->tpn,
-					(int32_t)event->element.tp->state);
-				return true;
-			}
-		}
-		return true;
-	} else if (event->event_type == UBCORE_EVENT_TP_FLUSH_DONE &&
-		   event->element.tp != NULL) {
-		/* Scenarios of flush done
-		 * 1. tp err: ubcore informs lower layer change tp to ERR when tp err.
-		 * It triggers udma to flush after udma change tp to ERR.
-		 * udma reports flush done event after flush done.
-		 * 2. qpc err: udma senses qpc err, flushes and reports flush done event.
-		 * tp has not been changed to ERR in this case.
-		 * ubcore needs to change tp to ERR before change it to RESET.
-		 */
-		ubcore_log_info("ubcore detect tp %u flush done event",
-				event->element.tp->tpn);
-		if (event->element.tp->state == UBCORE_TP_STATE_RESET) {
-			ubcore_log_warn(
-				"Tp %u already in state %d, ignore flush done event",
-				event->element.tp->tpn,
-				(int32_t)event->element.tp->state);
-			return true;
-		}
-	}
-	return false;
-}
-
 void ubcore_dispatch_async_event(struct ubcore_event *event)
 {
 	if (event == NULL || event->ub_dev == NULL) {
 		ubcore_log_err("Invalid argument.\n");
 		return;
 	}
-
-	if (ubcore_preprocess_event(event))
-		return;
 
 	if (ubcore_dispatch_event(event) != 0)
 		ubcore_log_err("ubcore_dispatch_event failed");

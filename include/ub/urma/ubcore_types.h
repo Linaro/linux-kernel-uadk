@@ -1487,6 +1487,46 @@ enum ubcore_tjetty_type {
 	UBCORE_UNBIND_JETTY_VTPN
 };
 
+struct ubcore_vtpn_wait_node {
+	struct list_head node;
+	enum ubcore_tjetty_type type;
+	struct ubcore_tjetty *tjetty;
+	struct ubcore_jetty *jetty;
+	struct ubcore_import_cb *import_cb;
+	struct ubcore_bind_cb *bind_cb;
+};
+
+struct ubcore_disconnect_vtpn_wait_node {
+	struct list_head node;
+	enum ubcore_tjetty_type type;
+	struct ubcore_unimport_cb *unimport_cb;
+	struct ubcore_unbind_cb *unbind_cb;
+};
+
+struct ubcore_wait_vtpn_para {
+	enum ubcore_tjetty_type type;
+	struct ubcore_tjetty *tjetty;
+	struct ubcore_jetty *jetty;
+	struct ubcore_import_cb *import_cb;
+	struct ubcore_bind_cb *bind_cb;
+};
+
+enum ubcore_res_key_type {
+	UBCORE_RES_KEY_VTP = 1, // key id: VTPN
+	UBCORE_RES_KEY_TP, // key id: TPN
+	UBCORE_RES_KEY_TPG, // key id: TPGN
+	UBCORE_RES_KEY_UTP, // key id: UTP ID
+	UBCORE_RES_KEY_JFS, // key id: JFS ID
+	UBCORE_RES_KEY_JFR, // key id: JFR ID
+	UBCORE_RES_KEY_JETTY, // key id: JETTY ID
+	UBCORE_RES_KEY_JETTY_GROUP, // key id: JETTY GROUP ID
+	UBCORE_RES_KEY_JFC, // key id: JFC ID
+	UBCORE_RES_KEY_RC, // key id: RC ID
+	UBCORE_RES_KEY_SEG, // key id: TOKEN ID
+	UBCORE_RES_KEY_DEV_TA, // key id: EID
+	UBCORE_RES_KEY_DEV_TP // key id: EID
+};
+
 struct ubcore_res_upi_val {
 	uint32_t upi;
 };

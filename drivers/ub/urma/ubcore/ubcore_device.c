@@ -25,6 +25,8 @@
 #include "ubcore_main.h"
 #include "ubcore_cdev_file.h"
 #include "ubcore_uvs_cmd.h"
+#include "ubcore_vtp.h"
+#include "ubcore_connect_adapter.h"
 
 #define UBCORE_MAX_MUE_NUM 16
 #define UBCORE_DEVICE_NAME "ubcore"
@@ -436,26 +438,24 @@ static struct ubcore_ht_param g_ht_params[] = {
 				      offsetof(struct ubcore_jetty_id, id),
 			      sizeof(uint32_t), NULL, ubcore_free_driver_obj,
 			      ubcore_jetty_get },
+	/* key: currently tp_handle */
+	[UBCORE_HT_CP_VTPN] = { UBCORE_HASH_TABLE_SIZE,
+				offsetof(struct ubcore_vtpn, hnode),
+				offsetof(struct ubcore_vtpn, tp_handle),
+				sizeof(uint64_t), NULL, ubcore_free_driver_obj,
+				ubcore_vtpn_get },
+	[UBCORE_HT_EX_TP] = { UBCORE_HASH_TABLE_SIZE,
+			      offsetof(struct ubcore_ex_tp_info, hnode),
+			      offsetof(struct ubcore_ex_tp_info, tp_handle),
+			      sizeof(uint64_t), NULL, ubcore_free_driver_obj,
+			      NULL },
 };
-
-static inline void ubcore_set_vtp_hash_table_size(uint32_t vtp_size)
-{
-	if (vtp_size == 0 || vtp_size > UBCORE_HASH_TABLE_SIZE)
-		return;
-	g_ht_params[UBCORE_HT_RM_VTP].size = vtp_size;
-	g_ht_params[UBCORE_HT_RC_VTP].size = vtp_size;
-	g_ht_params[UBCORE_HT_UM_VTP].size = vtp_size;
-}
 
 static inline void ubcore_set_vtpn_hash_table_size(uint32_t vtpn_size)
 {
 	if (vtpn_size == 0 || vtpn_size > UBCORE_HASH_TABLE_SIZE)
 		return;
-	g_ht_params[UBCORE_HT_RM_VTPN].size = vtpn_size;
-	g_ht_params[UBCORE_HT_RC_VTPN].size = vtpn_size;
-	g_ht_params[UBCORE_HT_UM_VTPN].size = vtpn_size;
 	g_ht_params[UBCORE_HT_CP_VTPN].size = vtpn_size;
-	g_ht_params[UBCORE_HT_VTPN].size = vtpn_size;
 }
 
 static void ubcore_update_hash_tables_size(const struct ubcore_device_cap *cap)
@@ -469,25 +469,7 @@ static void ubcore_update_hash_tables_size(const struct ubcore_device_cap *cap)
 	if (cap->max_jetty != 0 &&
 	    cap->max_jetty < g_ht_params[UBCORE_HT_JETTY].size)
 		g_ht_params[UBCORE_HT_JETTY].size = cap->max_jetty;
-	if (cap->max_tp_cnt != 0 &&
-	    cap->max_tp_cnt < g_ht_params[UBCORE_HT_TP].size)
-		g_ht_params[UBCORE_HT_TP].size = cap->max_tp_cnt;
-	if (cap->max_tpg_cnt != 0 &&
-	    cap->max_tpg_cnt < g_ht_params[UBCORE_HT_TPG].size)
-		g_ht_params[UBCORE_HT_TPG].size = cap->max_tpg_cnt;
-	if (cap->max_vtp_cnt_per_ue < UBCORE_HASH_TABLE_SIZE &&
-	    cap->max_ue_cnt < UBCORE_HASH_TABLE_SIZE)
-		ubcore_set_vtp_hash_table_size(
-			(cap->max_vtp_cnt_per_ue * cap->max_ue_cnt));
 	ubcore_set_vtpn_hash_table_size(cap->max_vtp_cnt_per_ue);
-
-	if (cap->max_utp_cnt != 0 &&
-	    cap->max_utp_cnt < g_ht_params[UBCORE_HT_UTP].size)
-		g_ht_params[UBCORE_HT_UTP].size = cap->max_utp_cnt;
-	/* ctp size use max_tp_cnt */
-	if (cap->max_tp_cnt != 0 &&
-	    cap->max_tp_cnt < g_ht_params[UBCORE_HT_CTP].size)
-		g_ht_params[UBCORE_HT_CTP].size = cap->max_tp_cnt;
 }
 
 static int ubcore_alloc_hash_tables(struct ubcore_device *dev)

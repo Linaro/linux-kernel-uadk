@@ -27,6 +27,8 @@ ubcore_genl.o \
 ubcore_genl_admin.o \
 ubcore_vtp.o \
 ubcore_msg.o \
-ubcore_netlink.o
+ubcore_netlink.o \
+ubcore_dp.o \
+ubcore_segment.o
 
 obj-$(CONFIG_UB_URMA) += ubcore.o

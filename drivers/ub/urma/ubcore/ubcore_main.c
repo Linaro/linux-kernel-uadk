@@ -19,6 +19,7 @@
 #include "ubcore_connect_adapter.h"
 #include "ubcore_connect_bonding.h"
 #include "ubcore_genl.h"
+#include "ubcm/ub_cm.h"
 
 static int __init ubcore_init(void)
 {
@@ -55,9 +56,17 @@ static int __init ubcore_init(void)
 		goto create_wq;
 	}
 
+	ret = ubcm_init();
+	if (ret != 0) {
+		pr_err("Failed to init ubcm, ret: %d.\n", ret);
+		goto ubcm;
+	}
+
 	ubcore_log_info("ubcore module init success.\n");
 	return 0;
 
+ubcm:
+	ubcore_destroy_workqueues();
 create_wq:
 	ubcore_unregister_pnet_ops();
 reg_pnet:
@@ -71,6 +80,7 @@ class_init:
 
 static void __exit ubcore_exit(void)
 {
+	ubcm_uninit();
 	ubcore_destroy_workqueues();
 	ubcore_unregister_pnet_ops();
 	ubcore_genl_exit();

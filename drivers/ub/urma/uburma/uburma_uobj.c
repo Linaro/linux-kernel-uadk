@@ -1221,8 +1221,8 @@ static int uburma_hot_unplug_jfae(struct uburma_uobj *uobj,
 
 	spin_lock_irq(&jfe->lock);
 	jfe->deleting = true;
-	ubcore_unregister_event_handler(jfae->dev, &jfae->event_handler);
 	spin_unlock_irq(&jfe->lock);
+	ubcore_unregister_event_handler(jfae->dev, &jfae->event_handler);
 
 	return 0;
 }

@@ -10,11 +10,14 @@
  */
 
 #include "uburma_log.h"
-
 #include "uburma_cmd_tlv.h"
 
 #define UBURMA_CMD_TLV_MAX_LEN \
 	(sizeof(struct uburma_cmd_attr) * UBURMA_CMD_OUT_TYPE_INIT)
+
+#define UBURMA_EVENT_SPEC_ATTR_SIZE 16
+#define UBURMA_CMD_EVENT_TLV_MAX_LEN \
+	(sizeof(struct uburma_cmd_attr) * UBURMA_EVENT_SPEC_ATTR_SIZE)
 
 struct uburma_tlv_handler {
 	void (*fill_spec_in)(void *arg, struct uburma_cmd_spec *s);
@@ -78,6 +81,40 @@ uburma_create_ctx_fill_spec_out(void *arg_addr,
 }
 
 static void
+uburma_alloc_token_id_fill_spec_in(void *arg_addr,
+				   struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_alloc_token_id *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, ALLOC_TOKEN_ID_IN_FLAG, arg->flag);
+	SPEC(s++, ALLOC_TOKEN_ID_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_alloc_token_id_fill_spec_out(void *arg_addr,
+				    struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_alloc_token_id *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, ALLOC_TOKEN_ID_OUT_TOKEN_ID, arg->out.token_id);
+	SPEC(s++, ALLOC_TOKEN_ID_OUT_HANDLE, arg->out.handle);
+	SPEC(s++, ALLOC_TOKEN_ID_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_free_token_id_fill_spec_in(void *arg_addr,
+				  struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_free_token_id *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, FREE_TOKEN_ID_IN_HANDLE, arg->in.handle);
+	SPEC(s++, FREE_TOKEN_ID_IN_TOKEN_ID, arg->in.token_id);
+}
+
+static void
 uburma_register_seg_fill_spec_in(void *arg_addr,
 				 struct uburma_cmd_spec *spec)
 {
@@ -114,6 +151,44 @@ uburma_unregister_seg_fill_spec_in(void *arg_addr,
 	struct uburma_cmd_spec *s = spec;
 
 	SPEC(s++, UNREGISTER_SEG_IN_HANDLE, arg->in.handle);
+}
+
+static void
+uburma_import_seg_fill_spec_in(void *arg_addr,
+			       struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_seg *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_SEG_IN_EID, arg->in.eid);
+	SPEC(s++, IMPORT_SEG_IN_VA, arg->in.va);
+	SPEC(s++, IMPORT_SEG_IN_LEN, arg->in.len);
+	SPEC(s++, IMPORT_SEG_IN_FLAG, arg->in.flag);
+	SPEC(s++, IMPORT_SEG_IN_TOKEN, arg->in.token);
+	SPEC(s++, IMPORT_SEG_IN_TOKEN_ID, arg->in.token_id);
+	SPEC(s++, IMPORT_SEG_IN_MVA, arg->in.mva);
+	SPEC(s++, IMPORT_SEG_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_import_seg_fill_spec_out(void *arg_addr,
+				struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_seg *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_SEG_OUT_HANDLE, arg->out.handle);
+	SPEC(s++, IMPORT_SEG_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_unimport_seg_fill_spec_in(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_unimport_seg *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, UNIMPORT_SEG_IN_HANDLE, arg->in.handle);
 }
 
 static void
@@ -502,6 +577,43 @@ uburma_create_jfce_fill_spec_out(void *arg_addr,
 }
 
 static void
+uburma_import_jfr_fill_spec_in(void *arg_addr,
+			       struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jfr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JFR_IN_EID, arg->in.eid);
+	SPEC(s++, IMPORT_JFR_IN_ID, arg->in.id);
+	SPEC(s++, IMPORT_JFR_IN_FLAG, arg->in.flag);
+	SPEC(s++, IMPORT_JFR_IN_TOKEN, arg->in.token);
+	SPEC(s++, IMPORT_JFR_IN_TRANS_MODE, arg->in.trans_mode);
+	SPEC(s++, IMPORT_JFR_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_import_jfr_fill_spec_out(void *arg_addr,
+				struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jfr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JFR_OUT_TPN, arg->out.tpn);
+	SPEC(s++, IMPORT_JFR_OUT_HANDLE, arg->out.handle);
+	SPEC(s++, IMPORT_JFR_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_unimport_jfr_fill_spec_in(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_unimport_jfr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, UNIMPORT_JFR_IN_HANDLE, arg->in.handle);
+}
+
+static void
 uburma_create_jetty_fill_spec_in(void *arg_addr,
 				 struct uburma_cmd_spec *spec)
 {
@@ -680,6 +792,94 @@ uburma_delete_jetty_batch_fill_spec_out(void *arg_addr,
 }
 
 static void
+uburma_import_jetty_fill_spec_in(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jetty *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JETTY_IN_EID, arg->in.eid);
+	SPEC(s++, IMPORT_JETTY_IN_ID, arg->in.id);
+	SPEC(s++, IMPORT_JETTY_IN_FLAG, arg->in.flag);
+	SPEC(s++, IMPORT_JETTY_IN_TOKEN, arg->in.token);
+	SPEC(s++, IMPORT_JETTY_IN_TRANS_MODE, arg->in.trans_mode);
+	SPEC(s++, IMPORT_JETTY_IN_POLICY, arg->in.policy);
+	SPEC(s++, IMPORT_JETTY_IN_TYPE, arg->in.type);
+	SPEC(s++, IMPORT_JETTY_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_import_jetty_fill_spec_out(void *arg_addr,
+				  struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jetty *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JETTY_OUT_TPN, arg->out.tpn);
+	SPEC(s++, IMPORT_JETTY_OUT_HANDLE, arg->out.handle);
+	SPEC(s++, IMPORT_JETTY_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_unimport_jetty_fill_spec_in(void *arg_addr,
+				   struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_unimport_jetty *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, UNIMPORT_JETTY_IN_HANDLE, arg->in.handle);
+}
+
+static void
+uburma_advise_jetty_fill_spec_in(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_advise_jetty *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, ADVISE_JETTY_IN_JETTY_HANDLE, arg->in.jetty_handle);
+	SPEC(s++, ADVISE_JETTY_IN_TJETTY_HANDLE,
+	     arg->in.tjetty_handle);
+	SPEC(s++, ADVISE_JETTY_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_unadvise_jetty_fill_spec_in(void *arg_addr,
+				   struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_unadvise_jetty *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, UNADVISE_JETTY_IN_JETTY_HANDLE,
+	     arg->in.jetty_handle);
+	SPEC(s++, UNADVISE_JETTY_IN_TJETTY_HANDLE,
+	     arg->in.tjetty_handle);
+}
+
+static void
+uburma_bind_jetty_fill_spec_in(void *arg_addr,
+			       struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_bind_jetty *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, BIND_JETTY_IN_JETTY_HANDLE, arg->in.jetty_handle);
+	SPEC(s++, BIND_JETTY_IN_TJETTY_HANDLE, arg->in.tjetty_handle);
+	SPEC(s++, BIND_JETTY_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_bind_jetty_fill_spec_out(void *arg_addr,
+				struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_bind_jetty *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, BIND_JETTY_OUT_TPN, arg->out.tpn);
+	SPEC(s++, BIND_JETTY_OUT_UDATA, arg->udata);
+}
+
+static void
 uburma_create_jetty_grp_fill_spec_in(void *arg_addr,
 				     struct uburma_cmd_spec *spec)
 {
@@ -729,11 +929,543 @@ uburma_delete_jetty_grp_fill_spec_out(void *arg_addr,
 	     arg->out.async_events_reported);
 }
 
+static void uburma_user_ctl_fill_spec_in(void *arg_addr,
+					 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_user_ctl *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, USER_CTL_IN_IN_ADDR, arg->in.addr);
+	SPEC(s++, USER_CTL_IN_IN_LEN, arg->in.len);
+	SPEC(s++, USER_CTL_IN_OPCODE, arg->in.opcode);
+	SPEC(s++, USER_CTL_IN_OUT_ADDR, arg->out.addr);
+	SPEC(s++, USER_CTL_IN_OUT_LEN, arg->out.len);
+	SPEC(s++, USER_CTL_IN_UDATA, arg->udrv);
+}
+
+static void
+uburma_get_eid_list_fill_spec_in(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_eid_list *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_EID_LIST_IN_MAX_EID_CNT, arg->in.max_eid_cnt);
+}
+
+static void
+uburma_get_eid_list_fill_spec_out(void *arg_addr,
+				  struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_eid_list *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_EID_LIST_OUT_EID_CNT, arg->out.eid_cnt);
+	SPEC(s++, GET_EID_LIST_OUT_EID_LIST, arg->out.eid_list);
+}
+
+static void
+uburma_get_net_addr_list_fill_spec_in(void *arg_addr,
+				      struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_net_addr_list *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_NET_ADDR_LIST_IN_MAX_NETADDR_CNT,
+	     arg->in.max_netaddr_cnt);
+}
+
+static void
+uburma_get_net_addr_list_fill_spec_out(void *arg_addr,
+				       struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_net_addr_list *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+	uint64_t netaddr_size =
+		sizeof(struct uburma_cmd_net_addr_info);
+
+	SPEC(s++, GET_NET_ADDR_LIST_OUT_NETADDR_CNT,
+	     arg->out.netaddr_cnt);
+	fill_spec(s++, GET_NET_ADDR_LIST_OUT_NETADDR_LIST,
+		  netaddr_size, arg->out.len / netaddr_size,
+		  netaddr_size, arg->out.addr);
+}
+
+static void
+uburma_modify_tp_fill_spec_in(void *arg_addr,
+			      struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_modify_tp *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, MODIFY_TP_IN_TPN, arg->in.tpn);
+	SPEC(s++, MODIFY_TP_IN_TP_CFG_FLAG, arg->in.tp_cfg.flag);
+	SPEC(s++, MODIFY_TP_IN_TP_CFG_TRANS_MODE,
+	     arg->in.tp_cfg.trans_mode);
+	SPEC(s++, MODIFY_TP_IN_TP_CFG_RETRY_NUM,
+	     arg->in.tp_cfg.retry_num);
+	SPEC(s++, MODIFY_TP_IN_TP_CFG_RETRY_FACTOR,
+	     arg->in.tp_cfg.retry_factor);
+	SPEC(s++, MODIFY_TP_IN_TP_CFG_ACK_TIMEOUT,
+	     arg->in.tp_cfg.ack_timeout);
+	SPEC(s++, MODIFY_TP_IN_TP_CFG_DSCP, arg->in.tp_cfg.dscp);
+	SPEC(s++, MODIFY_TP_IN_TP_CFG_OOR_CNT,
+	     arg->in.tp_cfg.oor_cnt);
+	SPEC(s++, MODIFY_TP_IN_ATTR_FLAG, arg->in.attr.flag);
+	SPEC(s++, MODIFY_TP_IN_ATTR_PEER_TPN, arg->in.attr.peer_tpn);
+	SPEC(s++, MODIFY_TP_IN_ATTR_STATE, arg->in.attr.state);
+	SPEC(s++, MODIFY_TP_IN_ATTR_TX_PSN, arg->in.attr.tx_psn);
+	SPEC(s++, MODIFY_TP_IN_ATTR_RX_PSN, arg->in.attr.rx_psn);
+	SPEC(s++, MODIFY_TP_IN_ATTR_MTU, arg->in.attr.mtu);
+	SPEC(s++, MODIFY_TP_IN_ATTR_CC_PATTERN_IDX,
+	     arg->in.attr.cc_pattern_idx);
+	SPEC(s++, MODIFY_TP_IN_ATTR_OOS_CNT, arg->in.attr.oos_cnt);
+	SPEC(s++, MODIFY_TP_IN_ATTR_LOCAL_NET_ADDR_IDX,
+	     arg->in.attr.local_net_addr_idx);
+	SPEC(s++, MODIFY_TP_IN_ATTR_PEER_NET_ADDR,
+	     arg->in.attr.peer_net_addr);
+	SPEC(s++, MODIFY_TP_IN_ATTR_DATA_UDP_START,
+	     arg->in.attr.data_udp_start);
+	SPEC(s++, MODIFY_TP_IN_ATTR_ACK_UDP_START,
+	     arg->in.attr.ack_udp_start);
+	SPEC(s++, MODIFY_TP_IN_ATTR_UDP_RANGE,
+	     arg->in.attr.udp_range);
+	SPEC(s++, MODIFY_TP_IN_ATTR_HOP_LIMIT,
+	     arg->in.attr.hop_limit);
+	SPEC(s++, MODIFY_TP_IN_ATTR_FLOW_LABEL,
+	     arg->in.attr.flow_label);
+	SPEC(s++, MODIFY_TP_IN_ATTR_PORT_ID, arg->in.attr.port_id);
+	SPEC(s++, MODIFY_TP_IN_ATTR_MN, arg->in.attr.mn);
+	SPEC(s++, MODIFY_TP_IN_ATTR_PEER_TRANS_TYPE,
+	     arg->in.attr.peer_trans_type);
+	SPEC(s++, MODIFY_TP_IN_MASK, arg->in.mask);
+}
+
+static void
+uburma_query_device_fill_spec_in(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_query_device_attr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, QUERY_DEVICE_IN_DEV_NAME, arg->in.dev_name);
+}
+
+static void
+uburma_query_device_fill_spec_out(void *arg_addr,
+				  struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_query_device_attr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, QUERY_DEVICE_OUT_GUID, arg->out.attr.guid);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_FEATURE,
+	     arg->out.attr.dev_cap.feature);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFC,
+	     arg->out.attr.dev_cap.max_jfc);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFS,
+	     arg->out.attr.dev_cap.max_jfs);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFR,
+	     arg->out.attr.dev_cap.max_jfr);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JETTY,
+	     arg->out.attr.dev_cap.max_jetty);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JETTY_GRP,
+	     arg->out.attr.dev_cap.max_jetty_grp);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JETTY_IN_JETTY_GRP,
+	     arg->out.attr.dev_cap.max_jetty_in_jetty_grp);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFC_DEPTH,
+	     arg->out.attr.dev_cap.max_jfc_depth);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFS_DEPTH,
+	     arg->out.attr.dev_cap.max_jfs_depth);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFR_DEPTH,
+	     arg->out.attr.dev_cap.max_jfr_depth);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFS_INLINE_LEN,
+	     arg->out.attr.dev_cap.max_jfs_inline_len);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFS_SGE,
+	     arg->out.attr.dev_cap.max_jfs_sge);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFS_RSGE,
+	     arg->out.attr.dev_cap.max_jfs_rsge);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_JFR_SGE,
+	     arg->out.attr.dev_cap.max_jfr_sge);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_MSG_SIZE,
+	     arg->out.attr.dev_cap.max_msg_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_READ_SIZE,
+	     arg->out.attr.dev_cap.max_read_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_WRITE_SIZE,
+	     arg->out.attr.dev_cap.max_write_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_CAS_SIZE,
+	     arg->out.attr.dev_cap.max_cas_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_SWAP_SIZE,
+	     arg->out.attr.dev_cap.max_swap_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_FETCH_AND_ADD_SIZE,
+	     arg->out.attr.dev_cap.max_fetch_and_add_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_FETCH_AND_SUB_SIZE,
+	     arg->out.attr.dev_cap.max_fetch_and_sub_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_FETCH_AND_AND_SIZE,
+	     arg->out.attr.dev_cap.max_fetch_and_and_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_FETCH_AND_OR_SIZE,
+	     arg->out.attr.dev_cap.max_fetch_and_or_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_FETCH_AND_XOR_SIZE,
+	     arg->out.attr.dev_cap.max_fetch_and_xor_size);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_ATOMIC_FEAT,
+	     arg->out.attr.dev_cap.atomic_feat);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_TRANS_MODE,
+	     arg->out.attr.dev_cap.trans_mode);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_SUB_TRANS_MODE_CAP,
+	     arg->out.attr.dev_cap.sub_trans_mode_cap);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_CONGESTION_CTRL_ALG,
+	     arg->out.attr.dev_cap.congestion_ctrl_alg);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_CEQ_CNT,
+	     arg->out.attr.dev_cap.ceq_cnt);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_TP_IN_TPG,
+	     arg->out.attr.dev_cap.max_tp_in_tpg);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_EID_CNT,
+	     arg->out.attr.dev_cap.max_eid_cnt);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_PAGE_SIZE_CAP,
+	     arg->out.attr.dev_cap.page_size_cap);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_OOR_CNT,
+	     arg->out.attr.dev_cap.max_oor_cnt);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MN,
+	     arg->out.attr.dev_cap.mn);
+	SPEC(s++, QUERY_DEVICE_OUT_DEV_CAP_MAX_NETADDR_CN,
+	     arg->out.attr.dev_cap.max_netaddr_cnt);
+	SPEC(s++, QUERY_DEVICE_OUT_PORT_CNT, arg->out.attr.port_cnt);
+	SPEC(s++, QUERY_DEVICE_OUT_RESERVED_JETTY_ID_MIN,
+	     arg->out.attr.reserved_jetty_id_min);
+	SPEC(s++, QUERY_DEVICE_OUT_RESERVED_JETTY_ID_MAX,
+	     arg->out.attr.reserved_jetty_id_max);
+
+	SPEC_ARRAY(s++, QUERY_DEVICE_OUT_PORT_ATTR_MAX_MTU,
+		   arg->out.attr.port_attr, max_mtu);
+	SPEC_ARRAY(s++, QUERY_DEVICE_OUT_PORT_ATTR_STATE,
+		   arg->out.attr.port_attr, state);
+	SPEC_ARRAY(s++, QUERY_DEVICE_OUT_PORT_ATTR_ACTIVE_WIDTH,
+		   arg->out.attr.port_attr, active_width);
+	SPEC_ARRAY(s++, QUERY_DEVICE_OUT_PORT_ATTR_ACTIVE_SPEED,
+		   arg->out.attr.port_attr, active_speed);
+	SPEC_ARRAY(s++, QUERY_DEVICE_OUT_PORT_ATTR_ACTIVE_MTU,
+		   arg->out.attr.port_attr, active_mtu);
+}
+
+static void
+uburma_import_jetty_async_fill_spec_in(void *arg_addr,
+				       struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jetty_async *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_EID, arg->in.eid);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_ID, arg->in.id);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_FLAG, arg->in.flag);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_TOKEN, arg->in.token);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_TRANS_MODE,
+	     arg->in.trans_mode);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_POLICY, arg->in.policy);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_TYPE, arg->in.type);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_URMA_TJETTY,
+	     arg->in.urma_tjetty);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_USER_CTX, arg->in.user_ctx);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_FD, arg->in.fd);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_TIMEOUT, arg->in.timeout);
+	SPEC(s++, IMPORT_JETTY_ASYNC_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_import_jetty_async_fill_spec_out(void *arg_addr,
+					struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jetty_async *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JETTY_ASYNC_OUT_TPN, arg->out.tpn);
+	SPEC(s++, IMPORT_JETTY_ASYNC_OUT_HANDLE, arg->out.handle);
+	SPEC(s++, IMPORT_JETTY_ASYNC_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_unimport_jetty_async_fill_spec_in(void *arg_addr,
+					 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_unimport_jetty_async *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, UNIMPORT_JETTY_ASYNC_IN_HANDLE, arg->in.handle);
+}
+
+static void
+uburma_bind_jetty_async_fill_spec_in(void *arg_addr,
+				     struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_bind_jetty_async *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, BIND_JETTY_ASYNC_IN_JETTY_HANDLE,
+	     arg->in.jetty_handle);
+	SPEC(s++, BIND_JETTY_ASYNC_IN_TJETTY_HANDLE,
+	     arg->in.tjetty_handle);
+	SPEC(s++, BIND_JETTY_ASYNC_IN_URMA_TJETTY,
+	     arg->in.urma_tjetty);
+	SPEC(s++, BIND_JETTY_ASYNC_IN_URMA_JETTY, arg->in.urma_jetty);
+	SPEC(s++, BIND_JETTY_ASYNC_IN_FD, arg->in.fd);
+	SPEC(s++, BIND_JETTY_ASYNC_IN_USER_CTX, arg->in.user_ctx);
+	SPEC(s++, BIND_JETTY_ASYNC_IN_TIMEOUT, arg->in.timeout);
+	SPEC(s++, BIND_JETTY_ASYNC_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_bind_jetty_async_fill_spec_out(void *arg_addr,
+				      struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_bind_jetty_async *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, BIND_JETTY_ASYNC_OUT_TPN, arg->out.tpn);
+	SPEC(s++, BIND_JETTY_ASYNC_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_unbind_jetty_async_fill_spec_in(void *arg_addr,
+				       struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_unbind_jetty_async *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, UNBIND_JETTY_ASYNC_IN_JETTY_HANDLE,
+	     arg->in.jetty_handle);
+	SPEC(s++, UNBIND_JETTY_ASYNC_IN_TJETTY_HANDLE,
+	     arg->in.tjetty_handle);
+}
+
+static void
+uburma_create_notifier_fill_spec_out(void *arg_addr,
+				     struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_create_notifier *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, CREATE_NOTIFIER_OUT_FD, arg->out.fd);
+}
+
+static void
+uburma_get_tp_list_fill_spec_in(void *arg_addr,
+				struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_tp_list *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_TP_LIST_IN_FLAG, arg->in.flag);
+	SPEC(s++, GET_TP_LIST_IN_TRANS_MODE, arg->in.trans_mode);
+	SPEC(s++, GET_TP_LIST_IN_LOCAL_EID, arg->in.local_eid);
+	SPEC(s++, GET_TP_LIST_IN_PEER_EID, arg->in.peer_eid);
+	SPEC(s++, GET_TP_LIST_IN_TP_CNT, arg->in.tp_cnt);
+	SPEC(s++, GET_TP_LIST_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_get_tp_list_fill_spec_out(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_tp_list *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_TP_LIST_OUT_TP_CNT, arg->out.tp_cnt);
+	SPEC(s++, GET_TP_LIST_OUT_TP_HANDLE, arg->out.tp_handle);
+	SPEC(s++, GET_TP_LIST_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_import_jetty_ex_fill_spec_in(void *arg_addr,
+				    struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jetty_ex *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JETTY_EX_IN_EID, arg->in.eid);
+	SPEC(s++, IMPORT_JETTY_EX_IN_ID, arg->in.id);
+	SPEC(s++, IMPORT_JETTY_EX_IN_FLAG, arg->in.flag);
+	SPEC(s++, IMPORT_JETTY_EX_IN_TOKEN, arg->in.token);
+	SPEC(s++, IMPORT_JETTY_EX_IN_TRANS_MODE, arg->in.trans_mode);
+	SPEC(s++, IMPORT_JETTY_EX_IN_POLICY, arg->in.policy);
+	SPEC(s++, IMPORT_JETTY_EX_IN_TYPE, arg->in.type);
+	SPEC(s++, IMPORT_JETTY_EX_IN_TP_HANDLE, arg->in.tp_handle);
+	SPEC(s++, IMPORT_JETTY_EX_IN_PEER_TP_HANDLE,
+	     arg->in.peer_tp_handle);
+	SPEC(s++, IMPORT_JETTY_EX_IN_TAG, arg->in.tag);
+	SPEC(s++, IMPORT_JETTY_EX_IN_TX_PSN, arg->in.tx_psn);
+	SPEC(s++, IMPORT_JETTY_EX_IN_RX_PSN, arg->in.rx_psn);
+	SPEC(s++, IMPORT_JETTY_EX_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_import_jetty_ex_fill_spec_out(void *arg_addr,
+				     struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jetty_ex *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JETTY_EX_OUT_TPN, arg->out.tpn);
+	SPEC(s++, IMPORT_JETTY_EX_OUT_HANDLE, arg->out.handle);
+	SPEC(s++, IMPORT_JETTY_EX_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_import_jfr_ex_fill_spec_in(void *arg_addr,
+				  struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jfr_ex *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JFR_EX_IN_EID, arg->in.eid);
+	SPEC(s++, IMPORT_JFR_EX_IN_ID, arg->in.id);
+	SPEC(s++, IMPORT_JFR_EX_IN_FLAG, arg->in.flag);
+	SPEC(s++, IMPORT_JFR_EX_IN_TOKEN, arg->in.token);
+	SPEC(s++, IMPORT_JFR_EX_IN_TRANS_MODE, arg->in.trans_mode);
+	SPEC(s++, IMPORT_JFR_EX_IN_TP_HANDLE, arg->in.tp_handle);
+	SPEC(s++, IMPORT_JFR_EX_IN_PEER_TP_HANDLE,
+	     arg->in.peer_tp_handle);
+	SPEC(s++, IMPORT_JFR_EX_IN_TAG, arg->in.tag);
+	SPEC(s++, IMPORT_JFR_EX_IN_TX_PSN, arg->in.tx_psn);
+	SPEC(s++, IMPORT_JFR_EX_IN_RX_PSN, arg->in.rx_psn);
+	SPEC(s++, IMPORT_JFR_EX_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_import_jfr_ex_fill_spec_out(void *arg_addr,
+				   struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_import_jfr_ex *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, IMPORT_JFR_EX_OUT_TPN, arg->out.tpn);
+	SPEC(s++, IMPORT_JFR_EX_OUT_HANDLE, arg->out.handle);
+	SPEC(s++, IMPORT_JFR_EX_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_bind_jetty_ex_fill_spec_in(void *arg_addr,
+				  struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_bind_jetty_ex *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, BIND_JETTY_EX_IN_JETTY_HANDLE,
+	     arg->in.jetty_handle);
+	SPEC(s++, BIND_JETTY_EX_IN_TJETTY_HANDLE,
+	     arg->in.tjetty_handle);
+	SPEC(s++, BIND_JETTY_EX_IN_TP_HANDLE, arg->in.tp_handle);
+	SPEC(s++, BIND_JETTY_EX_IN_PEER_TP_HANDLE,
+	     arg->in.peer_tp_handle);
+	SPEC(s++, BIND_JETTY_EX_IN_TAG, arg->in.tag);
+	SPEC(s++, BIND_JETTY_EX_IN_TX_PSN, arg->in.tx_psn);
+	SPEC(s++, BIND_JETTY_EX_IN_RX_PSN, arg->in.rx_psn);
+	SPEC(s++, BIND_JETTY_EX_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_bind_jetty_ex_fill_spec_out(void *arg_addr,
+				   struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_bind_jetty_ex *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, BIND_JETTY_EX_OUT_TPN, arg->out.tpn);
+	SPEC(s++, BIND_JETTY_EX_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_set_tp_attr_fill_spec_in(void *arg_addr,
+				struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_set_tp_attr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, SET_TP_ATTR_IN_TP_HANLDE, arg->in.tp_handle);
+	SPEC(s++, SET_TP_ATTR_IN_TP_ATTR_CNT, arg->in.tp_attr_cnt);
+	SPEC(s++, SET_TP_ATTR_IN_TP_ATTR_BITMAP,
+	     arg->in.tp_attr_bitmap);
+	SPEC(s++, SET_TP_ATTR_IN_TP_ATTR, arg->in.tp_attr);
+	SPEC(s++, SET_TP_ATTR_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_set_tp_attr_fill_spec_out(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_set_tp_attr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, SET_TP_ATTR_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_get_tp_attr_fill_spec_in(void *arg_addr,
+				struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_tp_attr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_TP_ATTR_IN_TP_HANDLE, arg->in.tp_handle);
+	SPEC(s++, GET_TP_ATTR_IN_UDATA, arg->udata);
+}
+
+static void
+uburma_get_tp_attr_fill_spec_out(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_get_tp_attr *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_TP_ATTR_OUT_TP_ATTR_CNT, arg->out.tp_attr_cnt);
+	SPEC(s++, GET_TP_ATTR_OUT_TP_ATTR_BITMAP,
+	     arg->out.tp_attr_bitmap);
+	SPEC(s++, GET_TP_ATTR_OUT_TP_ATTR, arg->out.tp_attr);
+	SPEC(s++, GET_TP_ATTR_OUT_UDATA, arg->udata);
+}
+
+static void
+uburma_exchange_tp_info_fill_spec_in(void *arg_addr,
+				     struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_exchange_tp_info *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, EXCHANGE_TP_INFO_IN_FLAG, arg->in.get_tp_cfg.flag);
+	SPEC(s++, EXCHANGE_TP_INFO_IN_TRANS_MODE,
+	     arg->in.get_tp_cfg.trans_mode);
+	SPEC(s++, EXCHANGE_TP_INFO_IN_LOCAL_EID,
+	     arg->in.get_tp_cfg.local_eid);
+	SPEC(s++, EXCHANGE_TP_INFO_IN_PEER_EID,
+	     arg->in.get_tp_cfg.peer_eid);
+	SPEC(s++, EXCHANGE_TP_INFO_IN_TP_HANDLE, arg->in.tp_handle);
+	SPEC(s++, EXCHANGE_TP_INFO_IN_TX_PSN, arg->in.tx_psn);
+}
+
+static void
+uburma_exchange_tp_info_fill_spec_out(void *arg_addr,
+				      struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_exchange_tp_info *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, EXCHANGE_TP_INFO_OUT_PEER_TP_HANDLE,
+	     arg->out.peer_tp_handle);
+	SPEC(s++, EXCHANGE_TP_INFO_OUT_RX_PSN, arg->out.rx_psn);
+}
+
 static struct uburma_tlv_handler g_tlv_handler[] = {
 	[0] = {0},
 	[UBURMA_CMD_CREATE_CTX] = {
 		uburma_create_ctx_fill_spec_in, CREATE_CTX_IN_NUM,
 		uburma_create_ctx_fill_spec_out, CREATE_CTX_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_ALLOC_TOKEN_ID] = {
+		uburma_alloc_token_id_fill_spec_in, ALLOC_TOKEN_ID_IN_NUM,
+		uburma_alloc_token_id_fill_spec_out, ALLOC_TOKEN_ID_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_FREE_TOKEN_ID] = {
+		uburma_free_token_id_fill_spec_in, FREE_TOKEN_ID_IN_NUM,
+		NULL, 0,
 	},
 	[UBURMA_CMD_REGISTER_SEG] = {
 		uburma_register_seg_fill_spec_in, REGISTER_SEG_IN_NUM,
@@ -741,6 +1473,14 @@ static struct uburma_tlv_handler g_tlv_handler[] = {
 	},
 	[UBURMA_CMD_UNREGISTER_SEG] = {
 		uburma_unregister_seg_fill_spec_in, UNREGISTER_SEG_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_IMPORT_SEG] = {
+		uburma_import_seg_fill_spec_in, IMPORT_SEG_IN_NUM,
+		uburma_import_seg_fill_spec_out, IMPORT_SEG_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_UNIMPORT_SEG] = {
+		uburma_unimport_seg_fill_spec_in, UNIMPORT_SEG_IN_NUM,
 		NULL, 0,
 	},
 	[UBURMA_CMD_CREATE_JFR] = {
@@ -791,6 +1531,14 @@ static struct uburma_tlv_handler g_tlv_handler[] = {
 		NULL, 0,
 		uburma_create_jfce_fill_spec_out, CREATE_JFCE_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
 	},
+	[UBURMA_CMD_IMPORT_JFR] = {
+		uburma_import_jfr_fill_spec_in, IMPORT_JFR_IN_NUM,
+		uburma_import_jfr_fill_spec_out, IMPORT_JFR_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_UNIMPORT_JFR] = {
+		uburma_unimport_jfr_fill_spec_in, UNIMPORT_JFR_IN_NUM,
+		NULL, 0,
+	},
 	[UBURMA_CMD_CREATE_JETTY] = {
 		uburma_create_jetty_fill_spec_in, CREATE_JETTY_IN_NUM,
 		uburma_create_jetty_fill_spec_out, CREATE_JETTY_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
@@ -807,6 +1555,38 @@ static struct uburma_tlv_handler g_tlv_handler[] = {
 		uburma_delete_jetty_fill_spec_in, DELETE_JETTY_IN_NUM,
 		uburma_delete_jetty_fill_spec_out, DELETE_JETTY_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
 	},
+	[UBURMA_CMD_IMPORT_JETTY] = {
+		uburma_import_jetty_fill_spec_in, IMPORT_JETTY_IN_NUM,
+		uburma_import_jetty_fill_spec_out, IMPORT_JETTY_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_UNIMPORT_JETTY] = {
+		uburma_unimport_jetty_fill_spec_in, UNIMPORT_JETTY_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_ADVISE_JFR] = {
+		uburma_advise_jetty_fill_spec_in, ADVISE_JETTY_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_UNADVISE_JFR] = {
+		uburma_unadvise_jetty_fill_spec_in, UNADVISE_JETTY_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_ADVISE_JETTY] = {
+		uburma_advise_jetty_fill_spec_in, ADVISE_JETTY_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_UNADVISE_JETTY] = {
+		uburma_unadvise_jetty_fill_spec_in, UNADVISE_JETTY_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_BIND_JETTY] = {
+		uburma_bind_jetty_fill_spec_in, BIND_JETTY_IN_NUM,
+		uburma_bind_jetty_fill_spec_out, BIND_JETTY_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_UNBIND_JETTY] = {
+		uburma_unadvise_jetty_fill_spec_in, UNADVISE_JETTY_IN_NUM,
+		NULL, 0,
+	},
 	[UBURMA_CMD_CREATE_JETTY_GRP] = {
 		uburma_create_jetty_grp_fill_spec_in, CREATE_JETTY_GRP_IN_NUM,
 		uburma_create_jetty_grp_fill_spec_out, CREATE_JETTY_GRP_OUT_NUM -
@@ -815,6 +1595,72 @@ static struct uburma_tlv_handler g_tlv_handler[] = {
 	[UBURMA_CMD_DESTROY_JETTY_GRP] = {
 		uburma_delete_jetty_grp_fill_spec_in, DELETE_JETTY_GRP_IN_NUM,
 		uburma_delete_jetty_grp_fill_spec_out, DELETE_JETTY_GRP_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_USER_CTL] = {
+		uburma_user_ctl_fill_spec_in, USER_CTL_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_GET_EID_LIST] = {
+		uburma_get_eid_list_fill_spec_in, GET_EID_LIST_IN_NUM,
+		uburma_get_eid_list_fill_spec_out, GET_EID_LIST_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_GET_NETADDR_LIST] = {
+		uburma_get_net_addr_list_fill_spec_in, GET_NET_ADDR_LIST_IN_NUM,
+		uburma_get_net_addr_list_fill_spec_out, GET_NET_ADDR_LIST_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_MODIFY_TP] = {
+		uburma_modify_tp_fill_spec_in, MODIFY_TP_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_QUERY_DEV_ATTR] = {
+		uburma_query_device_fill_spec_in, QUERY_DEVICE_IN_NUM,
+		uburma_query_device_fill_spec_out, QUERY_DEVICE_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_IMPORT_JETTY_ASYNC] = {
+		uburma_import_jetty_async_fill_spec_in, IMPORT_JETTY_ASYNC_IN_NUM,
+		uburma_import_jetty_async_fill_spec_out, IMPORT_JETTY_ASYNC_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_UNIMPORT_JETTY_ASYNC] = {
+		uburma_unimport_jetty_async_fill_spec_in, UNIMPORT_JETTY_ASYNC_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_BIND_JETTY_ASYNC] = {
+		uburma_bind_jetty_async_fill_spec_in, BIND_JETTY_ASYNC_IN_NUM,
+		uburma_bind_jetty_async_fill_spec_out, BIND_JETTY_ASYNC_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_UNBIND_JETTY_ASYNC] = {
+		uburma_unbind_jetty_async_fill_spec_in, UNBIND_JETTY_ASYNC_IN_NUM,
+		NULL, 0,
+	},
+	[UBURMA_CMD_CREATE_NOTIFIER] = {
+		NULL, 0,
+		uburma_create_notifier_fill_spec_out, CREATE_NOTIFIER_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_GET_TP_LIST] = {
+		uburma_get_tp_list_fill_spec_in, GET_TP_LIST_IN_NUM,
+		uburma_get_tp_list_fill_spec_out, GET_TP_LIST_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_IMPORT_JETTY_EX] = {
+		uburma_import_jetty_ex_fill_spec_in, IMPORT_JETTY_EX_IN_NUM,
+		uburma_import_jetty_ex_fill_spec_out, IMPORT_JETTY_EX_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_IMPORT_JFR_EX] = {
+		uburma_import_jfr_ex_fill_spec_in, IMPORT_JFR_EX_IN_NUM,
+		uburma_import_jfr_ex_fill_spec_out, IMPORT_JFR_EX_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_BIND_JETTY_EX] = {
+		uburma_bind_jetty_ex_fill_spec_in, BIND_JETTY_EX_IN_NUM,
+		uburma_bind_jetty_ex_fill_spec_out, BIND_JETTY_EX_OUT_NUM -
 		UBURMA_CMD_OUT_TYPE_INIT,
 	},
 	[UBURMA_CMD_DELETE_JFS_BATCH] = {
@@ -835,6 +1681,19 @@ static struct uburma_tlv_handler g_tlv_handler[] = {
 	[UBURMA_CMD_DELETE_JETTY_BATCH] = {
 		uburma_delete_jetty_batch_fill_spec_in, DELETE_JETTY_BATCH_IN_NUM,
 		uburma_delete_jetty_batch_fill_spec_out, DELETE_JETTY_BATCH_OUT_NUM -
+		UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_SET_TP_ATTR] = {
+		uburma_set_tp_attr_fill_spec_in, SET_TP_ATTR_IN_NUM,
+		uburma_set_tp_attr_fill_spec_out, SET_TP_ATTR_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_GET_TP_ATTR] = {
+		uburma_get_tp_attr_fill_spec_in, GET_TP_ATTR_IN_NUM,
+		uburma_get_tp_attr_fill_spec_out, GET_TP_ATTR_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_CMD_EXCHANGE_TP_INFO] = {
+		uburma_exchange_tp_info_fill_spec_in, EXCHANGE_TP_INFO_IN_NUM,
+		uburma_exchange_tp_info_fill_spec_out, EXCHANGE_TP_INFO_OUT_NUM -
 		UBURMA_CMD_OUT_TYPE_INIT,
 	},
 };
@@ -1077,15 +1936,82 @@ free_spec:
 	return ret;
 }
 
+static void
+uburma_wait_jfce_fill_spec_in(void *arg_addr,
+			      struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_jfce_wait *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, JFCE_WAIT_IN_MAX_EVENT_CNT, arg->in.max_event_cnt);
+	SPEC(s++, JFCE_WAIT_IN_TIME_OUT, arg->in.time_out);
+}
+
+static void
+uburma_wait_jfce_fill_spec_out(void *arg_addr,
+			       struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_jfce_wait *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, JFCE_WAIT_OUT_EVENT_CNT, arg->out.event_cnt);
+	SPEC(s++, JFCE_WAIT_OUT_EVENT_DATA, arg->out.event_data);
+}
+
+static void
+uburma_get_async_event_fill_spec_out(void *arg_addr,
+				     struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_async_event *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, GET_ASYNC_EVENT_OUT_EVENT_TYPE, arg->event_type);
+	SPEC(s++, GET_ASYNC_EVENT_OUT_EVENT_DATA, arg->event_data);
+}
+
+static void
+uburma_wait_notify_fill_spec_in(void *arg_addr,
+				struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_wait_notify *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, WAIT_NOTIFY_IN_CNT, arg->in.cnt);
+	SPEC(s++, WAIT_NOTIFY_IN_TIMEOUT, arg->in.timeout);
+}
+
+static void
+uburma_wait_notify_fill_spec_out(void *arg_addr,
+				 struct uburma_cmd_spec *spec)
+{
+	struct uburma_cmd_wait_notify *arg = arg_addr;
+	struct uburma_cmd_spec *s = spec;
+
+	SPEC(s++, WAIT_NOTIFY_OUT_CNT, arg->out.cnt);
+	SPEC(s++, WAIT_NOTIFY_OUT_NOTIFY, arg->out.notify);
+}
 
 static struct uburma_tlv_handler g_event_tlv_handler[] = {
 	[0] = {0},
+	[UBURMA_EVENT_CMD_WAIT_JFCE] = {
+		uburma_wait_jfce_fill_spec_in, JFCE_WAIT_IN_NUM,
+		uburma_wait_jfce_fill_spec_out, JFCE_WAIT_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_EVENT_CMD_GET_ASYNC_EVENT] = {
+		NULL, 0,
+		uburma_get_async_event_fill_spec_out,
+		GET_ASYNC_EVENT_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	},
+	[UBURMA_EVENT_CMD_WAIT_NOTIFY] = {
+		uburma_wait_notify_fill_spec_in, WAIT_NOTIFY_IN_NUM,
+		uburma_wait_notify_fill_spec_out, WAIT_NOTIFY_OUT_NUM - UBURMA_CMD_OUT_TYPE_INIT,
+	}
 };
 
 int uburma_event_tlv_parse(struct uburma_cmd_hdr *hdr, void *arg)
 {
-	struct uburma_cmd_spec *spec = NULL;
-	struct uburma_cmd_attr *attr = NULL;
+	struct uburma_cmd_spec spec[UBURMA_EVENT_SPEC_ATTR_SIZE] = {0};
+	struct uburma_cmd_attr attr[UBURMA_EVENT_SPEC_ATTR_SIZE] = {0};
 	uint32_t attr_size, spec_size;
 	int ret;
 
@@ -1097,31 +2023,27 @@ int uburma_event_tlv_parse(struct uburma_cmd_hdr *hdr, void *arg)
 	}
 
 	spec_size = g_event_tlv_handler[hdr->command].spec_in_len;
-	spec = kcalloc(spec_size, sizeof(struct uburma_cmd_spec),
-		       GFP_KERNEL);
-	if (!spec)
-		return -ENOMEM;
-
 	g_event_tlv_handler[hdr->command].fill_spec_in(arg, spec);
 
-	attr = uburma_create_tlv_attr(hdr, &attr_size);
-	if (!attr) {
-		ret = -ENOMEM;
-		goto free_spec;
+	if (hdr->args_len % sizeof(struct uburma_cmd_attr) != 0 ||
+		hdr->args_len >= UBURMA_CMD_EVENT_TLV_MAX_LEN) {
+		uburma_log_err("Invalid args_len: %u.\n", hdr->args_len);
+		return -EINVAL;
 	}
 
-	ret = uburma_cmd_tlv_parse(spec, spec_size, attr, attr_size);
+	ret = uburma_copy_from_user(attr, (void __user *)(uintptr_t)hdr->args_addr,
+		hdr->args_len);
+	if (ret != 0)
+		return ret;
+	attr_size = hdr->args_len / sizeof(struct uburma_cmd_attr);
 
-	kfree(attr);
-free_spec:
-	kfree(spec);
-	return ret;
+	return uburma_cmd_tlv_parse(spec, spec_size, attr, attr_size);
 }
 
 int uburma_event_tlv_append(struct uburma_cmd_hdr *hdr, void *arg)
 {
-	struct uburma_cmd_spec *spec = NULL;
-	struct uburma_cmd_attr *attr = NULL;
+	struct uburma_cmd_spec spec[UBURMA_EVENT_SPEC_ATTR_SIZE] = {0};
+	struct uburma_cmd_attr attr[UBURMA_EVENT_SPEC_ATTR_SIZE] = {0};
 	uint32_t attr_size, spec_size;
 	int ret;
 
@@ -1133,23 +2055,18 @@ int uburma_event_tlv_append(struct uburma_cmd_hdr *hdr, void *arg)
 	}
 
 	spec_size = g_event_tlv_handler[hdr->command].spec_out_len;
-	spec = kcalloc(spec_size, sizeof(struct uburma_cmd_spec),
-		       GFP_KERNEL);
-	if (!spec)
-		return -ENOMEM;
-
 	g_event_tlv_handler[hdr->command].fill_spec_out(arg, spec);
 
-	attr = uburma_create_tlv_attr(hdr, &attr_size);
-	if (!attr) {
-		ret = -ENOMEM;
-		goto free_spec;
+	if (hdr->args_len % sizeof(struct uburma_cmd_attr) != 0 ||
+		hdr->args_len >= UBURMA_CMD_EVENT_TLV_MAX_LEN) {
+		uburma_log_err("Invalid args_len: %u.\n", hdr->args_len);
+		return -EINVAL;
 	}
+	ret = uburma_copy_from_user(attr, (void __user *)(uintptr_t)hdr->args_addr,
+		hdr->args_len);
+	if (ret != 0)
+		return ret;
+	attr_size = hdr->args_len / sizeof(struct uburma_cmd_attr);
 
-	ret = uburma_cmd_tlv_append(spec, spec_size, attr, attr_size);
-
-	kfree(attr);
-free_spec:
-	kfree(spec);
-	return ret;
+	return uburma_cmd_tlv_append(spec, spec_size, attr, attr_size);
 }

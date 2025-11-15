@@ -142,8 +142,246 @@ void uburma_uninit_jfe(struct uburma_jfe *jfe)
 	spin_unlock_irq(&jfe->lock);
 }
 
+static int uburma_delete_jfce(struct inode *inode, struct file *filp)
+{
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_file *ufile;
+
+	if (!uobj || !uobj->ufile)
+		return 0;
+
+	ufile = uobj->ufile;
+	down_write(&ufile->ucontext_rwsem);
+
+	uobj_get(uobj);
+	/* will call uburma_hot_unplug_jfce if clean up is not going on */
+	uburma_close_uobj_fd(filp);
+	uobj->ufile = NULL;
+	uobj_put(uobj);
+	up_write(&ufile->ucontext_rwsem);
+	kref_put(&ufile->ref, uburma_release_file);
+
+	return 0;
+}
+
+/* Read up to event_cnt events from jfe */
+static uint32_t uburma_read_jfe_event(struct uburma_jfe *jfe,
+				      uint32_t event_cnt,
+				      struct list_head *event_list)
+{
+	struct list_head *p, *next;
+	struct uburma_jfe_event *event;
+	uint32_t cnt = 0;
+
+	spin_lock_irq(&jfe->lock);
+
+	list_for_each_safe(p, next, &jfe->event_list) {
+		if (cnt == event_cnt)
+			break;
+		event = list_entry(p, struct uburma_jfe_event, node);
+		if (event->counter) {
+			++(*event->counter);
+			list_del(&event->obj_node);
+		}
+		list_del(p);
+		list_add_tail(p, event_list);
+		cnt++;
+	}
+	spin_unlock_irq(&jfe->lock);
+	return cnt;
+}
+
+static int uburma_wait_event_timeout(struct uburma_jfe *jfe,
+				     unsigned long max_timeout,
+				     uint32_t max_event_cnt,
+				     uint32_t *event_cnt,
+				     struct list_head *event_list)
+{
+	long timeout = (long)max_timeout;
+
+	*event_cnt = 0;
+	while (!jfe->deleting) {
+		asm volatile("" : : : "memory");
+		*event_cnt =
+			uburma_read_jfe_event(jfe, max_event_cnt, event_list);
+		/* Stop waiting once we have read at least one event */
+		if (jfe->deleting)
+			return -EIO;
+		else if (*event_cnt > 0)
+			break;
+		/*
+		 * 0 if the @condition evaluated to %false after the @timeout elapsed,
+		 * 1 if the @condition evaluated to %true after the @timeout elapsed,
+		 * the remaining jiffies (at least 1) if the @condition evaluated to true
+		 * before the @timeout elapsed,
+		 * or -%ERESTARTSYS if it was interrupted by a signal.
+		 */
+		timeout = wait_event_interruptible_timeout(
+			jfe->poll_wait,
+			(!list_empty(&jfe->event_list) || jfe->deleting),
+			(timeout));
+		if (timeout <= 0)
+			return timeout;
+	}
+
+	return 0;
+}
+
+static int uburma_wait_event(struct uburma_jfe *jfe, bool nonblock,
+			     uint32_t max_event_cnt, uint32_t *event_cnt,
+			     struct list_head *event_list)
+{
+	int ret;
+
+	*event_cnt = 0;
+	spin_lock_irq(&jfe->lock);
+	while (list_empty(&jfe->event_list)) {
+		spin_unlock_irq(&jfe->lock);
+		if (nonblock)
+			return -EAGAIN;
+
+		/* The function will return -ERESTARTSYS if it was interrupted by a
+		 * signal and 0 if @condition evaluated to true.
+		 */
+		ret = wait_event_interruptible(jfe->poll_wait,
+					       (!list_empty(&jfe->event_list) ||
+						jfe->deleting));
+		if (ret != 0)
+			return ret;
+
+		spin_lock_irq(&jfe->lock);
+		if (list_empty(&jfe->event_list) && jfe->deleting) {
+			spin_unlock_irq(&jfe->lock);
+			return -EIO;
+		}
+	}
+	spin_unlock_irq(&jfe->lock);
+	*event_cnt = uburma_read_jfe_event(jfe, max_event_cnt, event_list);
+
+	return 0;
+}
+
+static __poll_t uburma_jfe_poll(struct uburma_jfe *jfe, struct file *filp,
+				struct poll_table_struct *wait)
+{
+	__poll_t flag = 0;
+
+	poll_wait(filp, &jfe->poll_wait, wait);
+
+	spin_lock_irq(&jfe->lock);
+	if (!list_empty(&jfe->event_list))
+		flag = EPOLLIN | EPOLLRDNORM;
+
+	spin_unlock_irq(&jfe->lock);
+
+	return flag;
+}
+
+static __poll_t uburma_jfce_poll(struct file *filp,
+				 struct poll_table_struct *wait)
+{
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_jfce_uobj *jfce =
+		container_of(uobj, struct uburma_jfce_uobj, uobj);
+
+	return uburma_jfe_poll(&jfce->jfe, filp, wait);
+}
+
+static int uburma_jfce_wait(struct uburma_jfce_uobj *jfce, struct file *filp,
+			    struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_jfce_wait arg = { 0 };
+	struct list_head event_list;
+	struct uburma_jfe_event *event;
+	uint32_t max_event_cnt;
+	uint32_t i = 0;
+	struct list_head *p, *next;
+	int ret;
+
+	ret = uburma_event_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return -EFAULT;
+
+	/* urma lib ensures that max_event_cnt > 0 */
+	max_event_cnt = (arg.in.max_event_cnt < MAX_JFCE_EVENT_CNT ?
+				       arg.in.max_event_cnt :
+				       MAX_JFCE_EVENT_CNT);
+	INIT_LIST_HEAD(&event_list);
+	if (arg.in.time_out <= 0) {
+		ret = uburma_wait_event(
+			&jfce->jfe,
+			(filp->f_flags & O_NONBLOCK) | (arg.in.time_out == 0),
+			max_event_cnt, &arg.out.event_cnt, &event_list);
+	} else {
+		ret = uburma_wait_event_timeout(
+			&jfce->jfe, msecs_to_jiffies(arg.in.time_out),
+			max_event_cnt, &arg.out.event_cnt, &event_list);
+	}
+
+	if (ret < 0) {
+		uburma_log_err("Failed to wait jfce event");
+		return ret;
+	}
+
+	list_for_each_safe(p, next, &event_list) {
+		event = list_entry(p, struct uburma_jfe_event, node);
+		arg.out.event_data[i++] = event->event_data;
+		list_del(p);
+		kfree(event);
+	}
+
+	if (arg.out.event_cnt > 0 && uburma_event_tlv_append(hdr, &arg) != 0)
+		return -EFAULT;
+
+	return 0;
+}
+
+static long uburma_jfce_ioctl(struct file *filp, unsigned int cmd,
+			      unsigned long arg)
+{
+	struct uburma_cmd_hdr hdr;
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_jfce_uobj *jfce =
+		container_of(uobj, struct uburma_jfce_uobj, uobj);
+	int ret;
+
+	if (cmd == UBURMA_CMD_WAIT_JFC) {
+		ret = (int)copy_from_user(&hdr, (struct uburma_cmd_hdr *)arg,
+					  sizeof(struct uburma_cmd_hdr));
+		if ((ret != 0) || (hdr.args_len > UBURMA_CMD_MAX_ARGS_SIZE) ||
+		    (hdr.args_len == 0 || hdr.args_addr == 0 ||
+		     hdr.command >= UBURMA_EVENT_CMD_MAX)) {
+			ret = -EINVAL;
+		} else {
+			ret = uburma_jfce_wait(jfce, filp, &hdr);
+		}
+	} else {
+		ret = -ENOIOCTLCMD;
+	}
+	return (long)ret;
+}
+
+static int uburma_jfce_fasync(int fd, struct file *filp, int on)
+{
+	int ret;
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_jfce_uobj *jfce =
+		container_of(uobj, struct uburma_jfce_uobj, uobj);
+
+	if (!uobj)
+		return -EINVAL;
+	spin_lock_irq(&jfce->jfe.lock);
+	ret = fasync_helper(fd, filp, on, &jfce->jfe.async_queue);
+	spin_unlock_irq(&jfce->jfe.lock);
+	return ret;
+}
+
 const struct file_operations uburma_jfce_fops = {
 	.owner = THIS_MODULE,
+	.poll = uburma_jfce_poll,
+	.release = uburma_delete_jfce,
+	.unlocked_ioctl = uburma_jfce_ioctl,
+	.fasync = uburma_jfce_fasync,
 };
 
 void uburma_init_jfe(struct uburma_jfe *jfe)
@@ -154,8 +392,125 @@ void uburma_init_jfe(struct uburma_jfe *jfe)
 	jfe->async_queue = NULL;
 }
 
+static int uburma_delete_jfae(struct inode *inode, struct file *filp)
+{
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_jfae_uobj *jfae =
+		container_of(uobj, struct uburma_jfae_uobj, uobj);
+	struct uburma_file *ufile;
+
+	if (!uobj || !jfae || !uobj->ufile)
+		return 0;
+
+	ufile = uobj->ufile;
+	down_write(&ufile->ucontext_rwsem);
+
+	uobj_get(uobj);
+	/* call uburma_hot_unplug_jfae when cleanup is not going on */
+	uburma_close_uobj_fd(filp);
+	uburma_uninit_jfe(&jfae->jfe);
+	uobj->ufile = NULL;
+	uobj_put(uobj);
+	up_write(&ufile->ucontext_rwsem);
+	kref_put(&ufile->ref, uburma_release_file);
+
+	return 0;
+}
+
+static __poll_t uburma_jfae_poll(struct file *filp,
+				 struct poll_table_struct *wait)
+{
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_jfae_uobj *jfae =
+		container_of(uobj, struct uburma_jfae_uobj, uobj);
+
+	return uburma_jfe_poll(&jfae->jfe, filp, wait);
+}
+
+static inline void
+uburma_set_async_event(struct uburma_cmd_async_event *async_event,
+		       const struct uburma_jfe_event *event)
+{
+	async_event->event_data = event->event_data;
+	async_event->event_type = event->event_type;
+}
+
+static int uburma_get_async_event(struct uburma_jfae_uobj *jfae,
+				  struct file *filp, struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_async_event arg = { 0 };
+	struct list_head event_list;
+	struct uburma_jfe_event *event = NULL;
+	uint32_t event_cnt;
+	int ret;
+
+	INIT_LIST_HEAD(&event_list);
+	ret = uburma_wait_event(&jfae->jfe, filp->f_flags & O_NONBLOCK, 1,
+				&event_cnt, &event_list);
+	if (ret < 0)
+		return ret;
+
+	event = list_first_entry(&event_list, struct uburma_jfe_event, node);
+	if (!event)
+		return -EIO;
+
+	uburma_set_async_event(&arg, event);
+	list_del(&event->node);
+	kfree(event);
+
+	if (event_cnt > 0 && uburma_event_tlv_append(hdr, &arg) != 0)
+		return -EFAULT;
+
+	return 0;
+}
+
+static long uburma_jfae_ioctl(struct file *filp, unsigned int cmd,
+			      unsigned long arg)
+{
+	struct uburma_cmd_hdr hdr;
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_jfae_uobj *jfae =
+		container_of(uobj, struct uburma_jfae_uobj, uobj);
+	int ret;
+
+	if (cmd == UBURMA_CMD_GET_ASYNC_EVENT) {
+		ret = (int)copy_from_user(&hdr, (struct uburma_cmd_hdr *)arg,
+					  sizeof(struct uburma_cmd_hdr));
+		if ((ret != 0) || (hdr.args_len > UBURMA_CMD_MAX_ARGS_SIZE) ||
+		    (hdr.args_len == 0 || hdr.args_addr == 0 ||
+		     hdr.command >= UBURMA_EVENT_CMD_MAX)) {
+			ret = -EINVAL;
+		} else {
+			ret = uburma_get_async_event(jfae, filp, &hdr);
+		}
+	} else {
+		ret = -ENOIOCTLCMD;
+	}
+
+	return (long)ret;
+}
+
+static int uburma_jfae_fasync(int fd, struct file *filp, int on)
+{
+	int ret;
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_jfae_uobj *jfae =
+		container_of(uobj, struct uburma_jfae_uobj, uobj);
+
+	if (!uobj)
+		return -EINVAL;
+	spin_lock_irq(&jfae->jfe.lock);
+	ret = fasync_helper(fd, filp, on, &jfae->jfe.async_queue);
+	spin_unlock_irq(&jfae->jfe.lock);
+	return ret;
+}
+
 const struct file_operations uburma_jfae_fops = {
 	.owner = THIS_MODULE,
+	.poll = uburma_jfae_poll,
+	.release = uburma_delete_jfae,
+	.unlocked_ioctl = uburma_jfae_ioctl,
+	.fasync = uburma_jfae_fasync,
 };
 
 static void uburma_async_event_callback(struct ubcore_event *event,
@@ -185,6 +540,36 @@ void uburma_init_jfae(struct uburma_jfae_uobj *jfae,
 	uburma_init_jfae_handler(&jfae->event_handler);
 	ubcore_register_event_handler(ubc_dev, &jfae->event_handler);
 	jfae->dev = ubc_dev;
+}
+
+void uburma_release_comp_event(struct uburma_jfce_uobj *jfce,
+			       struct list_head *event_list)
+{
+	struct uburma_jfe *jfe = &jfce->jfe;
+	struct uburma_jfe_event *event, *tmp;
+
+	spin_lock_irq(&jfe->lock);
+	list_for_each_entry_safe(event, tmp, event_list, obj_node) {
+		list_del(&event->node);
+		kfree(event);
+	}
+	spin_unlock_irq(&jfe->lock);
+}
+
+void uburma_release_async_event(struct uburma_file *ufile,
+				struct list_head *event_list)
+{
+	struct uburma_jfae_uobj *jfae = ufile->ucontext->jfae;
+	struct uburma_jfe *jfe = &jfae->jfe;
+	struct uburma_jfe_event *event, *tmp;
+
+	spin_lock_irq(&jfe->lock);
+	list_for_each_entry_safe(event, tmp, event_list, obj_node) {
+		list_del(&event->node);
+		kfree(event);
+	}
+	spin_unlock_irq(&jfe->lock);
+	uburma_put_jfae(ufile);
 }
 
 int uburma_get_jfae(struct uburma_file *ufile)
@@ -220,35 +605,205 @@ void uburma_put_jfae(struct uburma_file *ufile)
 	uobj_put(&jfae->uobj);
 }
 
-void uburma_release_comp_event(struct uburma_jfce_uobj *jfce,
-			       struct list_head *event_list)
+static void uburma_flush_notifier(struct uburma_uobj *uobj,
+				  struct uburma_file *file)
 {
-	struct uburma_jfe *jfe = &jfce->jfe;
-	struct uburma_jfe_event *event, *tmp;
+	struct uburma_notifier_uobj *notifier =
+		container_of(uobj, struct uburma_notifier_uobj, uobj);
+	int incomplete_cnt;
+	uint32_t event_cnt;
+	struct uburma_jfe_event *event = NULL;
+	struct list_head event_list;
+	struct list_head *p, *next;
+	struct uburma_notify_event *notify;
+	int ret;
 
-	spin_lock_irq(&jfe->lock);
-	list_for_each_entry_safe(event, tmp, event_list, obj_node) {
-		list_del(&event->node);
-		kfree(event);
+	INIT_LIST_HEAD(&event_list);
+	while ((incomplete_cnt = atomic_read(&notifier->incomplete_cnt)) > 0) {
+		ret = uburma_wait_event(&notifier->jfe, false,
+					(uint32_t)incomplete_cnt, &event_cnt,
+					&event_list);
+		if (notifier->jfe.deleting)
+			break;
+		if (ret < 0)
+			continue;
+		atomic_sub(event_cnt, &notifier->incomplete_cnt);
+		list_for_each_safe(p, next, &event_list) {
+			event = list_entry(p, struct uburma_jfe_event, node);
+			notify = (struct uburma_notify_event *)(uintptr_t)
+					 event->event_data;
+			if (notify->notify.status == 0) {
+				if (notify->notify.type ==
+				    UBURMA_IMPORT_JETTY_NOTIFY)
+					uburma_unimport_jetty(
+						file, false,
+						notify->tjetty_handle);
+				else
+					uburma_unbind_jetty(
+						file, false,
+						notify->jetty_handle,
+						notify->tjetty_handle);
+			}
+			kfree((struct uburma_notify_event *)(uintptr_t)
+				      event->event_data);
+			list_del(p);
+			kfree(event);
+		}
 	}
-	spin_unlock_irq(&jfe->lock);
 }
 
-void uburma_release_async_event(struct uburma_file *ufile,
-				struct list_head *event_list)
+static int uburma_delete_notifier(struct inode *inode, struct file *filp)
 {
-	struct uburma_jfae_uobj *jfae = ufile->ucontext->jfae;
-	struct uburma_jfe *jfe = &jfae->jfe;
-	struct uburma_jfe_event *event, *tmp;
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_file *ufile;
 
-	spin_lock_irq(&jfe->lock);
-	list_for_each_entry_safe(event, tmp, event_list, obj_node) {
-		list_del(&event->node);
+	if (!uobj || !uobj->ufile)
+		return 0;
+
+	uobj_get(uobj);
+	ufile = uobj->ufile;
+	uburma_flush_notifier(uobj, ufile);
+
+	down_write(&ufile->ucontext_rwsem);
+	/* call uburma_hot_unplug_notifier when cleanup is not going on */
+	uburma_close_uobj_fd(filp);
+	uobj->ufile = NULL;
+	uobj_put(uobj);
+	up_write(&ufile->ucontext_rwsem);
+	kref_put(&ufile->ref, uburma_release_file);
+
+	return 0;
+}
+
+static __poll_t uburma_notifier_poll(struct file *filp,
+				     struct poll_table_struct *wait)
+{
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_notifier_uobj *notifier =
+		container_of(uobj, struct uburma_notifier_uobj, uobj);
+
+	return uburma_jfe_poll(&notifier->jfe, filp, wait);
+}
+
+static int uburma_wait_notify(struct uburma_notifier_uobj *notifier,
+			      struct file *filp, struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_wait_notify arg = { 0 };
+	struct list_head event_list;
+	struct uburma_jfe_event *event = NULL;
+	uint32_t event_cnt, max_event_cnt;
+	uint32_t i = 0;
+	struct list_head *p, *next;
+	int ret;
+
+	ret = uburma_event_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return -EFAULT;
+
+	max_event_cnt =
+		(arg.in.cnt < MAX_NOTIFY_CNT ? arg.in.cnt : MAX_NOTIFY_CNT);
+	INIT_LIST_HEAD(&event_list);
+	if (arg.in.timeout <= 0) {
+		ret = uburma_wait_event(&notifier->jfe,
+					(filp->f_flags & O_NONBLOCK) |
+						(arg.in.timeout == 0),
+					max_event_cnt, &event_cnt, &event_list);
+	} else {
+		ret = uburma_wait_event_timeout(
+			&notifier->jfe, msecs_to_jiffies(arg.in.timeout),
+			max_event_cnt, &event_cnt, &event_list);
+	}
+
+	if (ret < 0 && ret != -EAGAIN) {
+		uburma_log_err("Failed to wait notify event");
+		return ret;
+	}
+
+	arg.out.cnt = event_cnt;
+	atomic_sub(event_cnt, &notifier->incomplete_cnt);
+	list_for_each_safe(p, next, &event_list) {
+		event = list_entry(p, struct uburma_jfe_event, node);
+		arg.out.notify[i++] = ((struct uburma_notify_event *)(uintptr_t)
+					       event->event_data)
+					      ->notify;
+		kfree((struct uburma_notify_event *)(uintptr_t)
+			      event->event_data);
+		list_del(p);
 		kfree(event);
 	}
-	spin_unlock_irq(&jfe->lock);
+
+	if (event_cnt > 0 && uburma_event_tlv_append(hdr, &arg) != 0)
+		return -EFAULT;
+
+	return 0;
+}
+
+static long uburma_notifier_ioctl(struct file *filp, unsigned int cmd,
+				  unsigned long arg)
+{
+	struct uburma_cmd_hdr hdr;
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_notifier_uobj *notifier =
+		container_of(uobj, struct uburma_notifier_uobj, uobj);
+	int ret;
+
+	if (cmd == UBURMA_CMD_WAIT_NOTIFY) {
+		ret = (int)copy_from_user(&hdr, (struct uburma_cmd_hdr *)arg,
+					  sizeof(struct uburma_cmd_hdr));
+		if ((ret != 0) || (hdr.args_len > UBURMA_CMD_MAX_ARGS_SIZE) ||
+		    (hdr.args_len == 0 || hdr.args_addr == 0 ||
+		     hdr.command >= UBURMA_EVENT_CMD_MAX)) {
+			ret = -EINVAL;
+		} else {
+			ret = uburma_wait_notify(notifier, filp, &hdr);
+		}
+	} else {
+		ret = -ENOIOCTLCMD;
+	}
+
+	return (long)ret;
+}
+
+static int uburma_notifier_fasync(int fd, struct file *filp, int on)
+{
+	int ret;
+	struct uburma_uobj *uobj = filp->private_data;
+	struct uburma_notifier_uobj *notifier =
+		container_of(uobj, struct uburma_notifier_uobj, uobj);
+
+	if (!uobj)
+		return -EINVAL;
+	spin_lock_irq(&notifier->jfe.lock);
+	ret = fasync_helper(fd, filp, on, &notifier->jfe.async_queue);
+	spin_unlock_irq(&notifier->jfe.lock);
+	return ret;
 }
 
 const struct file_operations uburma_notifier_fops = {
 	.owner = THIS_MODULE,
+	.poll = uburma_notifier_poll,
+	.release = uburma_delete_notifier,
+	.unlocked_ioctl = uburma_notifier_ioctl,
+	.fasync = uburma_notifier_fasync,
 };
+
+struct uburma_notifier_uobj *uburma_get_notifier_uobj(int fd,
+						      struct uburma_file *ufile)
+{
+	struct uburma_uobj *uobj;
+	struct uburma_notifier_uobj *notifier;
+
+	if (fd < 0)
+		return ERR_PTR(-ENOENT);
+
+	uobj = uobj_get_read(UOBJ_CLASS_NOTIFIER, fd, ufile);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("get notifier uobj fail with fd %d\n", fd);
+		return (void *)uobj;
+	}
+
+	notifier = container_of(uobj, struct uburma_notifier_uobj, uobj);
+	uobj_get(uobj); // To keep the event file until notifier destroy.
+	uobj_put_read(uobj);
+	return notifier;
+}

@@ -158,12 +158,12 @@ static int ubcm_genl_uvs_add(const char *uvs_name, uint32_t genl_port,
 			     struct sock *genl_sock)
 {
 	struct ubcm_uvs_list *uvs_list = get_uvs_list();
-	struct ubcm_uvs_genl_node *new = NULL;
+	struct ubcm_uvs_genl_node *new_node = NULL;
 	struct ubcm_uvs_genl_node *node;
 	int idx;
 
-	new = kzalloc(sizeof(struct ubcm_uvs_genl_node), GFP_ATOMIC);
-	if (new == NULL)
+	new_node = kzalloc(sizeof(struct ubcm_uvs_genl_node), GFP_ATOMIC);
+	if (new_node == NULL)
 		return -ENOMEM;
 
 	spin_lock(&uvs_list->lock);
@@ -171,28 +171,28 @@ static int ubcm_genl_uvs_add(const char *uvs_name, uint32_t genl_port,
 	if (node != NULL) {
 		spin_unlock(&uvs_list->lock);
 		ubcm_log_warn("Uvs: %s already exist.\n", uvs_name);
-		kfree(new);
+		kfree(new_node);
 		return -EEXIST;
 	}
 
-	(void)strscpy(new->name, uvs_name, UBCM_MAX_UVS_NAME_LEN);
-	kref_init(&new->ref);
-	new->pid = (uint32_t)task_tgid_vnr(current);
-	new->id = uvs_list->next_id;
-	new->state = UBCM_UVS_STATE_ALIVE;
-	atomic_set(&new->map2ue, 0);
-	new->genl_port = genl_port;
-	new->genl_sock = genl_sock;
+	(void)strscpy(new_node->name, uvs_name, UBCM_MAX_UVS_NAME_LEN);
+	kref_init(&new_node->ref);
+	new_node->pid = (uint32_t)task_tgid_vnr(current);
+	new_node->id = uvs_list->next_id;
+	new_node->state = UBCM_UVS_STATE_ALIVE;
+	atomic_set(&new_node->map2ue, 0);
+	new_node->genl_port = genl_port;
+	new_node->genl_sock = genl_sock;
 	for (idx = 0; idx < UBCM_EID_TABLE_SIZE; idx++)
-		INIT_HLIST_HEAD(&new->eid_hlist[idx]);
+		INIT_HLIST_HEAD(&new_node->eid_hlist[idx]);
 
-	list_add_tail(&new->list_node, &uvs_list->list);
+	list_add_tail(&new_node->list_node, &uvs_list->list);
 	uvs_list->count++;
 	uvs_list->next_id++;
 	spin_unlock(&uvs_list->lock);
 
 	ubcm_log_info("Finish to add uvs node: %s, id: %u.\n", uvs_name,
-		      new->id);
+		      new_node->id);
 	return 0;
 }
 
@@ -210,9 +210,10 @@ static int ubcm_genl_uvs_add_handler(struct sk_buff *skb,
 	}
 
 	ret = ubcm_copy_uvs_name(info, uvs_name, payload_len);
-	if (ret != 0)
+	if (ret != 0) {
+		ubcm_log_err("Failed to copy uvs name.\n");
 		return ret;
-
+	}
 	ret = ubcm_genl_uvs_add(uvs_name, info->snd_portid,
 				genl_info_net(info)->genl_sock);
 	if (ret != 0) {

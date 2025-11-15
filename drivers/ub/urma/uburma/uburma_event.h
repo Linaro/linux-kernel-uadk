@@ -41,4 +41,6 @@ void uburma_release_async_event(struct uburma_file *ufile,
 int uburma_get_jfae(struct uburma_file *ufile);
 void uburma_put_jfae(struct uburma_file *ufile);
 
+struct uburma_notifier_uobj *
+uburma_get_notifier_uobj(int fd, struct uburma_file *ufile);
 #endif /* UBURMA_EVENT_H */

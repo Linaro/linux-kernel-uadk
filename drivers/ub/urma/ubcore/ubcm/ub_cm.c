@@ -108,8 +108,8 @@ static void ubcm_kref_release(struct kref *kref)
 	/* Delayed work should be flushed before resource destroy */
 	flush_workqueue(cm_ctx->wq);
 	if (!IS_ERR_OR_NULL(cm_dev->agent)) {
-		agent = cm_dev->agent;
 		spin_lock(&cm_dev->agent_lock);
+		agent = cm_dev->agent;
 		cm_dev->agent = NULL;
 		spin_unlock(&cm_dev->agent_lock);
 		(void)ubmad_unregister_agent(agent);
@@ -128,8 +128,6 @@ static void ubcm_put_device(struct ubcm_device *cm_dev)
 	uint32_t refcnt;
 
 	refcnt = kref_read(&cm_dev->kref);
-	ubcm_log_info("ubcm kref put, old refcnt: %u, new refcnt: %u.\n",
-		      refcnt, refcnt > 0 ? refcnt - 1 : 0);
 
 	kref_put(&cm_dev->kref, ubcm_kref_release);
 }
@@ -211,7 +209,7 @@ static int ubcm_add_device(struct ubcore_device *device)
 	spin_lock_init(&cm_dev->agent_lock);
 	ret = ubcm_get_ubc_dev(device);
 	if (ret != 0)
-		goto put_dev;
+		goto free_dev;
 	cm_dev->device = device;
 	ubcore_set_client_ctx_data(device, &g_ubcm_client, cm_dev);
 
@@ -231,6 +229,8 @@ static int ubcm_add_device(struct ubcore_device *device)
 put_dev:
 	/* Note: cm_dev will free next */
 	ubcm_put_device(cm_dev);
+free_dev:
+	kfree(cm_dev);
 	return ret;
 }
 

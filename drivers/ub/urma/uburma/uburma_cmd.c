@@ -125,6 +125,87 @@ static void uburma_fill_attr(struct ubcore_seg_cfg *cfg,
 	cfg->iova = arg->in.va;
 }
 
+static int uburma_cmd_alloc_token_id(struct ubcore_device *ubc_dev,
+				     struct uburma_file *file,
+				     struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_alloc_token_id arg;
+	union ubcore_token_id_flag flag = { 0 };
+	struct ubcore_udata udata = { 0 };
+	struct ubcore_token_id *token_id;
+	struct uburma_uobj *uobj;
+
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, (void *)&arg);
+	if (ret != 0)
+		return ret;
+
+	flag.bs.multi_seg = arg.flag.bs.multi_seg;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+	uobj = uobj_alloc(UOBJ_CLASS_TOKEN, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("UOBJ_CLASS_TOKEN alloc fail!\n");
+		return -ENOMEM;
+	}
+
+	token_id = ubcore_alloc_token_id(ubc_dev, flag, &udata);
+	if (IS_ERR_OR_NULL(token_id)) {
+		uburma_log_err("ubcore alloc token_id id failed.\n");
+		ret = PTR_ERR(token_id);
+		goto err_free_uobj;
+	}
+	uobj->object = token_id;
+	arg.out.token_id = token_id->token_id;
+	arg.out.handle = (uint64_t)uobj->id;
+
+	ret = uburma_tlv_append(hdr, (void *)&arg);
+	if (ret != 0)
+		goto err_free_token_id;
+
+	uobj_alloc_commit(uobj);
+	return 0;
+
+err_free_token_id:
+	(void)ubcore_free_token_id(token_id);
+err_free_uobj:
+	uobj_alloc_abort(uobj);
+	return ret;
+}
+
+static int uburma_cmd_free_token_id(struct ubcore_device *ubc_dev,
+				    struct uburma_file *file,
+				    struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_free_token_id arg;
+	struct ubcore_token_id *token;
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, (void *)&arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_get_del(UOBJ_CLASS_TOKEN, (int)arg.in.handle, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("failed to find token id.\n");
+		return -EINVAL;
+	}
+
+	token = (struct ubcore_token_id *)uobj->object;
+	if (arg.in.token_id != token->token_id) {
+		uburma_log_err(
+			"ubcore remove token_id failed: non-consistent.\n");
+		return -EPERM;
+	}
+	ret = uobj_remove_commit(uobj);
+	if (ret != 0)
+		uburma_log_err("ubcore remove commit token_id failed.\n");
+
+	uobj_put_del(uobj);
+	return ret;
+}
+
 static int uburma_cmd_register_seg(struct ubcore_device *ubc_dev,
 				   struct uburma_file *file,
 				   struct uburma_cmd_hdr *hdr)
@@ -313,7 +394,7 @@ static int uburma_cmd_create_jfs(struct ubcore_device *ubc_dev,
 {
 	struct uburma_cmd_create_jfs arg;
 	struct ubcore_jfs_cfg cfg = { 0 };
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct uburma_jfs_uobj *jfs_uobj;
 	struct uburma_uobj *jfc_uobj;
 	struct ubcore_jfs *jfs;
@@ -400,7 +481,7 @@ static int uburma_cmd_modify_jfs(struct ubcore_device *ubc_dev,
 	struct uburma_cmd_modify_jfs arg;
 	struct ubcore_jfs_attr attr = { 0 };
 	struct uburma_uobj *uobj;
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct ubcore_jfs *jfs;
 	int ret;
 
@@ -587,6 +668,79 @@ free_jfs_arr:
 	return ret;
 }
 
+static int uburma_cmd_import_seg(struct ubcore_device *ubc_dev,
+				 struct uburma_file *file,
+				 struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_import_seg arg;
+	struct ubcore_target_seg_cfg cfg = { 0 };
+	struct ubcore_udata udata = {};
+	struct ubcore_target_seg *tseg;
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, (void *)&arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_alloc(UOBJ_CLASS_TARGET_SEG, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("UOBJ_CLASS_TARGET_JFR alloc fail!\n");
+		return -ENOMEM;
+	}
+
+	(void)memcpy(cfg.seg.ubva.eid.raw, arg.in.eid, UBCORE_EID_SIZE);
+	cfg.seg.ubva.va = arg.in.va;
+	cfg.seg.len = arg.in.len;
+	cfg.seg.attr.value = arg.in.flag;
+	cfg.seg.token_id = arg.in.token_id;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	tseg = ubcore_import_seg(ubc_dev, &cfg, &udata);
+	if (IS_ERR_OR_NULL(tseg)) {
+		uburma_log_err("import seg failed.\n");
+		uobj_alloc_abort(uobj);
+		return PTR_ERR(tseg);
+	}
+
+	uobj->object = tseg;
+	arg.out.handle = (uint64_t)uobj->id;
+
+	ret = uburma_tlv_append(hdr, (void *)&arg);
+	if (ret != 0) {
+		(void)ubcore_unimport_seg(tseg);
+		uobj_alloc_abort(uobj);
+		return ret;
+	}
+	uobj_alloc_commit(uobj);
+	return ret;
+}
+
+static int uburma_cmd_unimport_seg(struct ubcore_device *ubc_dev,
+				   struct uburma_file *file,
+				   struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_unimport_seg arg;
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, (void *)&arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_get_del(UOBJ_CLASS_TARGET_SEG, arg.in.handle, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("failed to find imported target seg.\n");
+		return -EINVAL;
+	}
+	ret = uobj_remove_commit(uobj);
+	if (ret != 0)
+		uburma_log_err("unimport seg failed.\n");
+
+	uobj_put_del(uobj);
+	return ret;
+}
+
 static int uburma_cmd_create_jfr(struct ubcore_device *ubc_dev,
 				 struct uburma_file *file,
 				 struct uburma_cmd_hdr *hdr)
@@ -595,7 +749,7 @@ static int uburma_cmd_create_jfr(struct ubcore_device *ubc_dev,
 	struct uburma_uobj *jfc_uobj;
 	struct uburma_jfr_uobj *jfr_uobj;
 	struct ubcore_jfr_cfg cfg = { 0 };
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct ubcore_jfr *jfr;
 	int ret;
 
@@ -676,7 +830,7 @@ static int uburma_cmd_modify_jfr(struct ubcore_device *ubc_dev,
 	struct uburma_cmd_modify_jfr arg;
 	struct uburma_uobj *uobj;
 	struct ubcore_jfr_attr attr = { 0 };
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct ubcore_jfr *jfr;
 	int ret;
 
@@ -872,7 +1026,7 @@ static int uburma_cmd_create_jfc(struct ubcore_device *ubc_dev,
 	struct uburma_jfc_uobj *jfc_uobj;
 	struct uburma_jfce_uobj *jfce;
 	struct ubcore_jfc_cfg cfg = { 0 };
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct ubcore_jfc *jfc;
 	int ret;
 
@@ -951,7 +1105,7 @@ static int uburma_cmd_modify_jfc(struct ubcore_device *ubc_dev,
 	struct uburma_cmd_modify_jfc arg;
 	struct uburma_uobj *uobj;
 	struct ubcore_jfc_attr attr = { 0 };
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct ubcore_jfc *jfc;
 	int ret;
 
@@ -1150,7 +1304,7 @@ static int uburma_cmd_create_jetty(struct ubcore_device *ubc_dev,
 	struct uburma_uobj *jetty_grp_uobj = ERR_PTR(-ENOENT);
 	struct ubcore_jetty_cfg cfg = { 0 };
 	struct uburma_jetty_uobj *jetty_uobj;
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct ubcore_jetty *jetty;
 	int ret = 0;
 
@@ -1266,7 +1420,7 @@ static int uburma_cmd_modify_jetty(struct ubcore_device *ubc_dev,
 	struct uburma_uobj *uobj;
 	struct ubcore_jetty_attr attr = { 0 };
 	struct ubcore_jetty *jetty;
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	int ret;
 
 	ret = uburma_tlv_parse(hdr, &arg);
@@ -1488,6 +1642,204 @@ static int uburma_cmd_create_jfce(struct ubcore_device *ubc_dev,
 	return uburma_tlv_append(hdr, (void *)&arg);
 }
 
+static int uburma_cmd_import_jfr(struct ubcore_device *ubc_dev,
+				 struct uburma_file *file,
+				 struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_import_jfr arg;
+	struct ubcore_tjetty_cfg cfg = { 0 };
+	struct ubcore_udata udata = {};
+	struct ubcore_tjetty *tjfr;
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, (void *)&arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_alloc(UOBJ_CLASS_TARGET_JFR, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("UOBJ_CLASS_TARGET_JFR alloc fail!\n");
+		return -ENOMEM;
+	}
+
+	(void)memcpy(cfg.id.eid.raw, arg.in.eid, UBCORE_EID_SIZE);
+	cfg.id.id = arg.in.id;
+	cfg.flag.value = arg.in.flag;
+	cfg.token_value.token = arg.in.token;
+	cfg.trans_mode = arg.in.trans_mode;
+	cfg.eid_index = file->ucontext->eid_index;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	tjfr = ubcore_import_jfr(ubc_dev, &cfg, &udata);
+	if (IS_ERR_OR_NULL(tjfr)) {
+		uburma_log_err("ubcore_import_jfr failed.\n");
+		uobj_alloc_abort(uobj);
+		return PTR_ERR(tjfr);
+	}
+
+	uobj->object = tjfr;
+	arg.out.handle = (uint64_t)uobj->id;
+	if (tjfr->vtpn)
+		arg.out.tpn = tjfr->vtpn->vtpn;
+	else if (tjfr->tp)
+		arg.out.tpn = tjfr->tp->tpn;
+	else
+		arg.out.tpn = UBURMA_INVALID_TPN;
+
+	ret = uburma_tlv_append(hdr, (void *)&arg);
+	if (ret != 0) {
+		ubcore_unimport_jfr(tjfr);
+		uobj_alloc_abort(uobj);
+		return ret;
+	}
+	uobj_alloc_commit(uobj);
+	return 0;
+}
+
+static int uburma_cmd_import_jfr_ex(struct ubcore_device *ubc_dev,
+				    struct uburma_file *file,
+				    struct uburma_cmd_hdr *hdr)
+{
+	struct ubcore_active_tp_cfg active_tp_cfg = { 0 };
+	struct uburma_cmd_import_jfr_ex arg = { 0 };
+	struct ubcore_tjetty_cfg cfg = { 0 };
+	struct ubcore_udata udata = { 0 };
+	struct ubcore_tjetty *tjfr;
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, (void *)&arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_alloc(UOBJ_CLASS_TARGET_JFR, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("UOBJ_CLASS_TARGET_JFR alloc fail!\n");
+		return -ENOMEM;
+	}
+
+	(void)memcpy(cfg.id.eid.raw, arg.in.eid, UBCORE_EID_SIZE);
+	cfg.id.id = arg.in.id;
+	cfg.flag.value = arg.in.flag;
+	cfg.token_value.token = arg.in.token;
+	cfg.trans_mode = arg.in.trans_mode;
+	cfg.eid_index = file->ucontext->eid_index;
+
+	active_tp_cfg.tp_handle.value = arg.in.tp_handle;
+	active_tp_cfg.peer_tp_handle.value = arg.in.peer_tp_handle;
+	active_tp_cfg.tag = arg.in.tag;
+	active_tp_cfg.tp_attr.tx_psn = arg.in.tx_psn;
+	active_tp_cfg.tp_attr.rx_psn = arg.in.rx_psn;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	tjfr = ubcore_import_jfr_ex(ubc_dev, &cfg, &active_tp_cfg, &udata);
+	if (IS_ERR_OR_NULL(tjfr)) {
+		uburma_log_err("ubcore_import_jfr failed.\n");
+		uobj_alloc_abort(uobj);
+		return PTR_ERR(tjfr);
+	}
+
+	uobj->object = tjfr;
+	arg.out.handle = (uint64_t)uobj->id;
+	if (tjfr->vtpn)
+		arg.out.tpn = tjfr->vtpn->vtpn;
+	else if (tjfr->tp)
+		arg.out.tpn = tjfr->tp->tpn;
+	else
+		arg.out.tpn = UBURMA_INVALID_TPN;
+
+	ret = uburma_tlv_append(hdr, (void *)&arg);
+	if (ret != 0) {
+		ubcore_unimport_jfr(tjfr);
+		uobj_alloc_abort(uobj);
+		return ret;
+	}
+	uobj_alloc_commit(uobj);
+	return 0;
+}
+
+static int uburma_cmd_unimport_jfr(struct ubcore_device *ubc_dev,
+				   struct uburma_file *file,
+				   struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_unimport_jfr arg;
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_get_del(UOBJ_CLASS_TARGET_JFR, arg.in.handle, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("failed to find tjfr");
+		return -EINVAL;
+	}
+	ret = uobj_remove_commit(uobj);
+	if (ret != 0)
+		uburma_log_err("ubcore_unimport_jfr failed.\n");
+
+	uobj_put_del(uobj);
+	return ret;
+}
+
+static int uburma_cmd_import_jetty(struct ubcore_device *ubc_dev,
+				   struct uburma_file *file,
+				   struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_import_jetty arg;
+	struct ubcore_tjetty_cfg cfg = { 0 };
+	struct ubcore_tjetty *tjetty;
+	struct ubcore_udata udata = {};
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_alloc(UOBJ_CLASS_TARGET_JETTY, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("UOBJ_CLASS_TARGET_JETTY alloc fail!\n");
+		return -ENOMEM;
+	}
+
+	(void)memcpy(cfg.id.eid.raw, arg.in.eid, UBCORE_EID_SIZE);
+	cfg.id.id = arg.in.id;
+	cfg.token_value.token = arg.in.token;
+	cfg.trans_mode = (enum ubcore_transport_mode)arg.in.trans_mode;
+	cfg.flag.value = arg.in.flag;
+	cfg.policy = (enum ubcore_jetty_grp_policy)arg.in.policy;
+	cfg.type = (enum ubcore_target_type)arg.in.type;
+	cfg.eid_index = file->ucontext->eid_index;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	tjetty = ubcore_import_jetty(ubc_dev, &cfg, &udata);
+	if (IS_ERR_OR_NULL(tjetty)) {
+		uburma_log_err("ubcore_import_jetty failed.\n");
+		uobj_alloc_abort(uobj);
+		return PTR_ERR(tjetty);
+	}
+
+	uobj->object = tjetty;
+	arg.out.handle = (uint64_t)uobj->id;
+	if (tjetty->vtpn)
+		arg.out.tpn = tjetty->vtpn->vtpn;
+	else if (tjetty->tp)
+		arg.out.tpn = tjetty->tp->tpn;
+	else
+		arg.out.tpn = UBURMA_INVALID_TPN;
+
+	ret = uburma_tlv_append(hdr, &arg);
+	if (ret != 0) {
+		(void)ubcore_unimport_jetty(tjetty);
+		uobj_alloc_abort(uobj);
+		return ret;
+	}
+	uobj_alloc_commit(uobj);
+	return 0;
+}
 
 int uburma_unimport_jetty(struct uburma_file *file, bool async,
 			  int tjetty_handle)
@@ -1512,6 +1864,20 @@ int uburma_unimport_jetty(struct uburma_file *file, bool async,
 	uobj_put(uobj);
 	uobj_put_del(uobj);
 	return ret;
+}
+
+static int uburma_cmd_unimport_jetty(struct ubcore_device *ubc_dev,
+				     struct uburma_file *file,
+				     struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_unimport_jetty arg;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	return uburma_unimport_jetty(file, false, arg.in.handle);
 }
 
 static int uburma_get_jetty_tjetty_objs(struct uburma_file *file,
@@ -1545,6 +1911,115 @@ static inline void uburma_put_jetty_tjetty_objs(struct uburma_uobj *jetty_uobj,
 	uobj_put_read(tjetty_uobj);
 }
 
+static inline void uburma_put_jfs_tjfr_objs(struct uburma_uobj *jetty_uobj,
+					    struct uburma_uobj *tjetty_uobj)
+{
+	uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+}
+
+static int uburma_cmd_bind_jetty(struct ubcore_device *ubc_dev,
+				 struct uburma_file *file,
+				 struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_tjetty_uobj *uburma_tjetty;
+	struct uburma_cmd_bind_jetty arg;
+	struct uburma_uobj *tjetty_uobj;
+	struct uburma_uobj *jetty_uobj;
+	struct ubcore_tjetty *tjetty;
+	struct ubcore_udata udata = {};
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	if (uburma_get_jetty_tjetty_objs(file, arg.in.jetty_handle,
+					 arg.in.tjetty_handle, &jetty_uobj,
+					 &tjetty_uobj))
+		return -EINVAL;
+
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	tjetty = (struct ubcore_tjetty *)tjetty_uobj->object;
+	ret = ubcore_bind_jetty(jetty_uobj->object, tjetty, &udata);
+	if (ret != 0) {
+		uburma_log_err("bind jetty failed.\n");
+		uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+		return ret;
+	}
+
+	if (tjetty->vtpn)
+		arg.out.tpn = tjetty->vtpn->vtpn;
+	else if (tjetty->tp)
+		arg.out.tpn = tjetty->tp->tpn;
+	else
+		arg.out.tpn = UBURMA_INVALID_TPN;
+
+	uburma_tjetty = (struct uburma_tjetty_uobj *)(tjetty_uobj);
+	uburma_tjetty->jetty_uobj = (struct uburma_jetty_uobj *)jetty_uobj;
+	ret = uburma_tlv_append(hdr, &arg);
+	if (ret != 0)
+		(void)ubcore_unbind_jetty(jetty_uobj->object);
+
+	uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+	return ret;
+}
+
+static int uburma_cmd_bind_jetty_ex(struct ubcore_device *ubc_dev,
+				    struct uburma_file *file,
+				    struct uburma_cmd_hdr *hdr)
+{
+	struct ubcore_active_tp_cfg active_tp_cfg = { 0 };
+	struct uburma_cmd_bind_jetty_ex arg = { 0 };
+	struct uburma_tjetty_uobj *uburma_tjetty;
+	struct ubcore_udata udata = { 0 };
+	struct uburma_uobj *tjetty_uobj;
+	struct uburma_uobj *jetty_uobj;
+	struct ubcore_tjetty *tjetty;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	if (uburma_get_jetty_tjetty_objs(file, arg.in.jetty_handle,
+					 arg.in.tjetty_handle, &jetty_uobj,
+					 &tjetty_uobj))
+		return -EINVAL;
+
+	active_tp_cfg.tp_handle.value = arg.in.tp_handle;
+	active_tp_cfg.peer_tp_handle.value = arg.in.peer_tp_handle;
+	active_tp_cfg.tag = arg.in.tag;
+	active_tp_cfg.tp_attr.tx_psn = arg.in.tx_psn;
+	active_tp_cfg.tp_attr.rx_psn = arg.in.rx_psn;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	tjetty = (struct ubcore_tjetty *)tjetty_uobj->object;
+	ret = ubcore_bind_jetty_ex(jetty_uobj->object, tjetty, &active_tp_cfg,
+				   &udata);
+	if (ret != 0) {
+		uburma_log_err("bind jetty failed.\n");
+		uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+		return ret;
+	}
+
+	if (tjetty->vtpn)
+		arg.out.tpn = tjetty->vtpn->vtpn;
+	else if (tjetty->tp)
+		arg.out.tpn = tjetty->tp->tpn;
+	else
+		arg.out.tpn = UBURMA_INVALID_TPN;
+
+	uburma_tjetty = (struct uburma_tjetty_uobj *)(tjetty_uobj);
+	uburma_tjetty->jetty_uobj = (struct uburma_jetty_uobj *)jetty_uobj;
+	ret = uburma_tlv_append(hdr, &arg);
+	if (ret != 0)
+		(void)ubcore_unbind_jetty(jetty_uobj->object);
+
+	uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+	return ret;
+}
+
 int uburma_unbind_jetty(struct uburma_file *file, bool async, int jetty_handle,
 			int tjetty_handle)
 {
@@ -1571,6 +2046,21 @@ int uburma_unbind_jetty(struct uburma_file *file, bool async, int jetty_handle,
 	return ret;
 }
 
+static int uburma_cmd_unbind_jetty(struct ubcore_device *ubc_dev,
+				   struct uburma_file *file,
+				   struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_unadvise_jetty arg;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	return uburma_unbind_jetty(file, false, arg.in.jetty_handle,
+				   arg.in.tjetty_handle);
+}
+
 static int uburma_cmd_create_jetty_grp(struct ubcore_device *ubc_dev,
 				       struct uburma_file *file,
 				       struct uburma_cmd_hdr *hdr)
@@ -1578,7 +2068,7 @@ static int uburma_cmd_create_jetty_grp(struct ubcore_device *ubc_dev,
 	struct uburma_cmd_create_jetty_grp arg;
 	struct uburma_jetty_grp_uobj *jetty_grp_uobj;
 	struct ubcore_jetty_grp_cfg cfg = { 0 };
-	struct ubcore_udata udata;
+	struct ubcore_udata udata = {};
 	struct ubcore_jetty_group *jetty_grp;
 	int ret;
 
@@ -1678,6 +2168,918 @@ static int uburma_cmd_delete_jetty_grp(struct ubcore_device *ubc_dev,
 	return uburma_tlv_append(hdr, &arg);
 }
 
+static int uburma_fill_user_ctl_info(struct ubcore_ucontext *ctx,
+				     struct uburma_cmd_user_ctl *user_ctl,
+				     struct ubcore_user_ctl *k_user_ctl)
+{
+	if (!ctx) {
+		uburma_log_err("parameter invalid with ctx nullptr.\n");
+		return -EINVAL;
+	}
+
+	k_user_ctl->uctx = ctx;
+	k_user_ctl->in.addr = user_ctl->in.addr;
+	k_user_ctl->in.len = user_ctl->in.len;
+	k_user_ctl->in.opcode = user_ctl->in.opcode;
+
+	k_user_ctl->out.addr = user_ctl->out.addr;
+	k_user_ctl->out.len = user_ctl->out.len;
+
+	k_user_ctl->udrv_data.in_addr = user_ctl->udrv.in_addr;
+	k_user_ctl->udrv_data.in_len = user_ctl->udrv.in_len;
+	k_user_ctl->udrv_data.out_addr = user_ctl->udrv.out_addr;
+	k_user_ctl->udrv_data.out_len = user_ctl->udrv.out_len;
+
+	return 0;
+}
+
+static int uburma_fill_eid_list(struct ubcore_device *dev,
+				struct uburma_cmd_get_eid_list *eid_list)
+{
+	struct ubcore_eid_entry *e;
+	uint32_t max_eid_cnt = 0;
+	uint32_t eid_cnt = 0;
+	uint32_t i;
+
+	spin_lock(&dev->eid_table.lock);
+	if (!dev->eid_table.eid_entries) {
+		spin_unlock(&dev->eid_table.lock);
+		return -EINVAL;
+	}
+
+	max_eid_cnt = min(dev->eid_table.eid_cnt, eid_list->in.max_eid_cnt);
+	for (i = 0; i < max_eid_cnt; i++) {
+		e = &dev->eid_table.eid_entries[i];
+		if (!e->valid || !net_eq(e->net, current->nsproxy->net_ns))
+			continue;
+
+		eid_list->out.eid_list[eid_cnt].eid_index = e->eid_index;
+		eid_list->out.eid_list[eid_cnt].eid = e->eid;
+		eid_cnt++;
+	}
+	eid_list->out.eid_cnt = eid_cnt;
+	spin_unlock(&dev->eid_table.lock);
+	return 0;
+}
+
+static int uburma_cmd_get_eid_list(struct ubcore_device *ubc_dev,
+				   struct uburma_file *file,
+				   struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_get_eid_list *args;
+	int ret;
+
+	args = kcalloc(1, sizeof(struct uburma_cmd_get_eid_list), GFP_KERNEL);
+	if (!args)
+		return -ENOMEM;
+
+	ret = uburma_tlv_parse(hdr, args);
+	if (ret != 0)
+		goto out;
+
+	ret = uburma_fill_eid_list(ubc_dev, args);
+	if (ret != 0)
+		goto out;
+
+	ret = uburma_tlv_append(hdr, args);
+out:
+	kfree(args);
+	return ret;
+}
+
+static int uburma_cmd_user_ctl(struct ubcore_device *ubc_dev,
+			       struct uburma_file *file,
+			       struct uburma_cmd_hdr *hdr)
+{
+	struct ubcore_user_ctl k_user_ctl = { 0 };
+	struct uburma_cmd_user_ctl arg;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	ret = uburma_fill_user_ctl_info(file->ucontext, &arg, &k_user_ctl);
+	if (ret != 0)
+		return ret;
+
+	ret = ubcore_user_control(ubc_dev, &k_user_ctl);
+	if (ret != 0)
+		return ret;
+
+	return 0;
+}
+
+static int uburma_cmd_get_net_addr_list(struct ubcore_device *ubc_dev,
+					struct uburma_file *file,
+					struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_get_net_addr_list arg = { 0 };
+	struct uburma_cmd_net_addr_info *netaddr_info;
+	struct ubcore_sip_info *entry;
+	uint32_t max_netaddr_cnt;
+	uint32_t netaddr_cnt = 0;
+	size_t netaddr_size;
+	uint32_t i;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	max_netaddr_cnt =
+		min(ubc_dev->sip_table.max_sip_cnt, arg.in.max_netaddr_cnt);
+	netaddr_size =
+		max_netaddr_cnt * sizeof(struct uburma_cmd_net_addr_info);
+	netaddr_info = kcalloc(1, netaddr_size, GFP_KERNEL);
+	if (!netaddr_info)
+		return -ENOMEM;
+
+	mutex_lock(&ubc_dev->sip_table.lock);
+	if (!ubc_dev->sip_table.entry) {
+		mutex_unlock(&ubc_dev->sip_table.lock);
+		ret = -EINVAL;
+		goto free_list;
+	}
+
+	for (i = 0; i < max_netaddr_cnt; i++) {
+		entry = &ubc_dev->sip_table.entry[i].sip_info;
+		if (entry->is_active) {
+			netaddr_info[netaddr_cnt].netaddr = entry->addr;
+			netaddr_info[netaddr_cnt].index = i;
+			netaddr_cnt++;
+		}
+	}
+	mutex_unlock(&ubc_dev->sip_table.lock);
+
+	arg.out.netaddr_cnt = netaddr_cnt;
+	arg.out.len = (uint64_t)netaddr_size;
+	arg.out.addr = (uint64_t)(uintptr_t)netaddr_info;
+
+	ret = uburma_tlv_append(hdr, &arg);
+
+free_list:
+	kfree(netaddr_info);
+	return ret;
+}
+
+static void uburma_fill_tp_cfg(struct uburma_cmd_user_tp_cfg *cmd_tp_cfg,
+			       struct ubcore_tp_cfg *tp_cfg)
+{
+	/* Attention: ubcore_tp_cfg_flag is different with uburma_cmd_tp_cfg_flag */
+	/* so we cannot fill by value */
+	tp_cfg->flag.bs.target = cmd_tp_cfg->flag.bs.target;
+	tp_cfg->flag.bs.loopback = cmd_tp_cfg->flag.bs.loopback;
+	tp_cfg->flag.bs.dca_enable = cmd_tp_cfg->flag.bs.dca_enable;
+	tp_cfg->flag.bs.bonding = cmd_tp_cfg->flag.bs.bonding;
+
+	tp_cfg->trans_mode = cmd_tp_cfg->trans_mode;
+	tp_cfg->retry_num = cmd_tp_cfg->retry_num;
+	tp_cfg->retry_factor = cmd_tp_cfg->retry_factor;
+	tp_cfg->ack_timeout = cmd_tp_cfg->ack_timeout;
+	tp_cfg->dscp = cmd_tp_cfg->dscp;
+	tp_cfg->oor_cnt = cmd_tp_cfg->oor_cnt;
+}
+
+static void uburma_fill_peer_net_addr(struct uburma_cmd_net_addr *cmd_net_addr,
+				      struct ubcore_net_addr *net_addr)
+{
+	if (cmd_net_addr->sin_family == AF_INET) {
+		net_addr->type = UBCORE_NET_ADDR_TYPE_IPV4;
+		net_addr->net_addr.in4.addr = cmd_net_addr->in4.s_addr;
+	} else if (cmd_net_addr->sin_family == AF_INET6) {
+		net_addr->type = UBCORE_NET_ADDR_TYPE_IPV6;
+		(void)memcpy(net_addr->net_addr.raw, &cmd_net_addr->in6,
+			     sizeof(struct in6_addr));
+	}
+
+	net_addr->vlan = cmd_net_addr->vlan;
+	(void)memcpy(net_addr->mac, cmd_net_addr->mac,
+		     UBCORE_MAC_BYTES * sizeof(uint8_t));
+	net_addr->prefix_len = cmd_net_addr->prefix_len;
+}
+
+static void uburma_fill_tp_attr(struct uburma_cmd_tp_attr *cmd_attr,
+				struct ubcore_tp_attr *attr)
+{
+	attr->flag.value = cmd_attr->flag.value;
+	attr->peer_tpn = cmd_attr->peer_tpn;
+	attr->state = cmd_attr->state;
+	attr->tx_psn = cmd_attr->tx_psn;
+	attr->rx_psn = cmd_attr->rx_psn;
+	attr->mtu = cmd_attr->mtu;
+	attr->cc_pattern_idx = cmd_attr->cc_pattern_idx;
+	attr->oos_cnt = cmd_attr->oos_cnt;
+	attr->local_net_addr_idx = cmd_attr->local_net_addr_idx;
+	uburma_fill_peer_net_addr(&cmd_attr->peer_net_addr,
+				  &attr->peer_net_addr);
+	attr->data_udp_start = cmd_attr->data_udp_start;
+	attr->ack_udp_start = cmd_attr->ack_udp_start;
+	attr->udp_range = cmd_attr->udp_range;
+	attr->hop_limit = cmd_attr->hop_limit;
+	attr->flow_label = cmd_attr->flow_label;
+	attr->port_id = cmd_attr->port_id;
+	attr->mn = cmd_attr->mn;
+	attr->peer_trans_type = cmd_attr->peer_trans_type;
+}
+
+/* Attention: cmd_mask is different with mask, so we cannot fill by value */
+static void uburma_fill_tp_attr_mask(union uburma_cmd_tp_attr_mask *cmd_mask,
+				     union ubcore_tp_attr_mask *mask)
+{
+	mask->bs.flag = cmd_mask->bs.flag;
+	mask->bs.peer_tpn = cmd_mask->bs.peer_tpn;
+	mask->bs.state = cmd_mask->bs.state;
+	mask->bs.tx_psn = cmd_mask->bs.tx_psn;
+	mask->bs.rx_psn = cmd_mask->bs.rx_psn;
+	mask->bs.mtu = cmd_mask->bs.mtu;
+	mask->bs.cc_pattern_idx = cmd_mask->bs.cc_pattern_idx;
+	mask->bs.oos_cnt = cmd_mask->bs.oos_cnt;
+	mask->bs.local_net_addr_idx = cmd_mask->bs.local_net_addr_idx;
+	mask->bs.peer_net_addr = cmd_mask->bs.peer_net_addr;
+	mask->bs.data_udp_start = cmd_mask->bs.data_udp_start;
+	mask->bs.ack_udp_start = cmd_mask->bs.ack_udp_start;
+	mask->bs.udp_range = cmd_mask->bs.udp_range;
+	mask->bs.hop_limit = cmd_mask->bs.hop_limit;
+	mask->bs.flow_label = cmd_mask->bs.flow_label;
+	mask->bs.port_id = cmd_mask->bs.port_id;
+	mask->bs.mn = cmd_mask->bs.mn;
+	mask->bs.peer_trans_type = cmd_mask->bs.peer_trans_type;
+}
+
+static int uburma_modify_user_tp(struct ubcore_device *ubc_dev,
+				 struct uburma_cmd_modify_tp *arg)
+{
+	union ubcore_tp_attr_mask mask = { 0 };
+	struct ubcore_tp_cfg tp_cfg = { 0 };
+	struct ubcore_tp_attr attr = { 0 };
+	int ret;
+
+	if (!ubc_dev || !ubc_dev->ops ||
+	    !ubc_dev->ops->modify_user_tp) {
+		uburma_log_err("Invalid parameter.\n");
+		return -EINVAL;
+	}
+
+	uburma_fill_tp_cfg(&arg->in.tp_cfg, &tp_cfg);
+	uburma_fill_tp_attr(&arg->in.attr, &attr);
+	uburma_fill_tp_attr_mask(&arg->in.mask, &mask);
+
+	ret = ubc_dev->ops->modify_user_tp(ubc_dev, arg->in.tpn, &tp_cfg, &attr,
+					   mask);
+	if (ret != 0)
+		uburma_log_err("Failed to modify user tp, ret: %d.\n", ret);
+
+	return ret;
+}
+
+static int uburma_cmd_modify_tp(struct ubcore_device *ubc_dev,
+				struct uburma_file *file,
+				struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_modify_tp *arg;
+	int ret;
+
+	arg = kcalloc(1, sizeof(struct uburma_cmd_modify_tp), GFP_KERNEL);
+	if (!arg)
+		return -ENOMEM;
+
+	ret = uburma_tlv_parse(hdr, arg);
+	if (ret != 0)
+		goto out;
+
+	ret = uburma_modify_user_tp(ubc_dev, arg);
+	if (ret != 0)
+		uburma_log_err("Failed to modify user tp, tpn: %u.\n",
+			       arg->in.tpn);
+out:
+	kfree(arg);
+	return ret;
+}
+
+static void uburma_fill_device_attr(struct ubcore_device *ubc_dev,
+				    struct uburma_cmd_device_attr *attr)
+{
+	uint8_t port_cnt, i;
+
+	attr->guid = ubc_dev->attr.guid;
+	attr->dev_cap.feature.value = ubc_dev->attr.dev_cap.feature.value;
+	attr->dev_cap.max_jfc = ubc_dev->attr.dev_cap.max_jfc;
+	attr->dev_cap.max_jfs = ubc_dev->attr.dev_cap.max_jfs;
+	attr->dev_cap.max_jfr = ubc_dev->attr.dev_cap.max_jfr;
+	attr->dev_cap.max_jetty = ubc_dev->attr.dev_cap.max_jetty;
+	attr->dev_cap.max_jetty_grp = ubc_dev->attr.dev_cap.max_jetty_grp;
+	attr->dev_cap.max_jetty_in_jetty_grp =
+		ubc_dev->attr.dev_cap.max_jetty_in_jetty_grp;
+	attr->dev_cap.max_jfc_depth = ubc_dev->attr.dev_cap.max_jfc_depth;
+	attr->dev_cap.max_jfs_depth = ubc_dev->attr.dev_cap.max_jfs_depth;
+	attr->dev_cap.max_jfr_depth = ubc_dev->attr.dev_cap.max_jfr_depth;
+	attr->dev_cap.max_jfs_inline_len =
+		ubc_dev->attr.dev_cap.max_jfs_inline_size;
+	attr->dev_cap.max_jfs_sge = ubc_dev->attr.dev_cap.max_jfs_sge;
+	attr->dev_cap.max_jfs_rsge = ubc_dev->attr.dev_cap.max_jfs_rsge;
+	attr->dev_cap.max_jfr_sge = ubc_dev->attr.dev_cap.max_jfr_sge;
+	attr->dev_cap.max_msg_size = ubc_dev->attr.dev_cap.max_msg_size;
+	attr->dev_cap.max_read_size = ubc_dev->attr.dev_cap.max_read_size;
+	attr->dev_cap.max_write_size = ubc_dev->attr.dev_cap.max_write_size;
+	attr->dev_cap.max_cas_size = ubc_dev->attr.dev_cap.max_cas_size;
+	attr->dev_cap.max_swap_size = ubc_dev->attr.dev_cap.max_swap_size;
+	attr->dev_cap.max_fetch_and_add_size =
+		ubc_dev->attr.dev_cap.max_fetch_and_add_size;
+	attr->dev_cap.max_fetch_and_sub_size =
+		ubc_dev->attr.dev_cap.max_fetch_and_sub_size;
+	attr->dev_cap.max_fetch_and_and_size =
+		ubc_dev->attr.dev_cap.max_fetch_and_and_size;
+	attr->dev_cap.max_fetch_and_or_size =
+		ubc_dev->attr.dev_cap.max_fetch_and_or_size;
+	attr->dev_cap.max_fetch_and_xor_size =
+		ubc_dev->attr.dev_cap.max_fetch_and_xor_size;
+	attr->dev_cap.atomic_feat.value =
+		ubc_dev->attr.dev_cap.atomic_feat.value;
+	attr->dev_cap.trans_mode = ubc_dev->attr.dev_cap.trans_mode;
+	attr->dev_cap.sub_trans_mode_cap =
+		ubc_dev->attr.dev_cap.sub_trans_mode_cap;
+	attr->dev_cap.congestion_ctrl_alg =
+		ubc_dev->attr.dev_cap.congestion_ctrl_alg;
+	attr->dev_cap.ceq_cnt = ubc_dev->attr.dev_cap.ceq_cnt;
+	attr->dev_cap.max_tp_in_tpg = ubc_dev->attr.dev_cap.max_tp_in_tpg;
+	attr->dev_cap.max_eid_cnt = ubc_dev->attr.dev_cap.max_eid_cnt;
+	attr->dev_cap.page_size_cap = ubc_dev->attr.dev_cap.page_size_cap;
+	attr->dev_cap.max_oor_cnt = ubc_dev->attr.dev_cap.max_oor_cnt;
+	attr->dev_cap.mn = ubc_dev->attr.dev_cap.mn;
+	attr->dev_cap.max_netaddr_cnt = ubc_dev->attr.dev_cap.max_netaddr_cnt;
+
+	attr->port_cnt = ubc_dev->attr.port_cnt;
+	port_cnt = (attr->port_cnt < UBURMA_CMD_MAX_PORT_CNT) ?
+				 attr->port_cnt :
+				 UBURMA_CMD_MAX_PORT_CNT;
+	for (i = 0; i < port_cnt; i++)
+		attr->port_attr[i].max_mtu = ubc_dev->attr.port_attr[i].max_mtu;
+
+	attr->reserved_jetty_id_min = ubc_dev->attr.reserved_jetty_id_min;
+	attr->reserved_jetty_id_max = ubc_dev->attr.reserved_jetty_id_max;
+}
+
+static int uburma_fill_device_status(struct ubcore_device *ubc_dev,
+				     struct uburma_cmd_device_attr *attr)
+{
+	struct ubcore_device_status status;
+	uint8_t port_cnt, i;
+	int ret;
+
+	ret = ubcore_query_device_status(ubc_dev, &status);
+	if (ret != 0) {
+		uburma_log_err("Failed to query device status.\n");
+		return ret;
+	}
+
+	port_cnt = (attr->port_cnt < UBURMA_CMD_MAX_PORT_CNT) ?
+				 attr->port_cnt :
+				 UBURMA_CMD_MAX_PORT_CNT;
+	for (i = 0; i < port_cnt; i++) {
+		attr->port_attr[i].state = status.port_status[i].state;
+		attr->port_attr[i].active_width =
+			status.port_status[i].active_width;
+		attr->port_attr[i].active_speed =
+			status.port_status[i].active_speed;
+		attr->port_attr[i].active_mtu =
+			status.port_status[i].active_mtu;
+	}
+
+	return 0;
+}
+
+static int uburma_cmd_query_device_attr(struct ubcore_device *ubc_dev,
+					struct uburma_file *file,
+					struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_query_device_attr arg = { 0 };
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return -EINVAL;
+
+	if (strcmp(arg.in.dev_name, ubc_dev->dev_name) != 0) {
+		uburma_log_err("Invalid parameter with error dev_name.\n");
+		return -EINVAL;
+	}
+	uburma_fill_device_attr(ubc_dev, &arg.out.attr);
+	ret = uburma_fill_device_status(ubc_dev, &arg.out.attr);
+	if (ret != 0)
+		return ret;
+
+	return uburma_tlv_append(hdr, &arg);
+}
+
+struct uburma_import_jetty_async_user_arg {
+	struct uburma_notifier_uobj *notifier;
+	struct uburma_notify_event *notify;
+	struct uburma_uobj *uobj_tjetty;
+};
+
+static void uburma_free_notify_event(uint64_t event_data)
+{
+	kfree((struct uburma_notify_event *)event_data);
+}
+
+static void uburma_cmd_import_jetty_async_callback(struct ubcore_tjetty *tjetty,
+						   int status, void *user_arg)
+{
+	struct uburma_import_jetty_async_user_arg *arg = user_arg;
+	struct uburma_notifier_uobj *notifier = arg->notifier;
+	struct uburma_notify_event *notify_event = arg->notify;
+	struct uburma_notify *notify = &notify_event->notify;
+	struct uburma_uobj *uobj = arg->uobj_tjetty;
+
+	notify->status = status;
+	if (status == 0) {
+		uobj->object = tjetty;
+		uobj_alloc_commit(uobj);
+		if (tjetty->vtpn)
+			notify->vtpn = tjetty->vtpn->vtpn;
+	} else
+		uobj_alloc_abort(uobj);
+
+	notify->status = status;
+	if (tjetty->vtpn)
+		notify->vtpn = tjetty->vtpn->vtpn;
+	uburma_write_event_with_free_fn(&notifier->jfe,
+					(uint64_t)(uintptr_t)notify_event, 0,
+					NULL, NULL, uburma_free_notify_event);
+	uobj_put(&notifier->uobj);
+	kfree(user_arg);
+}
+
+static struct ubcore_import_cb *
+uburma_create_import_callback(struct uburma_cmd_import_jetty_async *arg,
+			      struct uburma_file *file,
+			      struct uburma_uobj *uobj_tjetty)
+{
+	struct uburma_import_jetty_async_user_arg *user_arg;
+	struct uburma_notifier_uobj *notifier;
+	struct uburma_notify_event *notify;
+	struct ubcore_import_cb *cb;
+
+	notifier = uburma_get_notifier_uobj(arg->in.fd, file);
+	if (IS_ERR_OR_NULL(notifier)) {
+		uburma_log_err("failed to find notifier.\n");
+		return NULL;
+	}
+
+	notify = kzalloc(sizeof(struct uburma_notify_event), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(notify)) {
+		uburma_log_err("failed to alloc notify.\n");
+		goto put_notifier;
+	}
+	notify->notify.type = UBURMA_IMPORT_JETTY_NOTIFY;
+	notify->notify.user_ctx = arg->in.user_ctx;
+	notify->notify.urma_jetty = arg->in.urma_tjetty;
+	notify->tjetty_handle = uobj_tjetty->id;
+
+	user_arg = kzalloc(sizeof(struct uburma_import_jetty_async_user_arg),
+			   GFP_KERNEL);
+	if (IS_ERR_OR_NULL(user_arg)) {
+		uburma_log_err("failed to alloc user arg.\n");
+		goto free_notify;
+	}
+	user_arg->notifier = notifier;
+	user_arg->notify = notify;
+	user_arg->uobj_tjetty = uobj_tjetty;
+
+	cb = kzalloc(sizeof(struct ubcore_import_cb), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(cb)) {
+		uburma_log_err("failed to alloc import callback.\n");
+		goto free_user_arg;
+	}
+	atomic_inc(&user_arg->notifier->incomplete_cnt);
+	cb->callback = uburma_cmd_import_jetty_async_callback;
+	cb->user_arg = user_arg;
+	return cb;
+
+free_user_arg:
+	kfree(user_arg);
+free_notify:
+	kfree(notify);
+put_notifier:
+	uobj_put(&notifier->uobj);
+	return NULL;
+}
+
+static void uburma_delete_import_callback(struct ubcore_import_cb *cb)
+{
+	struct uburma_import_jetty_async_user_arg *user_arg;
+
+	if (!cb)
+		return;
+	user_arg = cb->user_arg;
+	atomic_dec(&user_arg->notifier->incomplete_cnt);
+	uobj_put(&user_arg->notifier->uobj);
+	kfree(user_arg->notify);
+	kfree(user_arg);
+	kfree(cb);
+}
+
+static int uburma_cmd_import_jetty_async(struct ubcore_device *ubc_dev,
+					 struct uburma_file *file,
+					 struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_import_jetty_async arg;
+	struct ubcore_tjetty_cfg cfg = { 0 };
+	struct ubcore_tjetty *tjetty;
+	struct ubcore_udata udata = {};
+	struct uburma_uobj *uobj;
+	struct ubcore_import_cb *cb;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_alloc(UOBJ_CLASS_TARGET_JETTY, file);
+	if (IS_ERR_OR_NULL(uobj)) {
+		uburma_log_err("UOBJ_CLASS_TARGET_JETTY alloc fail!\n");
+		return -ENOMEM;
+	}
+
+	(void)memcpy(cfg.id.eid.raw, arg.in.eid, UBCORE_EID_SIZE);
+	cfg.id.id = arg.in.id;
+	cfg.token_value.token = arg.in.token;
+	cfg.trans_mode = (enum ubcore_transport_mode)arg.in.trans_mode;
+	cfg.flag.value = arg.in.flag;
+	cfg.policy = (enum ubcore_jetty_grp_policy)arg.in.policy;
+	cfg.type = (enum ubcore_target_type)arg.in.type;
+	cfg.eid_index = file->ucontext->eid_index;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	cb = uburma_create_import_callback(&arg, file, uobj);
+	if (IS_ERR_OR_NULL(cb)) {
+		uburma_log_err("failed to find notifier.\n");
+		uobj_alloc_abort(uobj);
+		return -ENOMEM;
+	}
+
+	tjetty = ubcore_import_jetty_async(ubc_dev, &cfg, arg.in.timeout, cb,
+					   &udata);
+	if (IS_ERR_OR_NULL(tjetty)) {
+		uburma_log_err("ubcore_import_jetty_async failed.\n");
+		uburma_delete_import_callback(cb);
+		uobj_alloc_abort(uobj);
+		return PTR_ERR(tjetty);
+	}
+
+	arg.out.handle = (uint64_t)uobj->id;
+	ret = uburma_tlv_append(hdr, &arg);
+	if (ret != 0) {
+		ubcore_unimport_jetty_async(tjetty, 0, NULL);
+		uburma_delete_import_callback(cb);
+		uobj_alloc_abort(uobj);
+		return ret;
+	}
+	return 0;
+}
+
+static int uburma_cmd_unimport_jetty_async(struct ubcore_device *ubc_dev,
+					   struct uburma_file *file,
+					   struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_unimport_jetty_async arg;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	return uburma_unimport_jetty(file, true, arg.in.handle);
+}
+
+struct uburma_bind_jetty_async_user_arg {
+	struct uburma_notifier_uobj *notifier;
+	struct uburma_notify_event *notify;
+};
+
+static void uburma_cmd_bind_jetty_async_callback(struct ubcore_jetty *jetty,
+						 struct ubcore_tjetty *tjetty,
+						 int status, void *user_arg)
+{
+	struct uburma_bind_jetty_async_user_arg *arg = user_arg;
+	struct uburma_notifier_uobj *notifier = arg->notifier;
+	struct uburma_notify_event *notify_event = arg->notify;
+	struct uburma_notify *notify = &notify_event->notify;
+
+	notify->status = status;
+	if (status == 0 && tjetty->vtpn)
+		notify->vtpn = tjetty->vtpn->vtpn;
+	uburma_write_event_with_free_fn(&notifier->jfe,
+					(uint64_t)(uintptr_t)notify_event, 0,
+					NULL, NULL, uburma_free_notify_event);
+	kfree(user_arg);
+}
+
+static struct ubcore_bind_cb *uburma_create_bind_callback(
+	struct uburma_cmd_bind_jetty_async *arg, struct uburma_file *file,
+	struct uburma_uobj *uobj_tjetty, struct uburma_uobj *uobj_jetty)
+{
+	struct uburma_notifier_uobj *notifier;
+	struct uburma_notify_event *notify;
+	struct uburma_bind_jetty_async_user_arg *user_arg;
+	struct ubcore_bind_cb *cb;
+
+	notifier = uburma_get_notifier_uobj(arg->in.fd, file);
+	if (IS_ERR_OR_NULL(notifier)) {
+		uburma_log_err("failed to find notifier.\n");
+		return NULL;
+	}
+
+	notify = kzalloc(sizeof(struct uburma_notify_event), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(notify)) {
+		uburma_log_err("failed to alloc notify.\n");
+		goto put_notifier;
+	}
+	notify->notify.type = UBURMA_BIND_JETTY_NOTIFY;
+	notify->notify.user_ctx = arg->in.user_ctx;
+	notify->notify.urma_jetty = arg->in.urma_jetty;
+	notify->tjetty_handle = uobj_tjetty->id;
+	notify->jetty_handle = uobj_jetty->id;
+
+	user_arg = kzalloc(sizeof(struct uburma_bind_jetty_async_user_arg),
+			   GFP_KERNEL);
+	if (IS_ERR_OR_NULL(user_arg)) {
+		uburma_log_err("failed to alloc user arg.\n");
+		goto free_notify;
+	}
+	user_arg->notifier = notifier;
+	user_arg->notify = notify;
+
+	cb = kzalloc(sizeof(struct ubcore_bind_cb), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(cb)) {
+		uburma_log_err("failed to alloc bind callback.\n");
+		goto free_user_arg;
+	}
+	atomic_inc(&user_arg->notifier->incomplete_cnt);
+	cb->callback = uburma_cmd_bind_jetty_async_callback;
+	cb->user_arg = user_arg;
+	return cb;
+
+free_user_arg:
+	kfree(user_arg);
+free_notify:
+	kfree(notify);
+put_notifier:
+	uobj_put(&notifier->uobj);
+	return NULL;
+}
+
+static void uburma_delete_bind_callback(struct ubcore_bind_cb *cb)
+{
+	struct uburma_bind_jetty_async_user_arg *user_arg;
+
+	if (!cb)
+		return;
+	user_arg = cb->user_arg;
+	atomic_dec(&user_arg->notifier->incomplete_cnt);
+	uobj_put(&user_arg->notifier->uobj);
+	kfree(user_arg->notify);
+	kfree(user_arg);
+	kfree(cb);
+}
+
+static int uburma_cmd_bind_jetty_async(struct ubcore_device *ubc_dev,
+				       struct uburma_file *file,
+				       struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_tjetty_uobj *uburma_tjetty;
+	struct uburma_cmd_bind_jetty_async arg;
+	struct uburma_uobj *tjetty_uobj;
+	struct uburma_uobj *jetty_uobj;
+	struct ubcore_tjetty *tjetty;
+	struct ubcore_udata udata = {};
+	struct ubcore_bind_cb *cb;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	if (uburma_get_jetty_tjetty_objs(file, arg.in.jetty_handle,
+					 arg.in.tjetty_handle, &jetty_uobj,
+					 &tjetty_uobj))
+		return -EINVAL;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	cb = uburma_create_bind_callback(&arg, file, jetty_uobj, tjetty_uobj);
+	if (IS_ERR_OR_NULL(cb)) {
+		uburma_log_err("failed to find notifier.\n");
+		uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+		return -ENOMEM;
+	}
+
+	tjetty = (struct ubcore_tjetty *)tjetty_uobj->object;
+	ret = ubcore_bind_jetty_async(jetty_uobj->object, tjetty,
+				      arg.in.timeout, cb, &udata);
+	if (ret != 0) {
+		uburma_log_err("bind jetty async failed.\n");
+		uburma_delete_bind_callback(cb);
+		uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+		return ret;
+	}
+
+	uburma_tjetty = (struct uburma_tjetty_uobj *)(tjetty_uobj);
+	uburma_tjetty->jetty_uobj = (struct uburma_jetty_uobj *)(jetty_uobj);
+	ret = uburma_tlv_append(hdr, &arg);
+	if (ret != 0) {
+		ubcore_unbind_jetty_async(jetty_uobj->object, 0, NULL);
+		uburma_delete_bind_callback(cb);
+	}
+
+	uburma_put_jetty_tjetty_objs(jetty_uobj, tjetty_uobj);
+	return ret;
+}
+
+static int uburma_cmd_unbind_jetty_async(struct ubcore_device *ubc_dev,
+					 struct uburma_file *file,
+					 struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_unadvise_jetty arg;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	return uburma_unbind_jetty(file, true, arg.in.jetty_handle,
+				   arg.in.tjetty_handle);
+}
+
+static int uburma_cmd_create_notifier(struct ubcore_device *ubc_dev,
+				      struct uburma_file *file,
+				      struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_create_notifier arg;
+	struct uburma_notifier_uobj *notifier;
+	struct uburma_uobj *uobj;
+
+	uobj = uobj_alloc(UOBJ_CLASS_NOTIFIER, file);
+	if (IS_ERR_OR_NULL(uobj))
+		return PTR_ERR(uobj);
+
+	notifier = container_of(uobj, struct uburma_notifier_uobj, uobj);
+	uburma_init_jfe(&notifier->jfe);
+	atomic_set(&notifier->incomplete_cnt, 0);
+
+	arg.out.fd = uobj->id; /* should get fd before commit uobj */
+	uobj_alloc_commit(uobj);
+
+	return uburma_tlv_append(hdr, (void *)&arg);
+}
+
+static int uburma_cmd_get_tp_list(struct ubcore_device *ubc_dev,
+				  struct uburma_file *file,
+				  struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_get_tp_list *arg = NULL;
+	struct ubcore_tp_info *tp_list = NULL;
+	struct ubcore_get_tp_cfg cfg = { 0 };
+	struct ubcore_udata udata = { 0 };
+	uint32_t tp_cnt = 0;
+	int ret;
+
+	arg = kcalloc(1, sizeof(struct uburma_cmd_get_tp_list), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(arg))
+		return -ENOMEM;
+	ret = uburma_tlv_parse(hdr, arg);
+	if (ret != 0)
+		goto free_arg;
+
+	if (arg->in.tp_cnt > UBURMA_CMD_MAX_TP_NUM || arg->in.tp_cnt == 0) {
+		uburma_log_err("Invalid tp_cnt: %u.\n", arg->in.tp_cnt);
+		ret = -EINVAL;
+		goto free_arg;
+	}
+
+	cfg.flag.value = arg->in.flag;
+	cfg.trans_mode = arg->in.trans_mode;
+	(void)memcpy(&cfg.local_eid, arg->in.local_eid,
+		     sizeof(union ubcore_eid));
+	(void)memcpy(&cfg.peer_eid, arg->in.peer_eid, sizeof(union ubcore_eid));
+	tp_cnt = arg->in.tp_cnt;
+	fill_udata(&udata, file->ucontext, &arg->udata);
+
+	tp_list = kcalloc(tp_cnt, sizeof(struct ubcore_tp_info), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(tp_list)) {
+		ret = -ENOMEM;
+		goto free_arg;
+	}
+	ret = ubcore_get_tp_list(ubc_dev, &cfg, &tp_cnt, tp_list, &udata);
+	if (ret != 0) {
+		uburma_log_err("Failed to get tp list, ret: %d.\n", ret);
+		goto free_tp_list;
+	}
+	arg->out.tp_cnt = tp_cnt;
+	(void)memcpy(arg->out.tp_handle, tp_list,
+		     tp_cnt * sizeof(struct ubcore_tp_info));
+
+	ret = uburma_tlv_append(hdr, arg);
+free_tp_list:
+	kfree(tp_list);
+free_arg:
+	kfree(arg);
+	return ret;
+}
+
+static int uburma_cmd_exchange_tp_info(struct ubcore_device *ubc_dev,
+				       struct uburma_file *file,
+				       struct uburma_cmd_hdr *hdr)
+{
+	struct uburma_cmd_exchange_tp_info arg;
+	struct ubcore_get_tp_cfg get_tcp_cfg = {0};
+	struct ubcore_udata udata = {0};
+	uint64_t peer_tp_handle;
+	uint32_t rx_psn;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+	get_tcp_cfg = arg.in.get_tp_cfg;
+	ret = ubcore_exchange_tp_info(ubc_dev, &get_tcp_cfg, arg.in.tp_handle,
+		arg.in.tx_psn, &peer_tp_handle, &rx_psn, &udata);
+	if (ret != 0) {
+		uburma_log_err("Failed to exchange tp info, ret: %d.\n", ret);
+		return ret;
+	}
+	arg.out.peer_tp_handle = peer_tp_handle;
+	arg.out.rx_psn = rx_psn;
+
+	ret = uburma_tlv_append(hdr, &arg);
+	return ret;
+}
+
+static int uburma_cmd_import_jetty_ex(struct ubcore_device *ubc_dev,
+				      struct uburma_file *file,
+				      struct uburma_cmd_hdr *hdr)
+{
+	struct ubcore_active_tp_cfg active_tp_cfg = { 0 };
+	struct uburma_cmd_import_jetty_ex arg = { 0 };
+	struct ubcore_tjetty_cfg cfg = { 0 };
+	struct ubcore_udata udata = { 0 };
+	struct ubcore_tjetty *tjetty;
+	struct uburma_uobj *uobj;
+	int ret;
+
+	ret = uburma_tlv_parse(hdr, &arg);
+	if (ret != 0)
+		return ret;
+
+	uobj = uobj_alloc(UOBJ_CLASS_TARGET_JETTY, file);
+	if (IS_ERR(uobj)) {
+		uburma_log_err("Failed to alloc uobj, class_id: %d.\n",
+			       UOBJ_CLASS_TARGET_JETTY);
+		return -ENOMEM;
+	}
+
+	(void)memcpy(cfg.id.eid.raw, arg.in.eid, UBCORE_EID_SIZE);
+	cfg.id.id = arg.in.id;
+	cfg.token_value.token = arg.in.token;
+	cfg.trans_mode = (enum ubcore_transport_mode)arg.in.trans_mode;
+	cfg.flag.value = arg.in.flag;
+	cfg.policy = (enum ubcore_jetty_grp_policy)arg.in.policy;
+	cfg.type = (enum ubcore_target_type)arg.in.type;
+	cfg.eid_index = file->ucontext->eid_index;
+
+	active_tp_cfg.tp_handle.value = arg.in.tp_handle;
+	active_tp_cfg.peer_tp_handle.value = arg.in.peer_tp_handle;
+	active_tp_cfg.tag = arg.in.tag;
+	active_tp_cfg.tp_attr.tx_psn = arg.in.tx_psn;
+	active_tp_cfg.tp_attr.rx_psn = arg.in.rx_psn;
+	fill_udata(&udata, file->ucontext, &arg.udata);
+
+	tjetty = ubcore_import_jetty_ex(ubc_dev, &cfg, &active_tp_cfg, &udata);
+	if (IS_ERR_OR_NULL(tjetty)) {
+		uburma_log_err("ubcore_import_jetty failed.\n");
+		uobj_alloc_abort(uobj);
+		return PTR_ERR(tjetty);
+	}
+
+	uobj->object = tjetty;
+	arg.out.handle = (uint64_t)uobj->id;
+	if (tjetty->vtpn)
+		arg.out.tpn = tjetty->vtpn->vtpn;
+	else if (tjetty->tp)
+		arg.out.tpn = tjetty->tp->tpn;
+	else
+		arg.out.tpn = UBURMA_INVALID_TPN;
+
+	ret = uburma_tlv_append(hdr, &arg);
+	if (ret != 0) {
+		(void)ubcore_unimport_jetty(tjetty);
+		uobj_alloc_abort(uobj);
+		return ret;
+	}
+	uobj_alloc_commit(uobj);
+	return 0;
+}
+
 typedef int (*uburma_cmd_handler)(struct ubcore_device *ubc_dev,
 				  struct uburma_file *file,
 				  struct uburma_cmd_hdr *hdr);
@@ -1685,8 +3087,12 @@ typedef int (*uburma_cmd_handler)(struct ubcore_device *ubc_dev,
 static uburma_cmd_handler g_uburma_cmd_handlers[] = {
 	[0] = NULL,
 	[UBURMA_CMD_CREATE_CTX] = uburma_cmd_create_ctx,
+	[UBURMA_CMD_ALLOC_TOKEN_ID] = uburma_cmd_alloc_token_id,
+	[UBURMA_CMD_FREE_TOKEN_ID] = uburma_cmd_free_token_id,
 	[UBURMA_CMD_REGISTER_SEG] = uburma_cmd_register_seg,
 	[UBURMA_CMD_UNREGISTER_SEG] = uburma_cmd_unregister_seg,
+	[UBURMA_CMD_IMPORT_SEG] = uburma_cmd_import_seg,
+	[UBURMA_CMD_UNIMPORT_SEG] = uburma_cmd_unimport_seg,
 	[UBURMA_CMD_CREATE_JFR] = uburma_cmd_create_jfr,
 	[UBURMA_CMD_MODIFY_JFR] = uburma_cmd_modify_jfr,
 	[UBURMA_CMD_QUERY_JFR] = uburma_cmd_query_jfr,
@@ -1699,16 +3105,37 @@ static uburma_cmd_handler g_uburma_cmd_handlers[] = {
 	[UBURMA_CMD_MODIFY_JFC] = uburma_cmd_modify_jfc,
 	[UBURMA_CMD_DELETE_JFC] = uburma_cmd_delete_jfc,
 	[UBURMA_CMD_CREATE_JFCE] = uburma_cmd_create_jfce,
+	[UBURMA_CMD_IMPORT_JFR] = uburma_cmd_import_jfr,
+	[UBURMA_CMD_UNIMPORT_JFR] = uburma_cmd_unimport_jfr,
 	[UBURMA_CMD_CREATE_JETTY] = uburma_cmd_create_jetty,
 	[UBURMA_CMD_MODIFY_JETTY] = uburma_cmd_modify_jetty,
 	[UBURMA_CMD_QUERY_JETTY] = uburma_cmd_query_jetty,
 	[UBURMA_CMD_DELETE_JETTY] = uburma_cmd_delete_jetty,
+	[UBURMA_CMD_IMPORT_JETTY] = uburma_cmd_import_jetty,
+	[UBURMA_CMD_UNIMPORT_JETTY] = uburma_cmd_unimport_jetty,
+	[UBURMA_CMD_BIND_JETTY] = uburma_cmd_bind_jetty,
+	[UBURMA_CMD_UNBIND_JETTY] = uburma_cmd_unbind_jetty,
 	[UBURMA_CMD_CREATE_JETTY_GRP] = uburma_cmd_create_jetty_grp,
 	[UBURMA_CMD_DESTROY_JETTY_GRP] = uburma_cmd_delete_jetty_grp,
+	[UBURMA_CMD_USER_CTL] = uburma_cmd_user_ctl,
+	[UBURMA_CMD_GET_EID_LIST] = uburma_cmd_get_eid_list,
+	[UBURMA_CMD_GET_NETADDR_LIST] = uburma_cmd_get_net_addr_list,
+	[UBURMA_CMD_MODIFY_TP] = uburma_cmd_modify_tp,
+	[UBURMA_CMD_QUERY_DEV_ATTR] = uburma_cmd_query_device_attr,
+	[UBURMA_CMD_IMPORT_JETTY_ASYNC] = uburma_cmd_import_jetty_async,
+	[UBURMA_CMD_UNIMPORT_JETTY_ASYNC] = uburma_cmd_unimport_jetty_async,
+	[UBURMA_CMD_BIND_JETTY_ASYNC] = uburma_cmd_bind_jetty_async,
+	[UBURMA_CMD_UNBIND_JETTY_ASYNC] = uburma_cmd_unbind_jetty_async,
+	[UBURMA_CMD_CREATE_NOTIFIER] = uburma_cmd_create_notifier,
+	[UBURMA_CMD_GET_TP_LIST] = uburma_cmd_get_tp_list,
+	[UBURMA_CMD_IMPORT_JETTY_EX] = uburma_cmd_import_jetty_ex,
+	[UBURMA_CMD_IMPORT_JFR_EX] = uburma_cmd_import_jfr_ex,
+	[UBURMA_CMD_BIND_JETTY_EX] = uburma_cmd_bind_jetty_ex,
 	[UBURMA_CMD_DELETE_JFS_BATCH] = uburma_cmd_delete_jfs_batch,
 	[UBURMA_CMD_DELETE_JFR_BATCH] = uburma_cmd_delete_jfr_batch,
 	[UBURMA_CMD_DELETE_JFC_BATCH] = uburma_cmd_delete_jfc_batch,
 	[UBURMA_CMD_DELETE_JETTY_BATCH] = uburma_cmd_delete_jetty_batch,
+	[UBURMA_CMD_EXCHANGE_TP_INFO] = uburma_cmd_exchange_tp_info,
 };
 
 static int uburma_cmd_parse(struct ubcore_device *ubc_dev,
@@ -1726,7 +3153,9 @@ static int uburma_cmd_parse(struct ubcore_device *ubc_dev,
 
 static inline bool is_cmd_ucontext_free(struct uburma_cmd_hdr *hdr)
 {
-	return hdr->command == UBURMA_CMD_CREATE_CTX;
+	return (hdr->command == UBURMA_CMD_CREATE_CTX ||
+		hdr->command == UBURMA_CMD_GET_EID_LIST ||
+		hdr->command == UBURMA_CMD_QUERY_DEV_ATTR);
 }
 
 long uburma_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)

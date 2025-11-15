@@ -241,7 +241,7 @@ static int ubmad_ubc_eid_ops_inner(struct ubcore_device *dev,
 		break;
 	default:
 		ubcm_log_err("Invali event_type: %d.\n", event_type);
-		return -EINVAL;
+		ret = -EINVAL;
 	}
 	ubcm_log_info("Finish to handle new eid, ret: %d, event_type: %d.\n",
 		      ret, (int)event_type);

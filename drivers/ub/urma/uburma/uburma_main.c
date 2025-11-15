@@ -63,7 +63,13 @@ static struct class g_uburma_class = {
 
 static const struct file_operations g_uburma_fops = {
 	.owner = THIS_MODULE,
+	// .write	 = uburma_write,
+	.mmap = uburma_mmap,
+	.open = uburma_open,
+	.release = uburma_close,
 	.llseek = no_llseek,
+	.unlocked_ioctl = uburma_ioctl,
+	.compat_ioctl = uburma_ioctl,
 };
 
 static int uburma_add_device(struct ubcore_device *ubc_dev);

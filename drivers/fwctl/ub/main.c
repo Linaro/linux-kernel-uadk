@@ -147,6 +147,11 @@ static void *ubctl_fw_rpc(struct fwctl_uctx *uctx, enum fwctl_rpc_scope scope,
 
 	ubctl_dbg(ucdev, "cmdif: opcode 0x%x retval %d\n", opcode, ret);
 
+	if (ret) {
+		kvfree(rpc_out);
+		return ERR_PTR(ret);
+	}
+
 	return rpc_out;
 }
 

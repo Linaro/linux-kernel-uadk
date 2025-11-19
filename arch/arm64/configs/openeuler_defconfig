@@ -2156,7 +2156,7 @@ CONFIG_FW_UPLOAD=y
 # end of Firmware loader
 
 # fwctl
-CONFIG_FWCTL=y
+CONFIG_FWCTL=m
 
 CONFIG_WANT_DEV_COREDUMP=y
 # CONFIG_ALLOW_DEV_COREDUMP is not set

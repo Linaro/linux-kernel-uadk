@@ -15,3 +15,4 @@ KASAN_SANITIZE_physaddr.o	+= n
 
 obj-$(CONFIG_KASAN)		+= kasan_init.o
 KASAN_SANITIZE_kasan_init.o	:= n
+obj-$(CONFIG_PFN_RANGE_ALLOC)	+= pfn_range_alloc.o

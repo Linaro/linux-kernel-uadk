@@ -267,5 +267,14 @@ int main(void)
 	DEVID_FIELD(cdx_device_id, device);
 	DEVID_FIELD(cdx_device_id, override_only);
 
+	DEVID(ub_device_id);
+	DEVID_FIELD(ub_device_id, vendor);
+	DEVID_FIELD(ub_device_id, device);
+	DEVID_FIELD(ub_device_id, mod_vendor);
+	DEVID_FIELD(ub_device_id, module);
+	DEVID_FIELD(ub_device_id, class_code);
+	DEVID_FIELD(ub_device_id, class_mask);
+	DEVID_FIELD(ub_device_id, override_only);
+
 	return 0;
 }

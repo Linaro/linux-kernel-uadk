@@ -24,3 +24,13 @@ config HNS3_PMU
 	  devices.
 	  Adds the HNS3 PMU into perf events system for monitoring latency,
 	  bandwidth etc.
+
+config UB_UMMU_PMU
+	tristate "HiSilicon UMMU PMU Support"
+	depends on ARM64
+	default n
+	help
+	  Provide support for hisilicon UMMU performance monitoring unit (PMU)
+	  devices.
+	  Adds the UMMU PMU into perf events system for cache hit rate, latency,
+	  package rate etc.

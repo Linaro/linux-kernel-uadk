@@ -38,6 +38,9 @@ static inline unsigned int hugetlb_vmemmap_optimizable_size(const struct hstate 
 		return 0;
 	return size > 0 ? size : 0;
 }
+
+int fake_online_pages_vmemmap_restore(struct page *head, unsigned long nr_pages);
+void fake_online_pages_vmemmap_optimize(struct page *head, unsigned long nr_pages);
 #else
 static inline int hugetlb_vmemmap_restore(const struct hstate *h, struct page *head)
 {
@@ -51,6 +54,15 @@ static inline void hugetlb_vmemmap_optimize(const struct hstate *h, struct page 
 static inline unsigned int hugetlb_vmemmap_optimizable_size(const struct hstate *h)
 {
 	return 0;
+}
+
+static inline int fake_online_pages_vmemmap_restore(struct page *head, unsigned long nr_pages)
+{
+	return 0;
+}
+
+static inline void fake_online_pages_vmemmap_optimize(struct page *head, unsigned long nr_pages)
+{
 }
 #endif /* CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP */
 

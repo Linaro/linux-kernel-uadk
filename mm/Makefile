@@ -146,6 +146,7 @@ obj-$(CONFIG_ETMEM) += etmem.o
 obj-$(CONFIG_PAGE_CACHE_LIMIT) += page_cache_limit.o
 obj-$(CONFIG_CLEAR_FREELIST_PAGE) += clear_freelist_page.o
 obj-$(CONFIG_MEMORY_RELIABLE) += mem_reliable.o
+obj-$(CONFIG_RECLAIM_NOTIFY)	+= reclaim_notify.o
 obj-$(CONFIG_DYNAMIC_POOL)	+= dynamic_pool.o
 obj-$(CONFIG_MEM_SAMPLING) += mem_sampling.o
 obj-$(CONFIG_THP_CONTROL) += thp_ctl.o

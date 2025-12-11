@@ -57,6 +57,7 @@
 
 static int sysctl_panic_on_oom;
 static int sysctl_oom_kill_allocating_task;
+int sysctl_oom_kill_cpuless_numa_allocating_task;
 static int sysctl_oom_dump_tasks = 1;
 static int sysctl_enable_oom_killer = 1;
 
@@ -779,6 +780,13 @@ static struct ctl_table vm_oom_kill_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
+		.procname	= "oom_kill_cpuless_numa_allocating_task",
+		.data		= &sysctl_oom_kill_cpuless_numa_allocating_task,
+		.maxlen		= sizeof(sysctl_oom_kill_cpuless_numa_allocating_task),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
 		.procname	= "oom_dump_tasks",
 		.data		= &sysctl_oom_dump_tasks,
 		.maxlen		= sizeof(sysctl_oom_dump_tasks),
@@ -1207,6 +1215,23 @@ int oom_type_notifier_call(unsigned int type, struct oom_control *oc)
 EXPORT_SYMBOL_GPL(oom_type_notifier_call);
 #endif
 
+static bool should_oom_kill_allocating_task(struct oom_control *oc)
+{
+	if (sysctl_oom_kill_allocating_task)
+		return true;
+
+	if (!oc->nodemask)
+		return false;
+
+	if (!sysctl_oom_kill_cpuless_numa_allocating_task)
+		return false;
+
+	if (nodes_intersects(*oc->nodemask, node_states[N_CPU]))
+		return false;
+
+	return true;
+}
+
 /**
  * out_of_memory - kill the "best" process when we run out of memory
  * @oc: pointer to struct oom_control
@@ -1263,7 +1288,7 @@ bool out_of_memory(struct oom_control *oc)
 		oc->nodemask = NULL;
 	check_panic_on_oom(oc);
 
-	if (!is_memcg_oom(oc) && sysctl_oom_kill_allocating_task &&
+	if (!is_memcg_oom(oc) && should_oom_kill_allocating_task(oc) &&
 	    current->mm && !oom_unkillable_task(current) &&
 	    oom_cpuset_eligible(current, oc) &&
 	    current->signal->oom_score_adj != OOM_SCORE_ADJ_MIN) {

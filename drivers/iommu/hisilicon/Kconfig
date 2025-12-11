@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# Hisilicon UMMU support
+#
+
+source "drivers/iommu/hisilicon/ummu-core/Kconfig"
+
+config UB_UMMU
+	tristate "Hisilicon UB MMU Support"
+	depends on ARM64 && ARCH_HISI
+	depends on UB_UBUS && UB_UBFI && UB_UBRT_PLAT_DEV
+	default n
+	select IOMMU_API
+	select IOMMU_IO_PGTABLE_LPAE
+	select GENERIC_MSI_IRQ
+	select IOMMUFD_DRIVER if IOMMUFD
+	select UMMU_CORE
+	help
+	  Support for implementations of the hisilicon UMMU architecture.
+	  UMMU provides address translation for device access to the
+	  local host.
+	  Say Y here if your Soc includes an UMMU device implementing
+	  the Hisilicon UMMU architecture.
+
+config UB_UMMU_SVA
+	bool "Support for Shared Virtual Addressing with UMMU"
+	depends on UB_UMMU
+	select IOMMU_SVA
+	select IOMMU_KSVA
+	select IOMMU_IOPF
+	select MMU_NOTIFIER
+	default n
+	help
+	  Support for sharing process address spaces with devices using
+	  the UMMU. And ummu provides access permission verification for
+	  process address spaces.
+	  Say Y here if your system supports SVA.
+
+config UB_UBMEM_UMMU
+	bool "Support UB memory's UMMU"
+	depends on UB_UMMU
+	default n
+	help
+	  Support the special UMMU for the address resolution of UB memory.
+	  This is a private implementation. User must check the hareware
+	  version.
+	  If you need them say Y here.
+
+config UB_UMMU_BYPASSDEV
+	bool "Support UMMU to bypass device in S1"
+	depends on UB_UMMU_BASE
+	default n
+	help
+	  Support UMMU to bypass device. You need to add the parameter,
+	  e.g."ummu.bypassdev=xxx(vendor):xxx(device)", to bypass a
+	  certain type of device while starting OS. Subsequently, the device
+	  will be bypassed, meaning IOVA = HPA(S1-only)/GPA(S1+S2).
+	  If you need them say Y here.

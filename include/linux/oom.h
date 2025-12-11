@@ -56,6 +56,7 @@ struct oom_control {
 
 extern struct mutex oom_lock;
 extern struct mutex oom_adj_mutex;
+extern int sysctl_oom_kill_cpuless_numa_allocating_task;
 
 static inline void set_current_oom_origin(void)
 {

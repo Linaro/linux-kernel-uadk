@@ -417,15 +417,30 @@ struct iommu_hwpt_arm_smmuv3 {
 };
 
 /**
+ * struct iommu_hwpt_ummu - Hisilicon Taget Entity Configuration Table info
+ *                          (IOMMU_HWPT_DATA_UMMU)
+ * @tecte: The first two double words of the user space Taget Entity
+ *         Configuration Entry for a user Taget Context Table.
+ *         Allowed fields:
+ *         --word0: V, TCRC_SEL, SECURE_SEL
+ *         --word1: TCT_MAXNUM, TCT_PTR, TCT_FMT
+ */
+struct iommu_hwpt_ummu {
+	__aligned_le64 tecte[2];
+};
+
+/**
  * enum iommu_hwpt_data_type - IOMMU HWPT Data Type
  * @IOMMU_HWPT_DATA_NONE: no data
  * @IOMMU_HWPT_DATA_VTD_S1: Intel VT-d stage-1 page table
  * @IOMMU_HWPT_DATA_ARM_SMMUV3: ARM SMMUv3 Context Descriptor Table
+ * @IOMMU_HWPT_DATA_UMMU: Hisilicon UMMU Taget Context Table
  */
 enum iommu_hwpt_data_type {
 	IOMMU_HWPT_DATA_NONE = 0,
 	IOMMU_HWPT_DATA_VTD_S1 = 1,
 	IOMMU_HWPT_DATA_ARM_SMMUV3 = 2,
+	IOMMU_HWPT_DATA_UMMU = 3,
 };
 
 /**
@@ -544,16 +559,37 @@ struct iommu_hw_info_arm_smmuv3 {
 };
 
 /**
+ * struct iommu_hw_info_ummu - Hisilicon UMMU hardware information
+ *                             (IOMMU_HW_INFO_TYPE_UMMU)
+ *
+ * @flags: Must be set to 0
+ * @__reserved: Must be 0
+ * @iidr: Hisilicon UMMU supports different product versions
+ * @aidr: Hisilicon UMMU architecture version
+ *
+ * User space should read the underlying Hisilicon UMMU hardware information for
+ * the list of supported features.
+ */
+struct iommu_hw_info_ummu {
+	__u32 flags;
+	__u32 __reserved;
+	__u32 iidr;
+	__u32 aidr;
+};
+
+/**
  * enum iommu_hw_info_type - IOMMU Hardware Info Types
  * @IOMMU_HW_INFO_TYPE_NONE: Used by the drivers that do not report hardware
  *                           info
  * @IOMMU_HW_INFO_TYPE_INTEL_VTD: Intel VT-d iommu info type
  * @IOMMU_HW_INFO_TYPE_ARM_SMMUV3: ARM SMMUv3 iommu info type
+ * @IOMMU_HW_INFO_TYPE_UMMU: Hisilicon UMMU iommu info type
  */
 enum iommu_hw_info_type {
 	IOMMU_HW_INFO_TYPE_NONE = 0,
 	IOMMU_HW_INFO_TYPE_INTEL_VTD = 1,
 	IOMMU_HW_INFO_TYPE_ARM_SMMUV3 = 2,
+	IOMMU_HW_INFO_TYPE_UMMU = 3,
 };
 
 /**

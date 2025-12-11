@@ -103,6 +103,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/printk.h>
 #include <linux/swapops.h>
+#include <linux/numa_remote.h>
 
 #include <asm/tlbflush.h>
 #include <asm/tlb.h>
@@ -2062,6 +2063,17 @@ static int policy_node(gfp_t gfp, struct mempolicy *policy, int nd)
 	     policy->mode == MPOL_PREFERRED_MANY) &&
 	    policy->home_node != NUMA_NO_NODE)
 		return policy->home_node;
+
+	/*
+	 * In nofallback mode, the remote node is not in zonelists,
+	 * set remote node as preferred_nid or it will be skipped.
+	 * MPOL_PREFERRED_MANY is not supported, becase at least
+	 * one remote node that will be skipped.
+	 */
+	if (policy->mode == MPOL_BIND) {
+		if (numa_remote_nofallback(first_node(policy->nodes)))
+			return first_node(policy->nodes);
+	}
 
 	return nd;
 }

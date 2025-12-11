@@ -473,6 +473,21 @@ static void smc_check_reset_syn_req(const struct tcp_sock *oldtp,
 #endif
 }
 
+static void ums_check_reset_syn_req(const struct tcp_sock *oldtp,
+				    struct request_sock *req,
+				    struct tcp_sock *newtp)
+{
+#if IS_ENABLED(CONFIG_UB_UMS)
+	struct inet_request_sock *ireq;
+
+	if (static_branch_unlikely(&tcp_have_ums)) {
+		ireq = inet_rsk(req);
+		if (oldtp->syn_ums && !ireq->ums_ok)
+			newtp->syn_ums = 0;
+	}
+#endif
+}
+
 /* This is not only more efficient than what we used to do, it eliminates
  * a lot of code duplication between IPv4/IPv6 SYN recv processing. -DaveM
  *
@@ -499,6 +514,8 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 	oldtp = tcp_sk(sk);
 
 	smc_check_reset_syn_req(oldtp, req, newtp);
+
+	ums_check_reset_syn_req(oldtp, req, newtp);
 
 	/* Now setup tcp_sock */
 	newtp->pred_flags = 0;

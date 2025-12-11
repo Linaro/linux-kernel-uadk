@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# UnifiedBus configuration
+#
+
+menuconfig UB
+       bool "UB (UnifiedBus) support"
+       depends on ARM64
+       default n
+       help
+         Support for UB.
+         If you have a hardware that support UB protocol,
+         Say y here. By Default this option is closed.
+
+if UB
+source "drivers/ub/ubus/Kconfig"
+source "drivers/ub/ubfi/Kconfig"
+source "drivers/ub/ubase/Kconfig"
+source "drivers/ub/cdma/Kconfig"
+source "drivers/ub/urma/hw/udma/Kconfig"
+
+config UB_URMA
+	tristate "Unified Bus (UB) urma support"
+	default m
+	help
+	  Unified remote memory access(URMA) support. This
+	  is the kernel side of the userspace urma support, which allows
+	  userspace processes to send and receive urma cmd. You will also
+	  need liburma from umdk
+
+endif # UB

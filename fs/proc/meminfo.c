@@ -19,6 +19,7 @@
 #endif
 #include <linux/zswap.h>
 #include <linux/dynamic_pool.h>
+#include <linux/numa_remote.h>
 #include <asm/page.h>
 #include "internal.h"
 
@@ -172,6 +173,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	reliable_report_meminfo(m);
 
 	dynamic_pool_show_meminfo(m);
+
+	numa_remote_report_meminfo(m);
 
 	return 0;
 }

@@ -35,6 +35,7 @@
 #include <linux/compaction.h>
 #include <linux/rmap.h>
 #include <linux/module.h>
+#include <linux/numa_remote.h>
 
 #include <asm/tlbflush.h>
 
@@ -1055,6 +1056,11 @@ struct zone *zone_for_pfn_range(int online_type, int nid,
 	if (online_type == MMOP_ONLINE_MOVABLE)
 		return &NODE_DATA(nid)->node_zones[ZONE_MOVABLE];
 
+#ifdef CONFIG_ZONE_EXTMEM
+	if (online_type == MMOP_ONLINE_EXTMEM)
+		return &NODE_DATA(nid)->node_zones[ZONE_EXTMEM];
+#endif
+
 	if (online_policy == ONLINE_POLICY_AUTO_MOVABLE)
 		return auto_movable_zone_for_pfn(nid, group, start_pfn, nr_pages);
 
@@ -1297,7 +1303,7 @@ int try_online_node(int nid)
 	return ret;
 }
 
-static int check_hotplug_memory_range(u64 start, u64 size)
+int check_hotplug_memory_range(u64 start, u64 size)
 {
 	/* memory range must be block size aligned */
 	if (!size || !IS_ALIGNED(start, memory_block_size_bytes()) ||
@@ -1312,7 +1318,17 @@ static int check_hotplug_memory_range(u64 start, u64 size)
 
 static int online_memory_block(struct memory_block *mem, void *arg)
 {
+#ifdef CONFIG_ZONE_EXTMEM
+	int nid = *(int *)arg;
+
+	if (numa_is_remote_node(nid))
+		mem->online_type = MMOP_ONLINE_EXTMEM;
+	else
+		mem->online_type = mhp_default_online_type;
+#else
 	mem->online_type = mhp_default_online_type;
+#endif
+
 	return device_online(&mem->dev);
 }
 
@@ -1480,6 +1496,9 @@ int __ref add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags)
 					  PFN_UP(start + size - 1),
 					  MEMINIT_HOTPLUG);
 
+	if (mhp_flags & MHP_PREONLINE)
+		set_memory_block_pre_online(start, size, true);
+
 	/* create new memmap entry */
 	if (!strcmp(res->name, "System RAM"))
 		firmware_map_add_hotplug(start, start + size, "System RAM");
@@ -1495,8 +1514,9 @@ int __ref add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags)
 		merge_system_ram_resource(res);
 
 	/* online pages if requested */
-	if (mhp_default_online_type != MMOP_OFFLINE)
-		walk_memory_blocks(start, size, NULL, online_memory_block);
+	if (mhp_default_online_type != MMOP_OFFLINE ||
+	    numa_is_remote_node(nid))
+		walk_memory_blocks(start, size, &nid, online_memory_block);
 
 	return ret;
 error_free:
@@ -1513,9 +1533,15 @@ error_mem_hotplug_end:
 int __ref __add_memory(int nid, u64 start, u64 size, mhp_t mhp_flags)
 {
 	struct resource *res;
+	char *resource_name;
 	int ret;
 
-	res = register_memory_resource(start, size, "System RAM");
+	if (numa_is_remote_node(nid))
+		resource_name = "System RAM (Remote)";
+	else
+		resource_name = "System RAM";
+
+	res = register_memory_resource(start, size, resource_name);
 	if (IS_ERR(res))
 		return PTR_ERR(res);
 
@@ -1836,13 +1862,16 @@ static void node_states_check_changes_offline(unsigned long nr_pages,
 	/*
 	 * We have accounted the pages from [0..ZONE_NORMAL); ZONE_HIGHMEM
 	 * does not apply as we don't support 32bit.
-	 * Here we count the possible pages from ZONE_MOVABLE.
+	 * Here we count the possible pages from ZONE_MOVABLE and ZONE_EXTMEM.
 	 * If after having accounted all the pages, we see that the nr_pages
 	 * to be offlined is over or equal to the accounted pages,
 	 * we know that the node will become empty, and so, we can clear
 	 * it for N_MEMORY as well.
 	 */
 	present_pages += pgdat->node_zones[ZONE_MOVABLE].present_pages;
+#ifdef CONFIG_ZONE_EXTMEM
+	present_pages += pgdat->node_zones[ZONE_EXTMEM].present_pages;
+#endif
 
 	if (nr_pages >= present_pages)
 		arg->status_change_nid = zone_to_nid(zone);
@@ -2277,6 +2306,11 @@ static int try_offline_memory_block(struct memory_block *mem, void *arg)
 	page = pfn_to_online_page(section_nr_to_pfn(mem->start_section_nr));
 	if (page && zone_idx(page_zone(page)) == ZONE_MOVABLE)
 		online_type = MMOP_ONLINE_MOVABLE;
+
+#ifdef CONFIG_ZONE_EXTMEM
+	if (page && is_zone_extmem_page(page))
+		online_type = MMOP_ONLINE_EXTMEM;
+#endif
 
 	rc = device_offline(&mem->dev);
 	/*

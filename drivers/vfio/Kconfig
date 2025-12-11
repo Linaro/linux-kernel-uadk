@@ -91,6 +91,7 @@ config VFIO_DEBUGFS
 	  entries as required.
 
 source "drivers/vfio/pci/Kconfig"
+source "drivers/vfio/ubus/Kconfig"
 source "drivers/vfio/platform/Kconfig"
 source "drivers/vfio/mdev/Kconfig"
 source "drivers/vfio/fsl-mc/Kconfig"

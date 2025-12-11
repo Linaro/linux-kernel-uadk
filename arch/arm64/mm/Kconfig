@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# MEMORY configuration for arm64
+#
+
+config PFN_RANGE_ALLOC
+	bool "Enable contiguous pfn range allocator"
+	default n
+	select CONTIG_ALLOC
+	depends on MEMORY_HOTPLUG
+	help
+		It allows to allocate contiguous memory from special pfn range,
+		the linear mapping granule of this range is never larger than PMD.
+
+		If unsure, say N.

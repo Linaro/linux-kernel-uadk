@@ -544,6 +544,124 @@ TRACE_EVENT(mm_mem_sampling_damon_record,
 	TP_printk("vaddr=%llx pid=%d", __entry->vaddr, __entry->pid)
 );
 #endif /* CONFIG_DAMON_MEM_SAMPLING */
+
+#ifdef CONFIG_PFN_RANGE_ALLOC
+TRACE_EVENT(pfn_range_alloc,
+
+	TP_PROTO(struct folio *folio, unsigned int nr_pages,
+			int nid),
+
+	TP_ARGS(folio, nr_pages, nid),
+
+	TP_STRUCT__entry(
+		__field(struct folio*, folio)
+		__field(unsigned int, nr_pages)
+		__field(int, nid)
+	),
+
+	TP_fast_assign(
+		__entry->folio = folio;
+		__entry->nr_pages = nr_pages;
+		__entry->nid = nid;
+	),
+
+	TP_printk("folio=%p pfn=0x%lx err=%ld nr_pages=%u nid=%d",
+		!IS_ERR(__entry->folio) ? __entry->folio : NULL,
+		!IS_ERR(__entry->folio) ? folio_pfn(__entry->folio) : 0,
+		!IS_ERR(__entry->folio) ? 0 : PTR_ERR(__entry->folio),
+		__entry->nr_pages,
+		__entry->nid)
+);
+
+TRACE_EVENT(pfn_range_free,
+
+	TP_PROTO(struct folio *folio, int ret),
+
+	TP_ARGS(folio, ret),
+
+	TP_STRUCT__entry(
+		__field(struct folio*, folio)
+		__field(int, ret)
+	),
+
+	TP_fast_assign(
+		__entry->folio = folio;
+		__entry->ret = ret;
+	),
+
+	TP_printk("folio=%p pfn=0x%lx ret=%d",
+		__entry->folio, folio_pfn(__entry->folio), __entry->ret)
+);
+
+TRACE_EVENT(hugetlb_pool_alloc,
+
+	TP_PROTO(struct folio *folio, int nid),
+
+	TP_ARGS(folio, nid),
+
+	TP_STRUCT__entry(
+		__field(struct folio*, folio)
+		__field(int, nid)
+	),
+
+	TP_fast_assign(
+		__entry->folio = folio;
+		__entry->nid = nid;
+	),
+
+	TP_printk("folio=%p pfn=0x%lx err=%ld nid=%d",
+		!IS_ERR(__entry->folio) ? __entry->folio : NULL,
+		!IS_ERR(__entry->folio) ? folio_pfn(__entry->folio) : 0,
+		!IS_ERR(__entry->folio) ? 0 : PTR_ERR(__entry->folio),
+		__entry->nid)
+);
+
+TRACE_EVENT(hugetlb_pool_free,
+
+	TP_PROTO(struct folio *folio, int ret),
+
+	TP_ARGS(folio, ret),
+
+	TP_STRUCT__entry(
+		__field(struct folio*, folio)
+		__field(int, ret)
+	),
+
+	TP_fast_assign(
+		__entry->folio = folio;
+		__entry->ret = ret;
+	),
+
+	TP_printk("folio=%p pfn=0x%lx ret=%d",
+		__entry->folio, folio_pfn(__entry->folio), __entry->ret)
+);
+
+TRACE_EVENT(hugetlb_pool_alloc_size,
+
+	TP_PROTO(struct folio *folio, int nid, unsigned long size),
+
+	TP_ARGS(folio, nid, size),
+
+	TP_STRUCT__entry(
+		__field(struct folio*, folio)
+		__field(int, nid)
+		__field(unsigned long, size)
+	),
+
+	TP_fast_assign(
+		__entry->folio = folio;
+		__entry->nid = nid;
+		__entry->size = size;
+	),
+
+	TP_printk("folio=%p pfn=0x%lx err=%ld nid=%d size=0x%lx",
+		!IS_ERR(__entry->folio) ? __entry->folio : NULL,
+		!IS_ERR(__entry->folio) ? folio_pfn(__entry->folio) : 0,
+		!IS_ERR(__entry->folio) ? 0 : PTR_ERR(__entry->folio),
+		__entry->nid, __entry->size)
+);
+
+#endif
 #endif /* _TRACE_KMEM_H */
 
 /* This part must be outside protection */

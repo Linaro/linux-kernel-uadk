@@ -8641,6 +8641,17 @@ F:	kernel/futex/*
 F:	tools/perf/bench/futex*
 F:	tools/testing/selftests/futex/
 
+FWCTL SUBSYSTEM
+M:     Dave Jiang <dave.jiang@intel.com>
+M:     Jason Gunthorpe <jgg@nvidia.com>
+M:     Saeed Mahameed <saeedm@nvidia.com>
+R:     Jonathan Cameron <Jonathan.Cameron@huawei.com>
+S:     Maintained
+F:     Documentation/userspace-api/fwctl/
+F:     drivers/fwctl/
+F:     include/linux/fwctl.h
+F:     include/uapi/fwctl/
+
 GATEWORKS SYSTEM CONTROLLER (GSC) DRIVER
 M:	Tim Harvey <tharvey@gateworks.com>
 S:	Maintained

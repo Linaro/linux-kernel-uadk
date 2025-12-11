@@ -632,6 +632,11 @@ void __init mem_init(void)
 		pswiotlb_init(1, PSWIOTLB_VERBOSE);
 #endif
 
+	/* Must be placed before buddy is initialized, to avoid reserved
+	 * memory is reserved by memblock.
+	 */
+	pmd_mapping_reserve_and_remap();
+
 	/* this will put all unused low memory onto the freelists */
 	memblock_free_all();
 

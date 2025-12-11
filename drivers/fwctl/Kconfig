@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menuconfig FWCTL
+	tristate "fwctl device firmware access framework"
+	help
+	  fwctl provides a userspace API for restricted access to communicate
+	  with on-device firmware. The communication channel is intended to
+	  support a wide range of lockdown compatible device behaviors including
+	  manipulating device FLASH, debugging, and other activities that don't
+	  fit neatly into an existing subsystem.
+
+if FWCTL
+config FWCTL_UB
+	tristate "ub_fwctl depend on fwctl driver"
+	depends on UB_UBASE
+	default n
+	help
+	  ub_fwctl provides users with various information related to
+	  querying UB (UnifiedBus) registers or devices.
+
+	  If you don't know what to do here, say N.
+endif

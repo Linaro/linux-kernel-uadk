@@ -225,6 +225,7 @@ struct vfio_device_info {
 #define VFIO_DEVICE_FLAGS_FSL_MC (1 << 6)	/* vfio-fsl-mc device */
 #define VFIO_DEVICE_FLAGS_CAPS	(1 << 7)	/* Info supports caps */
 #define VFIO_DEVICE_FLAGS_CDX	(1 << 8)	/* vfio-cdx device */
+#define VFIO_DEVICE_FLAGS_UB	(1 << 9)	/* vfio-ub device */
 #define VFIO_DEVICE_FLAGS_SECURE (1 << 15)	/* vfio-secure device */
 	__u32	num_regions;	/* Max region index + 1 */
 	__u32	num_irqs;	/* Max IRQ index + 1 */
@@ -657,6 +658,22 @@ enum {
 	VFIO_PCI_ERR_IRQ_INDEX,
 	VFIO_PCI_REQ_IRQ_INDEX,
 	VFIO_PCI_NUM_IRQS
+};
+
+/* UB irq types */
+enum {
+	VFIO_UB_INTR_IRQ_INDEX,
+	VFIO_UB_REQ_IRQ_INDEX,
+	VFIO_UB_NUM_IRQS
+};
+
+/* UB regions types */
+enum {
+	VFIO_UB_REGION0_INDEX = 0,
+	VFIO_UB_REGION1_INDEX,
+	VFIO_UB_REGION2_INDEX,
+	VFIO_UB_CONFIG_REGION_INDEX,
+	VFIO_UB_NUM_REGIONS
 };
 
 /*

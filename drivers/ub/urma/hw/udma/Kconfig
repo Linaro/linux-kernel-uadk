@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0+
+# Copyright(c) 2025 HiSilicon Technologies CO., Ltd. All rights reserved.
+
+menuconfig UB_UDMA
+	default n
+	tristate "UB UDMA Driver"
+	depends on UB_UBASE && UB_URMA && UB_UMMU_CORE
+	help
+	  UDMA driver support for Hisilicon UBUS engine
+	  in Hisilicon SoC. To compile this driver,
+	  choose Y here: if UB_UDMA is m, this module
+	  will be called udma.

@@ -83,6 +83,9 @@ struct memory_block {
 #if defined(CONFIG_MEMORY_FAILURE) && defined(CONFIG_MEMORY_HOTPLUG)
 	atomic_long_t nr_hwpoison;
 #endif
+#ifdef CONFIG_NUMA_REMOTE
+	bool pre_online;
+#endif
 };
 
 int arch_get_memory_phys_device(unsigned long start_pfn);
@@ -146,6 +149,26 @@ int create_memory_block_devices(unsigned long start, unsigned long size,
 				struct vmem_altmap *altmap,
 				struct memory_group *group);
 void remove_memory_block_devices(unsigned long start, unsigned long size);
+#ifdef CONFIG_NUMA_REMOTE
+bool check_memory_block_nid(unsigned long start, unsigned long size, int nid);
+bool check_memory_block_pre_online(unsigned long start, unsigned long size,
+				   bool pre_online);
+void set_memory_block_pre_online(unsigned long start, unsigned long size,
+				   bool pre_online);
+static inline bool memory_block_is_pre_online(struct memory_block *mem)
+{
+	return mem->pre_online;
+}
+#else
+static inline void set_memory_block_pre_online(unsigned long start, unsigned long size,
+				   bool pre_online)
+{
+}
+static inline bool memory_block_is_pre_online(struct memory_block *mem)
+{
+	return false;
+}
+#endif
 extern void memory_dev_init(void);
 extern int memory_notify(unsigned long val, void *v);
 extern struct memory_block *find_memory_block(unsigned long section_nr);

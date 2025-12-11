@@ -429,6 +429,7 @@ static inline bool tcp_urg_mode(const struct tcp_sock *tp)
 #define OPTION_SMC		BIT(9)
 #define OPTION_MPTCP		BIT(10)
 #define OPTION_COMP		BIT(11)
+#define OPTION_UMS		BIT(12)
 
 static void smc_options_write(__be32 *ptr, u16 *options)
 {
@@ -453,6 +454,21 @@ static void comp_options_write(__be32 *ptr, u16 *options)
 			*ptr++ = htonl((TCPOPT_EXP  << 24) |
 				       (TCPOLEN_EXP_COMP_BASE  << 16) |
 				       (TCPOPT_COMP_MAGIC));
+		}
+	}
+#endif
+}
+
+static void ums_options_write(__be32 *ptr, u16 *options)
+{
+#if IS_ENABLED(CONFIG_UB_UMS)
+	if (static_branch_unlikely(&tcp_have_ums)) {
+		if (unlikely(OPTION_UMS & *options)) {
+			*ptr++ = htonl((TCPOPT_NOP  << 24) |
+				       (TCPOPT_NOP  << 16) |
+				       (TCPOPT_EXP <<  8) |
+				       (TCPOLEN_EXP_UMS_BASE));
+			*ptr++ = htonl(TCPOPT_UMS_MAGIC);
 		}
 	}
 #endif
@@ -733,6 +749,8 @@ static void tcp_options_write(struct tcphdr *th, struct tcp_sock *tp,
 	mptcp_options_write(th, ptr, tp, opts);
 
 	comp_options_write(ptr, &options);
+
+	ums_options_write(ptr, &options);
 }
 
 static void smc_set_option(const struct tcp_sock *tp,
@@ -767,6 +785,22 @@ static void comp_set_option(struct sock *sk,
 #endif
 }
 
+static void ums_set_option(const struct tcp_sock *tp,
+			   struct tcp_out_options *opts,
+			   unsigned int *remaining)
+{
+#if IS_ENABLED(CONFIG_UB_UMS)
+	if (static_branch_unlikely(&tcp_have_ums)) {
+		if (tp->syn_ums) {
+			if (*remaining >= TCPOLEN_EXP_UMS_BASE_ALIGNED) {
+				opts->options |= OPTION_UMS;
+				*remaining -= TCPOLEN_EXP_UMS_BASE_ALIGNED;
+			}
+		}
+	}
+#endif
+}
+
 static void comp_set_option_cond(struct sock *sk,
 				 const struct inet_request_sock *ireq,
 				 struct tcp_out_options *opts,
@@ -795,6 +829,23 @@ static void smc_set_option_cond(const struct tcp_sock *tp,
 			if (*remaining >= TCPOLEN_EXP_SMC_BASE_ALIGNED) {
 				opts->options |= OPTION_SMC;
 				*remaining -= TCPOLEN_EXP_SMC_BASE_ALIGNED;
+			}
+		}
+	}
+#endif
+}
+
+static void ums_set_option_cond(const struct tcp_sock *tp,
+				const struct inet_request_sock *ireq,
+				struct tcp_out_options *opts,
+				unsigned int *remaining)
+{
+#if IS_ENABLED(CONFIG_UB_UMS)
+	if (static_branch_unlikely(&tcp_have_ums)) {
+		if (tp->syn_ums && ireq->ums_ok) {
+			if (*remaining >= TCPOLEN_EXP_UMS_BASE_ALIGNED) {
+				opts->options |= OPTION_UMS;
+				*remaining -= TCPOLEN_EXP_UMS_BASE_ALIGNED;
 			}
 		}
 	}
@@ -886,6 +937,7 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 
 	smc_set_option(tp, opts, &remaining);
 	comp_set_option(sk, opts, &remaining);
+	ums_set_option(tp, opts, &remaining);
 
 	if (sk_is_mptcp(sk)) {
 		unsigned int size;
@@ -969,6 +1021,8 @@ static unsigned int tcp_synack_options(const struct sock *sk,
 	smc_set_option_cond(tcp_sk(sk), ireq, opts, &remaining);
 
 	comp_set_option_cond((struct sock *)sk, ireq, opts, &remaining);
+
+	ums_set_option_cond(tcp_sk(sk), ireq, opts, &remaining);
 
 	bpf_skops_hdr_opt_len((struct sock *)sk, skb, req, syn_skb,
 			      synack_type, opts, &remaining);

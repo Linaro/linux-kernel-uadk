@@ -175,6 +175,17 @@ config HMEM_REPORTING
 	  Enable reporting for heterogeneous memory access attributes under
 	  their non-uniform memory nodes.
 
+config NUMA_REMOTE
+	bool "Establish numa node for remote memory"
+	depends on NUMA
+	depends on ARM64 && ARM64_4K_PAGES
+	depends on SPARSEMEM_VMEMMAP
+	depends on ZONE_EXTMEM
+	help
+	  This option will initial any useless node as memory-less node.
+	  In order to support online remote memory on these node. These
+	  Such node is called remote node.
+
 source "drivers/base/test/Kconfig"
 
 config SYS_HYPERVISOR

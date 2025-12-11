@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0+
+menu "VFIO support for UBUS devices"
+	depends on UB_UBUS && MMU
+
+config VFIO_UB
+	tristate "Generic VFIO support for any UBUS device"
+	select VFIO_VIRQFD
+	select IRQ_BYPASS_MANAGER
+	help
+	  Support for the generic UBUS VFIO bus driver which can connect any
+	  UBUS device to the VFIO framework.
+
+	  If you don't know what to do here, say N.
+
+endmenu

@@ -3820,24 +3820,22 @@ static inline bool page_is_guard(struct page *page)
 	return PageGuard(page);
 }
 
-bool __set_page_guard(struct zone *zone, struct page *page, unsigned int order,
-		      int migratetype);
+bool __set_page_guard(struct zone *zone, struct page *page, unsigned int order);
 static inline bool set_page_guard(struct zone *zone, struct page *page,
-				  unsigned int order, int migratetype)
+				  unsigned int order)
 {
 	if (!debug_guardpage_enabled())
 		return false;
-	return __set_page_guard(zone, page, order, migratetype);
+	return __set_page_guard(zone, page, order);
 }
 
-void __clear_page_guard(struct zone *zone, struct page *page, unsigned int order,
-			int migratetype);
+void __clear_page_guard(struct zone *zone, struct page *page, unsigned int order);
 static inline void clear_page_guard(struct zone *zone, struct page *page,
-				    unsigned int order, int migratetype)
+				    unsigned int order)
 {
 	if (!debug_guardpage_enabled())
 		return;
-	__clear_page_guard(zone, page, order, migratetype);
+	__clear_page_guard(zone, page, order);
 }
 
 #else	/* CONFIG_DEBUG_PAGEALLOC */
@@ -3847,9 +3845,9 @@ static inline unsigned int debug_guardpage_minorder(void) { return 0; }
 static inline bool debug_guardpage_enabled(void) { return false; }
 static inline bool page_is_guard(struct page *page) { return false; }
 static inline bool set_page_guard(struct zone *zone, struct page *page,
-			unsigned int order, int migratetype) { return false; }
+			unsigned int order) { return false; }
 static inline void clear_page_guard(struct zone *zone, struct page *page,
-				unsigned int order, int migratetype) {}
+				unsigned int order) {}
 #endif	/* CONFIG_DEBUG_PAGEALLOC */
 
 #ifdef __HAVE_ARCH_GATE_AREA
@@ -3982,6 +3980,7 @@ extern void shake_page(struct page *p);
 extern atomic_long_t num_poisoned_pages __read_mostly;
 extern int soft_offline_page(unsigned long pfn, int flags);
 extern int soft_online_page(unsigned long pfn);
+int kill_accessing_process(unsigned long pfn, int flags, bool force_kill);
 #ifdef CONFIG_MEMORY_FAILURE
 /*
  * Sysfs entries for memory failure handling statistics.
@@ -4213,4 +4212,89 @@ void vma_pgtable_walk_end(struct vm_area_struct *vma);
 /* added to mm.h to avoid every caller adding new header file */
 #include <linux/mem_reliable.h>
 
+enum reclaim_reason {
+	RR_KSWAPD,
+	RR_DIRECT_RECLAIM,
+	RR_TYPES
+};
+
+#ifdef CONFIG_RECLAIM_NOTIFY
+
+struct reclaim_notify_data {
+	int nr_nid;		/* Number of nodes in nid[] */
+	int nid[MAX_NUMNODES];	/* Nodes who getting trouble in reclaiming */
+
+	/*
+	 * Indicates whether notification caller is required to return
+	 * synchronously.
+	 * @true:  the caller do related works first, then return.
+	 * @false: the caller return first and then do related works.
+	 */
+	bool sync;
+
+	/*
+	 * Indicates at which situation the notifier is called, notified
+	 * module could take different action according to the reason.
+	 */
+	enum reclaim_reason reason;
+
+	/*
+	 * Number of pages released by the notified module, which is
+	 * returned after the notification is executed.
+	 */
+	unsigned long nr_freed;
+};
+
+int register_reclaim_notifier(struct notifier_block *nb);
+int unregister_reclaim_notifier(struct notifier_block *nb);
+unsigned long do_reclaim_notify(enum reclaim_reason reason,
+				const void *reclaim_context);
+#else
+static inline int register_reclaim_notifier(struct notifier_block *nb)
+{
+	return 0;
+}
+static inline int unregister_reclaim_notifier(struct notifier_block *nb)
+{
+	return 0;
+}
+static inline unsigned long do_reclaim_notify(enum reclaim_reason reason,
+				const void *reclaim_context)
+{
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_PFN_RANGE_ALLOC
+#define PFN_RANGE_ALLOC_SIZE PMD_SIZE
+#define PFN_RANGE_ALLOC_ORDER PMD_ORDER
+#define PFN_RANGE_ALLOC_NR_PAGES (1 << PFN_RANGE_ALLOC_ORDER)
+
+extern unsigned long contig_mem_pool_percent;
+struct folio *pfn_range_alloc(unsigned int nr_pages, int nid);
+int pfn_range_free(struct folio *folio);
+int set_linear_mapping_nc(unsigned long start_pfn, unsigned long end_pfn, bool set_nc);
+int set_linear_mapping_invalid(unsigned long start_pfn, unsigned long end_pfn,
+										bool set_invalid);
+#else
+static inline struct folio *pfn_range_alloc(unsigned int nr_pages, int nid)
+{
+	return ERR_PTR(-EINVAL);
+}
+static inline int pfn_range_free(struct folio *folio)
+{
+	return -EINVAL;
+}
+static inline
+int set_linear_mapping_nc(unsigned long start_pfn, unsigned long end_pfn, bool set_nc)
+{
+	return -EINVAL;
+}
+static inline
+int set_linear_mapping_invalid(unsigned long start_pfn, unsigned long end_pfn,
+										bool set_invalid)
+{
+	return -EINVAL;
+}
+#endif
 #endif /* _LINUX_MM_H */

@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/pci.h>
+#include <ub/ubus/ubus.h>
 
 #include "internals.h"
 
@@ -142,6 +143,7 @@ int msi_domain_insert_msi_desc(struct device *dev, unsigned int domid,
 
 	/* Copy type specific data to the new descriptor. */
 	desc->pci = init_desc->pci;
+	desc->ub_intr = init_desc->ub_intr;
 
 	return msi_insert_desc(dev, desc, domid, init_desc->msi_index);
 }
@@ -432,7 +434,7 @@ unsigned int msi_domain_get_virq(struct device *dev, unsigned int domid, unsigne
 {
 	struct msi_desc *desc;
 	unsigned int ret = 0;
-	bool pcimsi = false;
+	bool devmsi = false;
 	struct xarray *xa;
 
 	if (!dev->msi.data)
@@ -443,18 +445,23 @@ unsigned int msi_domain_get_virq(struct device *dev, unsigned int domid, unsigne
 
 	/* This check is only valid for the PCI default MSI domain */
 	if (dev_is_pci(dev) && domid == MSI_DEFAULT_DOMAIN)
-		pcimsi = to_pci_dev(dev)->msi_enabled;
+		devmsi = to_pci_dev(dev)->msi_enabled;
+#ifdef CONFIG_UB_UBUS
+	/* This check is only valid for the UBUS default MSI domain */
+	if (dev_is_ub(dev) && domid == MSI_DEFAULT_DOMAIN)
+		devmsi = to_ub_entity(dev)->intr_type1;
+#endif
 
 	msi_lock_descs(dev);
 	xa = &dev->msi.data->__domains[domid].store;
-	desc = xa_load(xa, pcimsi ? 0 : index);
+	desc = xa_load(xa, devmsi ? 0 : index);
 	if (desc && desc->irq) {
 		/*
 		 * PCI-MSI has only one descriptor for multiple interrupts.
 		 * PCI-MSIX and platform MSI use a descriptor per
 		 * interrupt.
 		 */
-		if (pcimsi) {
+		if (devmsi) {
 			if (index < desc->nvec_used)
 				ret = desc->irq + index;
 		} else {

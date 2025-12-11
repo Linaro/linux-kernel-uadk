@@ -829,9 +829,17 @@ static int hwpoison_hugetlb_range(pte_t *ptep, unsigned long hmask,
 #define hwpoison_hugetlb_range	NULL
 #endif
 
+static int hwpoison_test_walk(unsigned long start, unsigned long end,
+			     struct mm_walk *walk)
+{
+	/* We also want to consider pages mapped into VM_PFNMAP. */
+	return 0;
+}
+
 static const struct mm_walk_ops hwpoison_walk_ops = {
 	.pmd_entry = hwpoison_pte_range,
 	.hugetlb_entry = hwpoison_hugetlb_range,
+	.test_walk = hwpoison_test_walk,
 	.walk_lock = PGWALK_RDLOCK,
 };
 
@@ -848,10 +856,10 @@ static const struct mm_walk_ops hwpoison_walk_ops = {
  * is proper in most cases, but it could be wrong when the application
  * process has multiple entries mapping the error page.
  */
-static int kill_accessing_process(struct task_struct *p, unsigned long pfn,
-				  int flags)
+int kill_accessing_process(unsigned long pfn, int flags, bool force_kill)
 {
-	int ret;
+	int ret, ret_kill = -EINVAL;
+	struct task_struct *p = current;
 	struct hwpoison_walk priv = {
 		.pfn = pfn,
 	};
@@ -863,12 +871,24 @@ static int kill_accessing_process(struct task_struct *p, unsigned long pfn,
 	mmap_read_lock(p->mm);
 	ret = walk_page_range(p->mm, 0, TASK_SIZE, &hwpoison_walk_ops,
 			      (void *)&priv);
+        /*
+         * ret = 1 when CMCI wins, regardless of whether try_to_unmap()
+         * succeeds or fails, then kill the process with SIGBUS.
+         * ret = 0 when poison page is a clean page and it's dropped, no
+         * SIGBUS is needed.
+        */
 	if (ret == 1 && priv.tk.addr)
-		kill_proc(&priv.tk, pfn, flags);
-	else
-		ret = 0;
+		ret_kill = kill_proc(&priv.tk, pfn, flags);
+
+	if (force_kill && (ret_kill < 0)) {
+		pr_err("%#lx: Sending force SIGBUS to %s:%d due to hardware memory corruption\n",
+				pfn, p->comm, task_pid_nr(p));
+		force_sig(SIGBUS);
+	}
+
 	mmap_read_unlock(p->mm);
-	return ret > 0 ? -EHWPOISON : -EFAULT;
+
+	return ret > 0 ? -EHWPOISON : 0;
 }
 
 /*
@@ -2081,7 +2101,7 @@ retry:
 		pr_err("%#lx: already hardware poisoned\n", pfn);
 		if (flags & MF_ACTION_REQUIRED) {
 			folio = page_folio(p);
-			res = kill_accessing_process(current, folio_pfn(folio), flags);
+			res = kill_accessing_process(folio_pfn(folio), flags, false);
 			action_result(pfn, MF_MSG_ALREADY_POISONED, MF_FAILED);
 		}
 		return res;
@@ -2277,7 +2297,7 @@ try_again:
 		pr_err("%#lx: already hardware poisoned\n", pfn);
 		res = -EHWPOISON;
 		if (flags & MF_ACTION_REQUIRED)
-			res = kill_accessing_process(current, pfn, flags);
+			res = kill_accessing_process(pfn, flags, false);
 		if (flags & MF_COUNT_INCREASED)
 			put_page(p);
 		action_result(pfn, MF_MSG_ALREADY_POISONED, MF_FAILED);

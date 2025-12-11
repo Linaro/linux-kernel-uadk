@@ -37,6 +37,9 @@
 #include <linux/mm_inline.h>
 #include <linux/share_pool.h>
 #include <linux/dynamic_pool.h>
+#ifndef __GENKSYMS__
+#include <trace/events/kmem.h>
+#endif
 
 #include <asm/page.h>
 #include <asm/pgalloc.h>
@@ -47,6 +50,7 @@
 #include <linux/hugetlb_cgroup.h>
 #include <linux/node.h>
 #include <linux/page_owner.h>
+#include <linux/numa_remote.h>
 #include "internal.h"
 #include "hugetlb_vmemmap.h"
 #include <linux/page-isolation.h>
@@ -2304,7 +2308,13 @@ static int alloc_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 	gfp_t gfp_mask = htlb_alloc_mask(h) | __GFP_THISNODE;
 
 	for_each_node_mask_to_alloc(h, nr_nodes, node, nodes_allowed) {
-		folio = alloc_fresh_hugetlb_folio(h, gfp_mask, node,
+		gfp_t gfp = 0;
+
+		/* Use __GFP_MEMALLOC to make sure all pages can be allocated */
+		if (numa_remote_hugetlb_nowatermark(node))
+			gfp |= __GFP_MEMALLOC;
+
+		folio = alloc_fresh_hugetlb_folio(h, gfp_mask | gfp, node,
 					nodes_allowed, node_alloc_noretry);
 		if (folio) {
 			free_huge_folio(folio); /* free it into the hugepage allocator */
@@ -3723,6 +3733,23 @@ found:
 	return 1;
 }
 
+#ifdef CONFIG_ZONE_EXTMEM
+static void hugetlb_drain_remote_pcp(struct hstate *h, int nid)
+{
+	pg_data_t *pgdat = NODE_DATA(nid);
+	struct zone *zone;
+
+	zone = &pgdat->node_zones[ZONE_EXTMEM];
+
+	if (zone_managed_pages(zone))
+		drain_all_pages(zone);
+}
+#else
+static inline void hugetlb_drain_remote_pcp(struct hstate *h, int nid)
+{
+}
+#endif
+
 #define persistent_huge_pages(h) (h->nr_huge_pages - h->surplus_huge_pages)
 static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 			      nodemask_t *nodes_allowed)
@@ -3732,6 +3759,7 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 	struct page *page;
 	LIST_HEAD(page_list);
 	NODEMASK_ALLOC(nodemask_t, node_alloc_noretry, GFP_KERNEL);
+	bool drained = false;
 
 	/*
 	 * Bit mask controlling how hard we retry per-node allocations.
@@ -3816,6 +3844,11 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 
 		/* yield cpu to avoid soft lockup */
 		cond_resched();
+
+		if (numa_remote_hugetlb_nowatermark(nid) && !drained && (nid != NUMA_NO_NODE)) {
+			hugetlb_drain_remote_pcp(h, nid);
+			drained = true;
+		}
 
 		ret = alloc_pool_huge_page(h, nodes_allowed,
 						node_alloc_noretry);
@@ -7887,7 +7920,6 @@ int hugetlb_insert_hugepage_pte_by_pa(struct mm_struct *mm, unsigned long addr,
 EXPORT_SYMBOL_GPL(hugetlb_insert_hugepage_pte_by_pa);
 #endif /* CONFIG_HUGETLB_INSERT_PAGE */
 
-#ifdef CONFIG_ASCEND_FEATURES
 struct folio *alloc_hugetlb_folio_size(int nid, unsigned long size)
 {
 	gfp_t gfp_mask;
@@ -7896,13 +7928,12 @@ struct folio *alloc_hugetlb_folio_size(int nid, unsigned long size)
 	unsigned long flags;
 	struct folio *folio = NULL;
 
-	nodes_clear(nodemask);
-	node_set(nid, nodemask);
-
 	h = size_to_hstate(size);
 	if (!h)
 		return NULL;
 
+	nodes_clear(nodemask);
+	node_set(nid, nodemask);
 	gfp_mask = htlb_alloc_mask(h);
 	spin_lock_irqsave(&hugetlb_lock, flags);
 	if (h->free_huge_pages - h->resv_huge_pages > 0)
@@ -7912,4 +7943,57 @@ struct folio *alloc_hugetlb_folio_size(int nid, unsigned long size)
 	return folio;
 }
 EXPORT_SYMBOL(alloc_hugetlb_folio_size);
+
+#ifdef CONFIG_PFN_RANGE_ALLOC
+struct folio *hugetlb_pool_alloc(int nid)
+{
+	struct folio *folio = ERR_PTR(-EINVAL);
+
+	if (nid < 0 || nid >= MAX_NUMNODES)
+		goto out;
+
+	folio = alloc_hugetlb_folio_size(nid, PFN_RANGE_ALLOC_SIZE);
+	if (!folio)
+		folio = ERR_PTR(-ENOMEM);
+
+out:
+	trace_hugetlb_pool_alloc(folio, nid);
+	return folio;
+}
+EXPORT_SYMBOL_GPL(hugetlb_pool_alloc);
+
+int hugetlb_pool_free(struct folio *folio)
+{
+	int ret = -EINVAL;
+
+	if (!folio_test_hugetlb(folio))
+		goto out;
+
+	ret = 0;
+	folio_put(folio);
+out:
+	trace_hugetlb_pool_free(folio, ret);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(hugetlb_pool_free);
+
+struct folio *hugetlb_pool_alloc_size(int nid, unsigned long size)
+{
+	struct folio *folio = ERR_PTR(-EINVAL);
+
+	if (nid < 0 || nid >= MAX_NUMNODES)
+		goto out;
+
+	if ((size != PMD_SIZE) && (size != PUD_SIZE))
+		goto out;
+
+	folio = alloc_hugetlb_folio_size(nid, size);
+	if (!folio)
+		folio = ERR_PTR(-ENOMEM);
+
+out:
+	trace_hugetlb_pool_alloc_size(folio, nid, size);
+	return folio;
+}
+EXPORT_SYMBOL_GPL(hugetlb_pool_alloc_size);
 #endif

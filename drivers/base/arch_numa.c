@@ -12,6 +12,7 @@
 #include <linux/memblock.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/numa_remote.h>
 
 #include <asm/sections.h>
 
@@ -388,7 +389,7 @@ static int __init numa_alloc_distance(void)
  * If @from or @to is higher than the highest known node or lower than zero
  * or @distance doesn't make sense, the call is ignored.
  */
-void __init numa_set_distance(int from, int to, int distance)
+void __ref numa_set_distance(int from, int to, int distance)
 {
 	if (!numa_distance) {
 		pr_warn_once("Warning: distance table not allocated yet\n");
@@ -441,13 +442,17 @@ static int __init numa_register_nodes(void)
 		}
 	}
 
+	numa_register_remote_nodes();
+
 	/* Finally register nodes. */
 	for_each_node_mask(nid, numa_nodes_parsed) {
 		unsigned long start_pfn, end_pfn;
 
 		get_pfn_range_for_nid(nid, &start_pfn, &end_pfn);
 		setup_node_data(nid, start_pfn, end_pfn);
-		node_set_online(nid);
+
+		if (!numa_is_remote_node(nid))
+			node_set_online(nid);
 	}
 
 	/* Setup online nodes to actual nodes*/

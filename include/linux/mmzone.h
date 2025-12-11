@@ -1032,7 +1032,7 @@ struct zone {
 
 	CACHELINE_PADDING(_pad3_);
 
-	KABI_RESERVE(1)
+	KABI_USE(1, unsigned long nr_free_highatomic)
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
@@ -1533,6 +1533,32 @@ static inline bool zone_is_zone_device(struct zone *zone)
 {
 	return false;
 }
+#endif
+
+#ifdef CONFIG_ZONE_EXTMEM
+static inline bool is_zone_extmem_page(const struct page *page)
+{
+	return page_zonenum(page) == ZONE_EXTMEM;
+}
+
+static inline bool zone_is_zone_extmem(struct zone *zone)
+{
+	return zone_idx(zone) == ZONE_EXTMEM;
+}
+
+#define get_extmem_zone(nid) (&NODE_DATA((nid))->node_zones[ZONE_EXTMEM])
+#else
+static inline bool is_zone_extmem_page(const struct page *page)
+{
+	return false;
+}
+
+static inline bool zone_is_zone_extmem(struct zone *zone)
+{
+	return false;
+}
+
+#define get_extmem_zone(nid) NULL
 #endif
 
 /*

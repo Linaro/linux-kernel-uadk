@@ -167,6 +167,19 @@ struct msi_desc_data {
 
 #define MSI_MAX_INDEX		((unsigned int)USHRT_MAX)
 
+struct ub_intr_desc {
+	struct {
+		u32 mask;
+		u8 is_type1 : 1;
+		u16 entry_nr;
+		u16 addr_index;
+	} intr_attrib;
+	u16 addr_num;
+	u16 vec_num;
+	void __iomem *vector_base;
+	void __iomem *addr_base;
+};
+
 /**
  * struct msi_desc - Descriptor structure for MSI based interrupts
  * @irq:	The base interrupt number
@@ -205,7 +218,11 @@ struct msi_desc {
 	union {
 		struct pci_msi_desc	pci;
 		struct msi_desc_data	data;
+#ifndef __GENKSYMS__
+		struct ub_intr_desc	ub_intr;
+#else
 		KABI_EXTEND_WITH_SIZE(KABI_RESERVE(1), 5)
+#endif
 	};
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
@@ -574,6 +591,7 @@ enum {
 	MSI_FLAG_PCI_MSIX_ALLOC_DYN	= (1 << 20),
 	/* Support for PCI/IMS */
 	MSI_FLAG_PCI_IMS		= (1 << 21),
+	KABI_EXTEND_ENUM(MSI_FLAG_UB_INTR = (1 << 22))
 };
 
 /**
@@ -707,5 +725,32 @@ static inline struct irq_domain *pci_msi_get_device_domain(struct pci_dev *pdev)
 }
 static inline void pci_write_msi_msg(unsigned int irq, struct msi_msg *msg) { }
 #endif /* !CONFIG_PCI_MSI */
+
+struct ub_usi_entry {
+	u32 vector; /* Kernel uses to write allocated vector */
+	u16 entry; /* Driver uses to specify entry, OS writes */
+};
+struct ub_entity;
+struct irq_affinity;
+#ifdef CONFIG_UB_UBUS_USI
+struct ub_entity *msi_desc_to_ub_entity(struct msi_desc *desc);
+void ub_msi_mask_irq(struct irq_data *data);
+void ub_msi_unmask_irq(struct irq_data *data);
+void ub_write_interruptid(struct ub_entity *uent);
+struct irq_domain *ub_msi_create_irq_domain(struct fwnode_handle *fwnode,
+					    struct msi_domain_info *info,
+					    struct irq_domain *parent);
+void __ub_write_msi_msg(struct msi_desc *entry, struct msi_msg *msg);
+int ub_interrupt_id_alloc(struct ub_entity *uent);
+void ub_interrupt_id_free(struct ub_entity *uent);
+bool ub_setup_usi_device_domain(struct ub_entity *uent, unsigned int hwsize);
+void __iomem *ub_vector_desc_addr(struct msi_desc *desc);
+u32 ub_intr_addr_count(struct ub_entity *uent);
+u32 ub_intr_vec_count(struct ub_entity *uent);
+int usi_setup_interrupts(struct ub_entity *uent,
+			 struct ub_usi_entry *entries, int nvec,
+			 struct irq_affinity *affd);
+int ub_setup_msi_context(struct ub_entity *uent);
+#endif /* CONFIG_UB_UBUS_USI */
 
 #endif /* LINUX_MSI_H */

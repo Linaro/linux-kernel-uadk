@@ -97,6 +97,13 @@ config ARM_GIC_V3_ITS_PCI
 	depends on PCI_MSI
 	default ARM_GIC_V3_ITS
 
+config ARM_GIC_V3_ITS_UBUS
+	bool
+	depends on ARM_GIC_V3_ITS
+	depends on UB_UBUS
+	depends on UB_UBUS_USI
+	default ARM_GIC_V3_ITS
+
 config ARM_GIC_V3_ITS_FSL_MC
 	bool
 	depends on ARM_GIC_V3_ITS

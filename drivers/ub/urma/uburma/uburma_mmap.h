@@ -1,0 +1,24 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+ *
+ * Description: uburma mmap head file
+ * Author: Wen Chen
+ * Create: 2024-03-18
+ * Note:
+ * History: 2024-03-18: Create file
+ */
+
+#ifndef UBURMA_MMAP_H
+#define UBURMA_MMAP_H
+
+#include <linux/sched/mm.h>
+
+#include "uburma_types.h"
+
+void uburma_unmap_vma_pages(struct uburma_file *ufile);
+const struct vm_operations_struct *uburma_get_umap_ops(void);
+void uburma_umap_priv_init(struct uburma_umap_priv *priv,
+			   struct vm_area_struct *vma);
+
+#endif /* UBURMA_MMAP_H */
